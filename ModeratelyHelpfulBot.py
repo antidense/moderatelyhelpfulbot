@@ -16,12 +16,12 @@ from sqlalchemy import *
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import pprint
-from settings import bot_name, password, client_id, client_secret
+from settings import bot_name, password, client_id, client_secret, BOT_OWNER, db_engine
 
-BOT_OWNER = "antidense"
+
 
 # Set up database
-db_engine = 'mysql+pymysql://modhelpfulbot:RHW5Cbm3gcCt0Cgw@127.0.0.1:3306/modhelpfulbot?charset=utf8mb4'
+
 engine = create_engine(db_engine)
 Base = declarative_base(bind=engine)
 
