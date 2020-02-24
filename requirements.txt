@@ -1,0 +1,9 @@
+feedparser
+pprint
+sqlalchemy
+pyyaml
+humanize
+prawcore
+pytz
+iso8601
+praw
