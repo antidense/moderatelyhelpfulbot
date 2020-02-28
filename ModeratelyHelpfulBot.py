@@ -123,7 +123,7 @@ class TrackedSubreddit(Base):
             return False, "Is the wiki updated? I could not find any settings in the wiki"
         try:
             self.settings_yaml = yaml.safe_load(self.settings_yaml_txt)
-        except yaml.scanner.ScannerError as e:
+        except (yaml.scanner.ScannerError, yaml.composer.ComposerError) as e:
             return False, str(e)
 
         if self.settings_yaml is None:
