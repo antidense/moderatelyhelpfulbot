@@ -91,6 +91,7 @@ class TrackedSubreddit(Base):
     distinguish = True
     exempt_self_posts = False
     exempt_link_posts = False
+    title_exempt_keyword = None
     modmail_posts_reply = None
     modmail_no_posts_reply = None
     modmail_no_posts_reply_internal = False
@@ -123,7 +124,7 @@ class TrackedSubreddit(Base):
             return False, "Is the wiki updated? I could not find any settings in the wiki"
         try:
             self.settings_yaml = yaml.safe_load(self.settings_yaml_txt)
-        except (yaml.scanner.ScannerError, yaml.composer.ComposerError) as e:
+        except (yaml.scanner.ScannerError, yaml.composer.ComposerError, yaml.parser.ParserError) as e:
             return False, str(e)
 
         if self.settings_yaml is None:
@@ -150,6 +151,7 @@ class TrackedSubreddit(Base):
                 'distinguish',
                 'exempt_link_posts'
                 'exempt_self_posts'
+                'title_exempt_keyword'
             )
             if not pr_settings:
                 return False, "Bad config"
@@ -414,6 +416,14 @@ def look_for_rule_violations(tr_sub: TrackedSubreddit):
             recent_post.reviewed = True
             s.add(recent_post)
             continue
+
+        #check if keyword exempt:
+        if tr_sub.title_exempt_keyword is not None:
+            if tr_sub.title_exempt_keyword in recent_post.title:
+                recent_post.reviewed = True
+                s.add(recent_post)
+                continue
+
 
         # checking if previously removed
         if recent_post.get_api_handle().banned_by:
