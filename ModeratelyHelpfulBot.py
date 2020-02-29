@@ -292,6 +292,7 @@ class SubmittedPost(Base):
         return comment
 
     def get_status(self):
+        global BOT_NAME
         self.get_api_handle()
         self.self_deleted = False if self.api_handle.author else True
         self.banned_by = self.api_handle.banned_by
@@ -303,7 +304,7 @@ class SubmittedPost(Base):
             return "self-deleted"
         elif self.banned_by == "AutoModerator":
             return "Automod-removed"
-        elif self.banned_by == "ModeratelyHelpfulBot":
+        elif self.banned_by == BOT_NAME:
             return "MHB-removed"
         elif "bot" in self.banned_by.lower():
             return "Bot-removed"
