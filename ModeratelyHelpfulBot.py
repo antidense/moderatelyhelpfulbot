@@ -420,7 +420,7 @@ def look_for_rule_violations(tr_sub: TrackedSubreddit):
 
         # check if keyword exempt:
         if tr_sub.title_exempt_keyword is not None:
-            if tr_sub.title_exempt_keyword in recent_post.title:
+            if tr_sub.title_exempt_keyword.lower() in recent_post.title.lower():
                 recent_post.reviewed = True
                 s.add(recent_post)
                 continue
