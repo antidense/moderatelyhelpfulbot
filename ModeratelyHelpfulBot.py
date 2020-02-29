@@ -16,18 +16,18 @@ from sqlalchemy import *
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import pprint
-from settings import bot_name, password, client_id, client_secret, BOT_OWNER, db_engine
+from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET, BOT_OWNER, DB_ENGINE
 
 
 
 # Set up database
 
-engine = create_engine(db_engine)
+engine = create_engine(DB_ENGINE)
 Base = declarative_base(bind=engine)
 
 # Set up praw
-reddit_client = praw.Reddit(client_id=client_id, client_secret=client_secret, password=password,
-                            user_agent="ModeratelyHelpfulBot v0.4", username=bot_name)
+reddit_client = praw.Reddit(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, password=BOT_PW,
+                            user_agent="ModeratelyHelpfulBot v0.4", username=BOT_NAME)
 
 # Set up some global variables
 last_checked = datetime.now() - timedelta(days=1)  # type: datetime
@@ -356,7 +356,7 @@ def already_has_bot_comment(submission):
     global reddit_client
     top_level_comments = list(submission.comments)
     for c in top_level_comments:
-        if c.author and c.author.name == bot_name:
+        if c.author and c.author.name == BOT_NAME:
             return True
     return False
 
