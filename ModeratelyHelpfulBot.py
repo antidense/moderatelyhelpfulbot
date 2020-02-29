@@ -189,7 +189,7 @@ class TrackedSubreddit(Base):
             tr_sub.update_from_yaml(force_update=True)
         return tr_sub
 
-    def get_author_report(self, author_name: str) -> str:
+    def get_author_summary(self, author_name: str) -> str:
         recent_posts = s.query(SubmittedPost) \
             .filter(SubmittedPost.subreddit.ilike(self.subreddit_name)) \
             .filter(SubmittedPost.author == author_name) \
@@ -917,16 +917,16 @@ def handle_direct_messages():
                 tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
                 if tr_sub and tr_sub.modmail_posts_reply:
                     try:
-                        message.reply(tr_sub.get_author_report(author_name))
+                        message.reply(tr_sub.get_author_summary(author_name))
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
             record_actioned(check_actioned("ban_note: {0}".format(author_name)))
-        elif message.body.lower().startswith("report"):
+        elif message.body.lower().startswith("summary"):
             subreddit_name = message.subject.lower().replace("re: ", "")
             tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
-            author_name_to_check = message.body.lower().replace("report ", "")
+            author_name_to_check = message.body.lower().replace("summary ", "")
             if tr_sub:
-                message.reply(tr_sub.get_author_report(author_name_to_check)[:999])
+                message.reply(tr_sub.get_author_summary(author_name_to_check)[:999])
         # Respond to a command (update)
         elif message.body.lower() == "stats":
             subreddit_name = message.subject.lower().replace("re: ", "")
