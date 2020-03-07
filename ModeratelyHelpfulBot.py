@@ -162,7 +162,7 @@ class TrackedSubreddit(Base):
             if 'min_post_interval_hrs' in pr_settings:
                 self.min_post_interval = timedelta(hours=pr_settings['min_post_interval_hrs'])
                 self.min_post_interval_hrs = pr_settings['min_post_interval_hrs']
-            if 'grace_period_mins' in pr_settings:
+            if 'grace_period_mins' in pr_settings and pr_settings['grace_period_mins'] is not None:
                 self.grace_period_mins = timedelta(minutes=pr_settings['grace_period_mins'])
 
         if 'modmail' in self.settings_yaml:
@@ -982,13 +982,16 @@ def handle_direct_messages():
 
 
 def do_automated_replies():
-    # Deal with datingadvice
+    # Deal with datingadvice  --- please add the call to this back!!!
+
     for message in reddit_client.subreddit('datingadvice').mod.unread():
-        message.reply(
-            "Hi, thank you for your interest in /r/datingadvice.  "
-            "We have since moved all our content to /r/dating, "
-            "so please visit us there! There is no longer any content here, and we have since closed /r/datingadvice")
-        message.mark_read()
+        if not check_actioned(message.author.name):
+            message.reply(
+                "Hi, thank you for your interest in /r/datingadvice.  "
+                "We have since moved all our content to /r/dating, "
+                "so please visit us there! There is no longer any content here, and we have since closed /r/datingadvice")
+            message.mark_read()
+            record_actioned(message.author.name)
 
 
 def handle_modmail_messages():
@@ -1113,7 +1116,7 @@ def main_loop():
         # update_TMBR_submissions(look_back=timedelta(days=7))
         send_broadcast_messages()
         do_automated_approvals()
-        do_automated_replies()
+        #  do_automated_replies()  This is currently disabled!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         handle_direct_messages()
         handle_modmail_messages()
         logger.debug('sleeping for %s seconds' % main_settings['sleep_interval'])
