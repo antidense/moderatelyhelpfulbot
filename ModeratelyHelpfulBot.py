@@ -96,6 +96,7 @@ class TrackedSubreddit(Base):
     modmail_no_posts_reply = None
     modmail_no_posts_reply_internal = False
     modmail_auto_approve_messages_with_links = False
+    modmail_all_reply = None
     subreddit_mods = []
 
     def __init__(self, subreddit_name):
@@ -149,9 +150,10 @@ class TrackedSubreddit(Base):
                 'comment',
                 'report_reason',
                 'distinguish',
-                'exempt_link_posts'
-                'exempt_self_posts'
-                'title_exempt_keyword'
+                'exempt_link_posts',
+                'exempt_self_posts',
+                'title_exempt_keyword',
+
             )
             if not pr_settings:
                 return False, "Bad config"
@@ -168,7 +170,7 @@ class TrackedSubreddit(Base):
         if 'modmail' in self.settings_yaml:
             m_settings = self.settings_yaml['modmail']
             possible_settings = ('modmail_no_posts_reply', 'modmail_no_posts_reply_internal', 'modmail_posts_reply',
-                                 'modmail_auto_approve_messages_with_links')
+                                 'modmail_auto_approve_messages_with_links', 'modmail_all_reply',)
             for possible_setting in possible_settings:
                 if possible_setting in m_settings:
                     setattr(self, possible_setting, m_settings[possible_setting])
@@ -1019,6 +1021,11 @@ def handle_modmail_messages():
         if convo.num_messages == 1:
             if check_actioned(convo.id):
                 convo.read()
+                continue
+            if tr_sub.modmail_all_reply:
+                response = populate_tags(tr_sub.tr_sub.modmail_all_reply, None, tr_sub=tr_sub)
+                convo.read()
+                record_actioned(convo.id)
                 continue
             recent_posts = s.query(SubmittedPost) \
                 .filter(SubmittedPost.subreddit.ilike(subreddit_name)) \
