@@ -1012,6 +1012,9 @@ def handle_modmail_messages():
         if author_name in tr_sub.subreddit_mods:
             convo.read()
             continue
+        if author_name == "AutoModerator":
+            convo.read()
+            continue
         print('test000000000000000000000000000000'+convo.subject+"  "+subreddit_name+" "+str(convo.last_unread))
         if convo.num_messages == 1:
             if check_actioned(convo.id):
