@@ -97,7 +97,7 @@ class TrackedSubreddit(Base):
     modmail_no_posts_reply_internal = False
     modmail_auto_approve_messages_with_links = False
     modmail_all_reply = None
-    subreddit_mods = []
+
 
     def __init__(self, subreddit_name):
         self.subreddit_name = subreddit_name.lower()
@@ -107,6 +107,7 @@ class TrackedSubreddit(Base):
         self.update_from_yaml(force_update=True)
 
     def update_from_yaml(self, force_update=False) -> (Boolean, String):
+        return_text = "Updated Successfully!"
         print(self.subreddit_name)
         subreddit_handle = reddit_client.subreddit(self.subreddit_name)
         self.subreddit_mods = list(moderator.name for moderator in subreddit_handle.moderator())
@@ -160,6 +161,8 @@ class TrackedSubreddit(Base):
             for possible_setting in possible_settings:
                 if possible_setting in pr_settings:
                     setattr(self, possible_setting, pr_settings[possible_setting])
+                else:
+                    return_text = "Did not understand variable '{}'".format(possible_setting)
 
             if 'min_post_interval_hrs' in pr_settings:
                 self.min_post_interval = timedelta(hours=pr_settings['min_post_interval_hrs'])
@@ -174,8 +177,11 @@ class TrackedSubreddit(Base):
             for possible_setting in possible_settings:
                 if possible_setting in m_settings:
                     setattr(self, possible_setting, m_settings[possible_setting])
+                else:
+                    return_text = "Did not understand variable '{}'".format(possible_setting)
+
         self.last_updated = datetime.now()
-        return True, "Updated Successfully!"
+        return True, return_text
 
     @staticmethod
     def get_subreddit_by_name(subreddit_name: str):
