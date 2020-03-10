@@ -396,6 +396,9 @@ def find_previous_posts(tr_sub: TrackedSubreddit, recent_post: SubmittedPost):
         if tr_sub.ignore_moderator_removed and banned_by in tr_sub.subreddit_mods:
             continue
         # ignore delete-and-repost (within the grace period)
+        if tr_sub.title_exempt_keyword is not None:
+            if tr_sub.title_exempt_keyword.lower() in possible_repost.title.lower():
+                continue
         if (banned_by or (not possible_repost.author)) \
                 and (recent_post.time_utc - possible_repost.time_utc < tr_sub.grace_period_mins):
             continue
