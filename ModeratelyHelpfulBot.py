@@ -158,9 +158,9 @@ class TrackedSubreddit(Base):
             )
             if not pr_settings:
                 return False, "Bad config"
-            for possible_setting in possible_settings:
-                if possible_setting in pr_settings:
-                    setattr(self, possible_setting, pr_settings[possible_setting])
+            for pr_setting in pr_settings:
+                if pr_setting in possible_settings:
+                    setattr(self, pr_setting, pr_settings[possible_setting])
                 else:
                     return_text = "Did not understand variable '{}'".format(possible_setting)
 
@@ -174,9 +174,9 @@ class TrackedSubreddit(Base):
             m_settings = self.settings_yaml['modmail']
             possible_settings = ('modmail_no_posts_reply', 'modmail_no_posts_reply_internal', 'modmail_posts_reply',
                                  'modmail_auto_approve_messages_with_links', 'modmail_all_reply',)
-            for possible_setting in possible_settings:
-                if possible_setting in m_settings:
-                    setattr(self, possible_setting, m_settings[possible_setting])
+            for m_setting in m_settings:
+                if m_setting in possible_settings:
+                    setattr(self, m_setting, m_settings[possible_setting])
                 else:
                     return_text = "Did not understand variable '{}'".format(possible_setting)
 
