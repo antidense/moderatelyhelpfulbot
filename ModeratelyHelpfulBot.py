@@ -97,6 +97,7 @@ class TrackedSubreddit(Base):
     modmail_no_posts_reply_internal = False
     modmail_auto_approve_messages_with_links = False
     modmail_all_reply = None
+    approve = False
 
 
     def __init__(self, subreddit_name):
@@ -141,7 +142,7 @@ class TrackedSubreddit(Base):
             possible_settings = (
                 'max_count_per_interval',
                 'ignore_AutoModerator_removed',
-                'ignore_moderator_removed'
+                'ignore_moderator_removed',
                 'ban_threshold_count',
                 'notify_about_spammers',
                 'ban_duration_days',
@@ -154,15 +155,18 @@ class TrackedSubreddit(Base):
                 'exempt_link_posts',
                 'exempt_self_posts',
                 'title_exempt_keyword',
+                'grace_period_mins',
+                'min_post_interval_hrs',
+                'approve',
 
             )
             if not pr_settings:
                 return False, "Bad config"
             for pr_setting in pr_settings:
                 if pr_setting in possible_settings:
-                    setattr(self, pr_setting, pr_settings[possible_setting])
+                    setattr(self, pr_setting, pr_settings[pr_setting])
                 else:
-                    return_text = "Did not understand variable '{}'".format(possible_setting)
+                    return_text = "Did not understand variable '{}'".format(pr_setting)
 
             if 'min_post_interval_hrs' in pr_settings:
                 self.min_post_interval = timedelta(hours=pr_settings['min_post_interval_hrs'])
@@ -176,9 +180,9 @@ class TrackedSubreddit(Base):
                                  'modmail_auto_approve_messages_with_links', 'modmail_all_reply',)
             for m_setting in m_settings:
                 if m_setting in possible_settings:
-                    setattr(self, m_setting, m_settings[possible_setting])
+                    setattr(self, m_setting, m_settings[m_setting])
                 else:
-                    return_text = "Did not understand variable '{}'".format(possible_setting)
+                    return_text = "Did not understand variable '{}'".format(m_setting)
 
         self.last_updated = datetime.now()
         return True, return_text
@@ -293,10 +297,13 @@ class SubmittedPost(Base):
         except prawcore.exceptions.Forbidden:
             logger.warning('I was not allowed to remove the post')
 
-    def reply(self, response, distinguish=True):
+    def reply(self, response, distinguish=True, approve=False):
         comment = self.get_api_handle().reply(response)
+        comment.mod.lock()
         if distinguish:
             comment.mod.distinguish()
+        if approve:
+            comment.mod.approve()
         return comment
 
     def get_status(self):
@@ -449,6 +456,7 @@ def look_for_rule_violations(tr_sub: TrackedSubreddit):
                 'looks like this is deleted: author={0}, banned_by={1}'.format(author_name, recent_post.banned_by))
             if author_name == "[deleted]":
                 recent_post.self_deleted = True
+            recent_post.reviewed = True
             s.add(recent_post)
             continue
 
@@ -499,7 +507,7 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
                      possible_repost, tr_sub.modmail)
     if tr_sub.comment:
         make_comment(tr_sub, recent_post, most_recent_reposts,
-                     tr_sub.comment, distinguish=tr_sub.distinguish)
+                     tr_sub.comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve)
 
 
 def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: SubmittedPost,
@@ -614,7 +622,7 @@ def populate_tags(input_text, recent_post, tr_sub=None, prev_post=None, prev_pos
 
 
 def make_comment(subreddit: TrackedSubreddit, recent_post: SubmittedPost, most_recent_reposts, comment_template: String,
-                 distinguish=False):
+                 distinguish=False, approve=False):
     prev_submission = most_recent_reposts[-1]
     next_eligibility = most_recent_reposts[0].time_utc + subreddit.min_post_interval
     ids = " Previous post(s):"\
@@ -626,7 +634,7 @@ def make_comment(subreddit: TrackedSubreddit, recent_post: SubmittedPost, most_r
     response = populate_tags(comment_template + response_tail + ids,
                              recent_post, tr_sub=subreddit, prev_post=prev_submission)
     try:
-        comment = recent_post.reply(response, distinguish=distinguish)
+        comment = recent_post.reply(response, distinguish=distinguish, approve=approve)
 
     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
         logger.warning('something went wrong in creating comment %s', str(e))
@@ -830,7 +838,7 @@ def handle_direct_messages():
                           .format(subreddit_name))
             reddit_client.subreddit('moderatelyhelpfulbot').message(subreddit_name, "Added as moderator")
         # Respond to author (only once)
-        elif not check_actioned(author_name):
+        elif author_name and not check_actioned(author_name):
             message.reply("Hi, thank you for messaging me! "
                           "I am only a non-sentient bot so I can't really help you if you have questions. "
                           "Please contact the subreddit moderators. There is a link in my original message :)")
@@ -931,7 +939,7 @@ def update_list_with_subreddit(subreddit_name: str):
     s.commit()
 
 
-def purge_old_records(days=40):
+def purge_old_records(days=30):
     to_delete = s.query(SubmittedPost) \
         .filter(SubmittedPost.time_utc < datetime.now() - timedelta(days=days)) \
         .filter(SubmittedPost.flagged_duplicate.is_(False)) \
