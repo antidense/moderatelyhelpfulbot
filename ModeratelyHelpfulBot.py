@@ -98,6 +98,7 @@ class TrackedSubreddit(Base):
     modmail_auto_approve_messages_with_links = False
     modmail_all_reply = None
     approve = False
+    lock_thread = True
 
 
     def __init__(self, subreddit_name):
@@ -158,6 +159,7 @@ class TrackedSubreddit(Base):
                 'grace_period_mins',
                 'min_post_interval_hrs',
                 'approve',
+                'lock_thread',
 
             )
             if not pr_settings:
@@ -297,9 +299,10 @@ class SubmittedPost(Base):
         except prawcore.exceptions.Forbidden:
             logger.warning('I was not allowed to remove the post')
 
-    def reply(self, response, distinguish=True, approve=False):
+    def reply(self, response, distinguish=True, approve=False, lock_thread=True):
         comment = self.get_api_handle().reply(response)
-        comment.mod.lock()
+        if lock_thread:
+            self.get_api_handle().mod.lock()
         if distinguish:
             comment.mod.distinguish()
         if approve:
@@ -507,7 +510,8 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
                      possible_repost, tr_sub.modmail)
     if tr_sub.comment:
         make_comment(tr_sub, recent_post, most_recent_reposts,
-                     tr_sub.comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve)
+                     tr_sub.comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve,
+                     lock_thread=tr_sub.lock_thread)
 
 
 def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: SubmittedPost,
@@ -622,7 +626,7 @@ def populate_tags(input_text, recent_post, tr_sub=None, prev_post=None, prev_pos
 
 
 def make_comment(subreddit: TrackedSubreddit, recent_post: SubmittedPost, most_recent_reposts, comment_template: String,
-                 distinguish=False, approve=False):
+                 distinguish=False, approve=False, lock_thread=True):
     prev_submission = most_recent_reposts[-1]
     next_eligibility = most_recent_reposts[0].time_utc + subreddit.min_post_interval
     ids = " Previous post(s):"\
@@ -634,7 +638,7 @@ def make_comment(subreddit: TrackedSubreddit, recent_post: SubmittedPost, most_r
     response = populate_tags(comment_template + response_tail + ids,
                              recent_post, tr_sub=subreddit, prev_post=prev_submission)
     try:
-        comment = recent_post.reply(response, distinguish=distinguish, approve=approve)
+        comment = recent_post.reply(response, distinguish=distinguish, approve=approve, lock_thread=lock_thread)
 
     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
         logger.warning('something went wrong in creating comment %s', str(e))
