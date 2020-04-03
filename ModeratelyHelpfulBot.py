@@ -186,6 +186,10 @@ class TrackedSubreddit(Base):
                 else:
                     return_text = "Did not understand variable '{}'".format(m_setting)
 
+        self.min_post_interval = self.min_post_interval if self.min_post_interval is not None else timedelta(hours=72)
+        self.grace_period_mins = self.grace_period_mins if self.grace_period_mins is not None else timedelta(minutes=30)
+
+
         self.last_updated = datetime.now()
         return True, return_text
 
@@ -472,6 +476,10 @@ def look_for_rule_violations(tr_sub: TrackedSubreddit):
         logger.info("----------------post time {0} interval {1}  after {2}"
                     .format(recent_post.time_utc, tr_sub.min_post_interval,
                             recent_post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins))
+
+        #Don't bother if this is only being used for reports
+        if tr_sub.max_count_per_interval > 1000:
+            continue
 
         associated_reposts = find_previous_posts(tr_sub, recent_post)
         verified_reposts_count = len(associated_reposts)
