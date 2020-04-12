@@ -19,7 +19,6 @@ import pprint
 from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET, BOT_OWNER, DB_ENGINE
 
 
-
 # Set up database
 
 engine = create_engine(DB_ENGINE)
