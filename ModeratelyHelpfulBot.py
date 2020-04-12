@@ -189,7 +189,6 @@ class TrackedSubreddit(Base):
         self.min_post_interval = self.min_post_interval if self.min_post_interval is not None else timedelta(hours=72)
         self.grace_period_mins = self.grace_period_mins if self.grace_period_mins is not None else timedelta(minutes=30)
 
-
         self.last_updated = datetime.now()
         return True, return_text
 
@@ -413,7 +412,7 @@ def find_previous_posts(tr_sub: TrackedSubreddit, recent_post: SubmittedPost):
         if tr_sub.title_exempt_keyword is not None:
             if tr_sub.title_exempt_keyword.lower() in possible_repost.title.lower():
                 continue
-        if (banned_by or (not possible_repost.author)) \
+        if possible_repost.get_status() is not "up" \
                 and (recent_post.time_utc - possible_repost.time_utc < tr_sub.grace_period_mins):
             continue
         most_recent_reposts.append(possible_repost)
@@ -423,6 +422,8 @@ def find_previous_posts(tr_sub: TrackedSubreddit, recent_post: SubmittedPost):
 
 def look_for_rule_violations(tr_sub: TrackedSubreddit):
     global reddit_client
+
+
     logger.debug("gathering recent post(s) in %s" % tr_sub.subreddit_name)
     recent_posts = s.query(SubmittedPost) \
         .filter(SubmittedPost.time_utc > datetime.now() - timedelta(hours=14)) \
@@ -477,9 +478,6 @@ def look_for_rule_violations(tr_sub: TrackedSubreddit):
                     .format(recent_post.time_utc, tr_sub.min_post_interval,
                             recent_post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins))
 
-        #Don't bother if this is only being used for reports
-        if tr_sub.max_count_per_interval > 1000:
-            continue
 
         associated_reposts = find_previous_posts(tr_sub, recent_post)
         verified_reposts_count = len(associated_reposts)
@@ -820,9 +818,9 @@ def handle_direct_messages():
                 moderators = tr_sub.subreddit_mods
                 global BOT_OWNER
                 if author_name not in moderators and author_name != BOT_OWNER:
-                    message.reply("You do not have permission to do this")
+                    message.reply("You do not have permission to do this. Are you sure you are a moderator of {}?".format(subreddit_name))
                 else:
-                    worked, reply_text = tr_sub.update_from_yaml(force_update=True)
+                    worked, status = tr_sub.update_from_yaml(force_update=True)
                     reply_text = "Received message to update config for {0}.  See the output below. " \
                                  "If you get a 404 error, it means that the config page needs to be created. " \
                                  "If you get a 503 error, it means the bot doesn't have wiki permissions. " \
@@ -830,9 +828,11 @@ def handle_direct_messages():
                                  "Please message [/r/moderatelyhelpfulbot](https://www.reddit.com/" \
                                  "message/compose?to=%2Fr%2Fmoderatelyhelpfulbot) if you have any questions \n\n" \
                                  "Update report: \n\n >{1}"\
-                        .format(subreddit_name, reply_text,)
+                        .format(subreddit_name, status,)
                     message.reply(reply_text)
-                    reddit_client.redditor(BOT_OWNER).message(subreddit_name, reply_text)
+                    bot_owner_message = "subreddit: {0}\n\nrequestor: {1}\n\nreport: {2}"\
+                        .format(subreddit_name, author_name, status)
+                    reddit_client.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
                     s.add(tr_sub)
                     s.commit()
             message.mark_read()
@@ -946,9 +946,11 @@ def update_list_with_subreddit(subreddit_name: str):
         tr_sub = TrackedSubreddit(subreddit_name)
     else:
         tr_sub.update_from_yaml(force_update=True)
+
     watched_subs[subreddit_name] = tr_sub
     s.add(tr_sub)
     s.commit()
+    return tr_sub
 
 
 def purge_old_records(days=30):
@@ -959,6 +961,18 @@ def purge_old_records(days=30):
         .delete()
     s.commit()
 
+
+def purge_old_records_by_subreddit(tr_sub: TrackedSubreddit):
+    print("looking for old records to purge from ", tr_sub.subreddit_name, tr_sub.min_post_interval)
+    to_delete = s.query(SubmittedPost) \
+        .filter(SubmittedPost.time_utc < datetime.now() - tr_sub.min_post_interval*2) \
+        .filter(SubmittedPost.flagged_duplicate.is_(False)) \
+        .filter(SubmittedPost.pre_duplicate.is_(False)) \
+        .filter(SubmittedPost.subreddit == tr_sub.subreddit_name) \
+        .delete()
+    #print("purging {} old records from {}", len(to_delete), tr_sub.subreddit_name)
+    #to_delete.delete()
+    s.commit()
 
 def main_loop():
     global watched_subs
@@ -977,14 +991,17 @@ def main_loop():
 
         for subreddit_name in subs_to_update:
             if subreddit_name not in watched_subs:
-                update_list_with_subreddit(subreddit_name)
+                tr_sub = update_list_with_subreddit(subreddit_name)
+                purge_old_records_by_subreddit(tr_sub)
             tr_sub = watched_subs[subreddit_name]
             if tr_sub:
                 if tr_sub.last_updated < datetime.now() - timedelta(hours=4):
                     tr_sub.update_from_yaml(force_update=True)
                     s.add(tr_sub)
                     s.commit()
-                look_for_rule_violations(tr_sub)
+                # Don't bother if this is only being used for reports
+                if tr_sub.max_count_per_interval < 1000:
+                    look_for_rule_violations(tr_sub)
 
         # update_TMBR_submissions(look_back=timedelta(days=7))
         send_broadcast_messages()
