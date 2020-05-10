@@ -83,6 +83,7 @@ class TrackedSubreddit(Base):
     ban_threshold_count = 5
     notify_about_spammers = False
     author_exempt_flair_keyword = None
+    author_not_exempt_flair_keyword = None
     action = None
     modmail = None
     report_reason = None
@@ -147,6 +148,7 @@ class TrackedSubreddit(Base):
                 'notify_about_spammers',
                 'ban_duration_days',
                 'author_exempt_flair_keyword',
+                'author_not_exempt_flair_keyword',
                 'action',
                 'modmail',
                 'comment',
@@ -185,8 +187,10 @@ class TrackedSubreddit(Base):
                 else:
                     return_text = "Did not understand variable '{}'".format(m_setting)
 
-        self.min_post_interval = self.min_post_interval if self.min_post_interval is not None else timedelta(hours=72)
-        self.grace_period_mins = self.grace_period_mins if self.grace_period_mins is not None else timedelta(minutes=30)
+        if not self.min_post_interval:
+            self.min_post_interval = timedelta(hours=72)
+        if not self.grace_period_mins:
+            self.grace_period_mins = timedelta(minutes=30)
 
         self.last_updated = datetime.now()
         return True, return_text
@@ -412,7 +416,7 @@ def find_previous_posts(tr_sub: TrackedSubreddit, recent_post: SubmittedPost):
             if tr_sub.title_exempt_keyword.lower() in possible_repost.title.lower():
                 continue
         if possible_repost.get_status() is not "up" \
-                and (recent_post.time_utc - possible_repost.time_utc < tr_sub.grace_period_mins):
+                and ((recent_post.time_utc - possible_repost.time_utc) < tr_sub.grace_period_mins):
             continue
         most_recent_reposts.append(possible_repost)
     logger.info("----------------total {0} max {1}".format(len(most_recent_reposts), tr_sub.max_count_per_interval))
@@ -425,12 +429,13 @@ def look_for_rule_violations(tr_sub: TrackedSubreddit):
 
     logger.debug("gathering recent post(s) in %s" % tr_sub.subreddit_name)
     recent_posts = s.query(SubmittedPost) \
-        .filter(SubmittedPost.time_utc > datetime.now() - timedelta(hours=14)) \
+        .filter(SubmittedPost.time_utc > datetime.now() - timedelta(hours=4)) \
         .filter(SubmittedPost.subreddit.ilike(tr_sub.subreddit_name)) \
         .filter(SubmittedPost.flagged_duplicate.is_(False)) \
         .filter(SubmittedPost.reviewed.is_(False)) \
         .filter(SubmittedPost.banned_by.is_(None)) \
-        .all()
+        .order_by(desc(SubmittedPost.time_utc)) \
+        .limit(20).all()
     for count, recent_post in enumerate(recent_posts):
 
         # if (recent_post.is_self and tr_sub.exempt_self_posts) or (recent_post.) :
@@ -442,6 +447,12 @@ def look_for_rule_violations(tr_sub: TrackedSubreddit):
             recent_post.reviewed = True
             s.add(recent_post)
             continue
+
+        if tr_sub.author_not_exempt_flair_keyword:
+            if author_flair and tr_sub.author_not_exempt_flair_keyword not in author_flair:
+                continue
+            if not author_flair:
+                continue
 
         # check if keyword exempt:
         if tr_sub.title_exempt_keyword is not None:
@@ -476,8 +487,6 @@ def look_for_rule_violations(tr_sub: TrackedSubreddit):
         logger.info("----------------post time {0} interval {1}  after {2}"
                     .format(recent_post.time_utc, tr_sub.min_post_interval,
                             recent_post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins))
-
-
         associated_reposts = find_previous_posts(tr_sub, recent_post)
         verified_reposts_count = len(associated_reposts)
 
