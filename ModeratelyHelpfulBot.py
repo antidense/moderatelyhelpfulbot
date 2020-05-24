@@ -159,6 +159,7 @@ class TrackedSubreddit(Base):
                 'title_exempt_keyword',
                 'grace_period_mins',
                 'min_post_interval_hrs',
+                'min_post_interval_mins',
                 'approve',
                 'lock_thread',
 
@@ -171,6 +172,9 @@ class TrackedSubreddit(Base):
                 else:
                     return_text = "Did not understand variable '{}'".format(pr_setting)
 
+            if 'min_post_interval_mins' in pr_settings:
+                self.min_post_interval = timedelta(minutes = pr_settings['min_post_interval_mins'])
+                self.min_post_interval_hrs = None
             if 'min_post_interval_hrs' in pr_settings:
                 self.min_post_interval = timedelta(hours=pr_settings['min_post_interval_hrs'])
                 self.min_post_interval_hrs = pr_settings['min_post_interval_hrs']
@@ -448,6 +452,10 @@ def look_for_rule_violations(tr_sub: TrackedSubreddit):
             s.add(recent_post)
             continue
 
+        if author_flair and recent_post.get_api_handle().author_flair_css_class:
+            author_flair = recent_post.get_api_handle().author_flair_text + \
+                           recent_post.get_api_handle().author_flair_css_class
+
         if tr_sub.author_not_exempt_flair_keyword:
             if author_flair and tr_sub.author_not_exempt_flair_keyword not in author_flair:
                 continue
@@ -630,12 +638,15 @@ def populate_tags(input_text, recent_post, tr_sub=None, prev_post=None, prev_pos
     if tr_sub:
         input_text = input_text.replace("{subreddit}", tr_sub.subreddit_name)
         input_text = input_text.replace("{maxcount}", "{0}".format(tr_sub.max_count_per_interval))
-        if tr_sub.min_post_interval_hrs < 24:
-            input_text = input_text.replace("{interval}", "{0}h".format(tr_sub.min_post_interval_hrs))
+        if tr_sub.min_post_interval_hrs:
+            if tr_sub.min_post_interval_hrs < 24:
+                input_text = input_text.replace("{interval}", "{0}h".format(tr_sub.min_post_interval_hrs))
+            else:
+                input_text = input_text.replace(
+                    "{interval}", "{0}d{1}h".format(int(tr_sub.min_post_interval_hrs / 24),
+                                                    tr_sub.min_post_interval_hrs % 24)).replace("d0h", "d")
         else:
-            input_text = input_text.replace(
-                "{interval}", "{0}d{1}h".format(int(tr_sub.min_post_interval_hrs / 24),
-                                                tr_sub.min_post_interval_hrs % 24)).replace("d0h", "d")
+            input_text = input_text.replace("{interval}", "{0}m".format(tr_sub.min_post_interval_mins))
     return input_text
 
 
