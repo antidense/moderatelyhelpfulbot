@@ -182,6 +182,9 @@ class TrackedSubreddit(Base):
                 self.min_post_interval_hrs = pr_settings['min_post_interval_hrs']
             if 'grace_period_mins' in pr_settings and pr_settings['grace_period_mins'] is not None:
                 self.grace_period_mins = timedelta(minutes=pr_settings['grace_period_mins'])
+            if not self.ban_threshold_count:
+                self.ban_threshold_count = 5
+
 
         if 'modmail' in self.settings_yaml:
             m_settings = self.settings_yaml['modmail']
@@ -307,10 +310,13 @@ class SubmittedPost(Base):
     def mod_remove(self):
         try:
             self.get_api_handle().mod.remove()
+            return True
         except praw.exceptions.APIException:
             logger.warning('something went wrong removing post')
+            return False
         except prawcore.exceptions.Forbidden:
             logger.warning('I was not allowed to remove the post')
+            return False
 
     def reply(self, response, distinguish=True, approve=False, lock_thread=True):
         comment = self.get_api_handle().reply(response)
@@ -360,14 +366,13 @@ s = Session()
 s.rollback()
 
 
+
 def check_new_submissions2(query_limit=1000):
     global reddit_client
     subreddit_names = []
     possible_new_posts = [a for a in reddit_client.subreddit('mod').new(limit=query_limit)]
-    possible_spam_posts = [a for a in reddit_client.subreddit('mod').mod.spam(only='submissions')]
-    combined_new_posts = possible_new_posts + possible_spam_posts
-    combined_new_posts.sort(key=lambda x: x.created_utc, reverse=True)
-    for post_to_review in combined_new_posts:
+    print('found {0} posts'.format(len(possible_new_posts)))
+    for post_to_review in possible_new_posts:
         previous_post = s.query(SubmittedPost).get(post_to_review.id)
         if previous_post:
             break
@@ -377,6 +382,19 @@ def check_new_submissions2(query_limit=1000):
             if subreddit_name not in subreddit_names:
                 subreddit_names.append(subreddit_name)
             logger.info("found submitted post: '{0}...' http://redd.it/{1} ({2})".format(post.title[0:20], post.id,
+                                                                                         subreddit_name))
+            s.add(post)
+    possible_spam_posts = [a for a in reddit_client.subreddit('mod').mod.spam(only='submissions')]
+    for post_to_review in possible_spam_posts:
+        previous_post = s.query(SubmittedPost).get(post_to_review.id)
+        if previous_post:
+            break
+        if not previous_post:
+            post = SubmittedPost(post_to_review)
+            subreddit_name = post.subreddit.lower()
+            if subreddit_name not in subreddit_names:
+                subreddit_names.append(subreddit_name)
+            logger.info("found spam post: '{0}...' http://redd.it/{1} ({2})".format(post.title[0:20], post.id,
                                                                                          subreddit_name))
             s.add(post)
     logger.debug("updating database...")
@@ -436,7 +454,7 @@ def look_for_rule_violations(tr_sub: TrackedSubreddit):
 
     logger.debug("gathering recent post(s) in %s" % tr_sub.subreddit_name)
     recent_posts = s.query(SubmittedPost) \
-        .filter(SubmittedPost.time_utc > datetime.now() - timedelta(hours=4)) \
+        .filter(SubmittedPost.time_utc > datetime.now() - timedelta(hours=8)) \
         .filter(SubmittedPost.subreddit.ilike(tr_sub.subreddit_name)) \
         .filter(SubmittedPost.flagged_duplicate.is_(False)) \
         .filter(SubmittedPost.reviewed.is_(False)) \
@@ -527,8 +545,13 @@ def look_for_rule_violations(tr_sub: TrackedSubreddit):
 def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post: SubmittedPost,
                                           most_recent_reposts: List[SubmittedPost]):
     possible_repost = most_recent_reposts[-1]
+    if tr_sub.modmail:
+        send_modmail(tr_sub, recent_post,
+                     possible_repost, tr_sub.modmail)
     if tr_sub.action == "remove":
-        recent_post.mod_remove()
+        was_successful=recent_post.mod_remove()
+        if not was_successful:
+            return
     if tr_sub.action == "report":
         if tr_sub.report_reason:
             rp_reason = populate_tags(tr_sub.report_reason, recent_post, tr_sub=tr_sub,
@@ -536,9 +559,7 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
             recent_post.get_api_handle().report(("ModeratelyHelpfulBot:" + rp_reason)[0:99])
         else:
             recent_post.get_api_handle().report("ModeratelyHelpfulBot: repeatedly exceeding posting threshold")
-    if tr_sub.modmail:
-        send_modmail(tr_sub, recent_post,
-                     possible_repost, tr_sub.modmail)
+
     if tr_sub.comment:
         make_comment(tr_sub, recent_post, most_recent_reposts,
                      tr_sub.comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve,
@@ -986,7 +1007,7 @@ def update_list_with_subreddit(subreddit_name: str):
     return tr_sub
 
 
-def purge_old_records(days=30):
+def purge_old_records(days=14):
     to_delete = s.query(SubmittedPost) \
         .filter(SubmittedPost.time_utc < datetime.now() - timedelta(days=days)) \
         .filter(SubmittedPost.flagged_duplicate.is_(False)) \
