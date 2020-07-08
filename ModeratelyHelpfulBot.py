@@ -99,6 +99,7 @@ class TrackedSubreddit(Base):
     modmail_all_reply = None
     approve = False
     lock_thread = True
+    comment_stickied = False
 
 
     def __init__(self, subreddit_name):
@@ -162,6 +163,7 @@ class TrackedSubreddit(Base):
                 'min_post_interval_mins',
                 'approve',
                 'lock_thread',
+                'comment_stickied'
 
             )
             if not pr_settings:
@@ -185,11 +187,12 @@ class TrackedSubreddit(Base):
             m_settings = self.settings_yaml['modmail']
             possible_settings = ('modmail_no_posts_reply', 'modmail_no_posts_reply_internal', 'modmail_posts_reply',
                                  'modmail_auto_approve_messages_with_links', 'modmail_all_reply',)
-            for m_setting in m_settings:
-                if m_setting in possible_settings:
-                    setattr(self, m_setting, m_settings[m_setting])
-                else:
-                    return_text = "Did not understand variable '{}'".format(m_setting)
+            if m_settings:
+                for m_setting in m_settings:
+                    if m_setting in possible_settings:
+                        setattr(self, m_setting, m_settings[m_setting])
+                    else:
+                        return_text = "Did not understand variable '{}'".format(m_setting)
 
         if not self.min_post_interval:
             self.min_post_interval = timedelta(hours=72)
@@ -357,7 +360,7 @@ s = Session()
 s.rollback()
 
 
-def check_new_submissions2(query_limit=100):
+def check_new_submissions2(query_limit=1000):
     global reddit_client
     subreddit_names = []
     possible_new_posts = [a for a in reddit_client.subreddit('mod').new(limit=query_limit)]
@@ -469,6 +472,12 @@ def look_for_rule_violations(tr_sub: TrackedSubreddit):
                 s.add(recent_post)
                 continue
 
+        # Check if any post type restrictions
+        is_self = recent_post.get_api_handle().is_self
+        if is_self is True and tr_sub.exempt_self_posts is True:
+            continue
+        if is_self is not True and tr_sub.exempt_link_posts is True:
+            continue
 
         # checking if previously removed
         if recent_post.get_api_handle().banned_by:
@@ -533,7 +542,7 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
     if tr_sub.comment:
         make_comment(tr_sub, recent_post, most_recent_reposts,
                      tr_sub.comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve,
-                     lock_thread=tr_sub.lock_thread)
+                     lock_thread=tr_sub.lock_thread, stickied=tr_sub.comment_stickied)
 
 
 def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: SubmittedPost,
@@ -550,6 +559,10 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
 
     if len(other_spam_by_author) >= tr_sub.ban_threshold_count:
         num_days = tr_sub.ban_duration_days
+        if num_days < 1:
+            num_days = 1
+        if num_days > 998:
+            num_days = 0
 
         str_prev_posts = ",".join([" [{0}]({1})".format(a.id, a.get_comments_url()) for a in other_spam_by_author])
 
@@ -651,7 +664,7 @@ def populate_tags(input_text, recent_post, tr_sub=None, prev_post=None, prev_pos
 
 
 def make_comment(subreddit: TrackedSubreddit, recent_post: SubmittedPost, most_recent_reposts, comment_template: String,
-                 distinguish=False, approve=False, lock_thread=True):
+                 distinguish=False, approve=False, lock_thread=True, stickied=False):
     prev_submission = most_recent_reposts[-1]
     next_eligibility = most_recent_reposts[0].time_utc + subreddit.min_post_interval
     ids = " Previous post(s):"\
@@ -664,7 +677,8 @@ def make_comment(subreddit: TrackedSubreddit, recent_post: SubmittedPost, most_r
                              recent_post, tr_sub=subreddit, prev_post=prev_submission)
     try:
         comment = recent_post.reply(response, distinguish=distinguish, approve=approve, lock_thread=lock_thread)
-
+        if stickied:
+            comment.mod.distinguish(sticky=True)
     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
         logger.warning('something went wrong in creating comment %s', str(e))
     return comment
@@ -984,7 +998,7 @@ def purge_old_records(days=30):
 def purge_old_records_by_subreddit(tr_sub: TrackedSubreddit):
     print("looking for old records to purge from ", tr_sub.subreddit_name, tr_sub.min_post_interval)
     to_delete = s.query(SubmittedPost) \
-        .filter(SubmittedPost.time_utc < datetime.now() - tr_sub.min_post_interval*2) \
+        .filter(SubmittedPost.time_utc < datetime.now() - tr_sub.min_post_interval*1.5) \
         .filter(SubmittedPost.flagged_duplicate.is_(False)) \
         .filter(SubmittedPost.pre_duplicate.is_(False)) \
         .filter(SubmittedPost.subreddit == tr_sub.subreddit_name) \
