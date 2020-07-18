@@ -111,7 +111,6 @@ class TrackedSubreddit(Base):
 
     def update_from_yaml(self, force_update=False) -> (Boolean, String):
         return_text = "Updated Successfully!"
-        print(self.subreddit_name)
         subreddit_handle = reddit_client.subreddit(self.subreddit_name)
         self.subreddit_mods =[]
         try:
@@ -183,7 +182,7 @@ class TrackedSubreddit(Base):
                 self.min_post_interval = timedelta(minutes = pr_settings['min_post_interval_mins'])
                 self.min_post_interval_hrs = None
             if 'min_post_interval_hrs' in pr_settings:
-                self.min_post_interval = timedelta(hours=pr_settings['min_post_interval_hrs'])
+                self.min_post_interval = timedelta(hours=int(pr_settings['min_post_interval_hrs']))
                 self.min_post_interval_hrs = pr_settings['min_post_interval_hrs']
             if 'grace_period_mins' in pr_settings and pr_settings['grace_period_mins'] is not None:
                 self.grace_period_mins = timedelta(minutes=pr_settings['grace_period_mins'])
@@ -251,7 +250,7 @@ class TrackedSubreddit(Base):
 
         authors = s.query(SubmittedPost, func.count(SubmittedPost.author).label('qty'))\
             .filter(SubmittedPost.subreddit.ilike(self.subreddit_name))\
-            .group_by(SubmittedPost.author).order_by(desc('qty')).limit(10).all()
+            .group_by(SubmittedPost.author).order_by(desc('qty')).limit(10).all().scalar()
 
         response_lines = ["Stats report for {0} \n\n".format(self.subreddit_name),
                           '|Author|Count|\n\n'
@@ -372,7 +371,7 @@ s.rollback()
 
 
 
-def check_new_submissions2(query_limit=1000):
+def check_new_submissions2(query_limit=400):
     global reddit_client
     subreddit_names = []
     possible_new_posts = [a for a in reddit_client.subreddit('mod').new(limit=query_limit)]
@@ -401,6 +400,7 @@ def check_new_submissions2(query_limit=1000):
                 subreddit_names.append(subreddit_name)
             logger.info("found spam post: '{0}...' http://redd.it/{1} ({2})".format(post.title[0:20], post.id,
                                                                                          subreddit_name))
+            post.reviewed=True
             s.add(post)
     logger.debug("updating database...")
     s.commit()
@@ -428,8 +428,6 @@ def find_previous_posts(tr_sub: TrackedSubreddit, recent_post: SubmittedPost):
         .order_by(SubmittedPost.time_utc) \
         .all()
 
-    logger.info("Checking submission '{0}...' by '{1}' http://redd.it/{2} flair:({3})".format(
-        recent_post.title[0:20], recent_post.author, recent_post.id, recent_post.get_api_handle().author_flair_text))
 
     # Filter possible reposts (some maybe removed by automoderator or within grace period) - can't do in database
     most_recent_reposts = []
@@ -456,16 +454,19 @@ def find_previous_posts(tr_sub: TrackedSubreddit, recent_post: SubmittedPost):
 def look_for_rule_violations():
     global reddit_client
     global watched_subs
-
+    authors = dict()
     logger.debug("gathering recent post(s)" )
     recent_posts = s.query(SubmittedPost) \
-        .filter(SubmittedPost.time_utc > datetime.now(pytz.utc) - timedelta(hours=8)) \
+        .filter(SubmittedPost.time_utc > datetime.now(pytz.utc) - timedelta(hours=24)) \
         .filter(SubmittedPost.flagged_duplicate.is_(False)) \
         .filter(SubmittedPost.reviewed.is_(False)) \
         .filter(SubmittedPost.banned_by.is_(None)) \
         .order_by(desc(SubmittedPost.time_utc)) \
-        .limit(50).all()
-    for count, recent_post in enumerate(recent_posts):
+        .limit(100).all()
+    for index, recent_post in enumerate(recent_posts):
+        if index % 25 == 0:
+            logger.debug("           %d of %d" % (index + 1, len(recent_posts)))
+            s.commit()
 
         subreddit_name = recent_post.subreddit.lower()
         if subreddit_name not in watched_subs:
@@ -476,10 +477,32 @@ def look_for_rule_violations():
                     tr_sub.update_from_yaml(force_update=True)
                     s.add(tr_sub)
                     s.commit()
+                authors_tuple = s.query(SubmittedPost.author, func.count(SubmittedPost.author).label('qty')) \
+                    .filter(SubmittedPost.subreddit.ilike(subreddit_name)) \
+                    .filter(
+                    SubmittedPost.time_utc > datetime.now(pytz.utc)- tr_sub.min_post_interval + tr_sub.grace_period_mins) \
+                    .group_by(SubmittedPost.author).order_by(desc('qty')).all()
+                authors[subreddit_name] = dict((x, y) for x, y in authors_tuple)
+                #print(authors[subreddit_name])
+
         if subreddit_name not in watched_subs:
             print("CANNOT FIND SUBREDDIT!!! {0}".format(recent_post.subreddit))
             continue
         tr_sub = watched_subs[subreddit_name]
+
+        #Short cut - ignore authors in the alst time period
+        # careful though!! it's from the most recent post not the actual post time!
+        if subreddit_name in authors and recent_post.author in authors[subreddit_name]  \
+                and recent_post.time_utc > datetime.now(pytz.utc).replace(tzinfo=None) - timedelta(minutes=30):
+            author_count = authors[subreddit_name][recent_post.author]
+
+            if author_count <= tr_sub.max_count_per_interval:
+                recent_post.reviewed = True
+                if author_count>0:
+                    logger.info("{4}-[{3}] skipping, not enough posts to consider this author {0} {1} max: {2} "
+                                .format(recent_post.author, author_count, tr_sub.max_count_per_interval, subreddit_name, index))
+                s.add(recent_post)
+                continue
 
         # check if flair-exempt
         author_flair = recent_post.get_api_handle().author_flair_text
@@ -533,11 +556,15 @@ def look_for_rule_violations():
             recent_post.reviewed = True
             s.add(recent_post)
             continue
-        logger.debug("           %d of %d" % (count+1, len(recent_posts)))
-        logger.info("----------------post time {0} interval {1}  after {2} sub:{3}"
-                    .format(recent_post.time_utc , tr_sub.min_post_interval,
+
+        logger.info("----------------post time {0} | interval {1}  after {2} sub:{3}"
+                    .format(datetime.now(pytz.utc).replace(tzinfo=None)-recent_post.time_utc , tr_sub.min_post_interval,
                             recent_post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins,
                             recent_post.subreddit))
+        logger.info("{4}-Checking submission '{0}...' by '{1}' http://redd.it/{2} flair:({3})".format(
+            recent_post.title[0:20], recent_post.author, recent_post.id,
+            recent_post.get_api_handle().author_flair_text, index))
+
         associated_reposts = find_previous_posts(tr_sub, recent_post)
         verified_reposts_count = len(associated_reposts)
 
@@ -552,9 +579,6 @@ def look_for_rule_violations():
             check_for_actionable_violations(tr_sub, recent_post, associated_reposts)
         recent_post.reviewed = True
         s.add(recent_post)
-
-        if count % 25 == 0:
-            s.commit()
     s.commit()
 
 
@@ -911,14 +935,19 @@ def handle_direct_messages():
         elif message.subject.startswith('invitation to moderate'):
             subreddit_name = message.subject.replace("invitation to moderate /r/", "")
             sub = reddit_client.subreddit(subreddit_name)
-            sub.mod.accept_invite()
+            #sub.mod.accept_invite()
             message.mark_read()
+
+            """
             message.reply("Hi, thank you for inviting me!  I will start working now. Please make sure I have a config. "
                           "It should be at https://www.reddit.com/r/{0}/wiki/moderatelyhelpfulbot . "
                           "You may need to create it. You can find examples at "
                           "https://www.reddit.com/r/moderatelyhelpfulbot/wiki/index . "
                           .format(subreddit_name))
-            reddit_client.subreddit('moderatelyhelpfulbot').message(subreddit_name, "Added as moderator")
+            """
+            message.reply("Sorry, Moderatelyhelpfulbot is at full capacity and cannot handle any more subreddits at this time")
+            reddit_client.subreddit('moderatelyhelpfulbot').message(subreddit_name, "NOT Added as moderator")
+            #reddit_client.subreddit('moderatelyhelpfulbot').message(subreddit_name, "Added as moderator")
         # Respond to author (only once)
         elif author_name and not check_actioned(author_name):
             message.reply("Hi, thank you for messaging me! "
@@ -1038,7 +1067,7 @@ def purge_old_records(days=14):
 def purge_old_records_by_subreddit(tr_sub: TrackedSubreddit):
     print("looking for old records to purge from ", tr_sub.subreddit_name, tr_sub.min_post_interval)
     to_delete = s.query(SubmittedPost) \
-        .filter(SubmittedPost.time_utc < datetime.now() - tr_sub.min_post_interval*1.5) \
+        .filter(SubmittedPost.time_utc < datetime.now(pytz.utc).replace(tzinfo=None) - tr_sub.min_post_interval) \
         .filter(SubmittedPost.flagged_duplicate.is_(False)) \
         .filter(SubmittedPost.pre_duplicate.is_(False)) \
         .filter(SubmittedPost.subreddit == tr_sub.subreddit_name) \
