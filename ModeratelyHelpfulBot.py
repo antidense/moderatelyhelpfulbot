@@ -182,7 +182,7 @@ class TrackedSubreddit(Base):
                 self.min_post_interval = timedelta(minutes = pr_settings['min_post_interval_mins'])
                 self.min_post_interval_hrs = None
             if 'min_post_interval_hrs' in pr_settings:
-                self.min_post_interval = timedelta(hours=int(pr_settings['min_post_interval_hrs']))
+                self.min_post_interval = timedelta(hours=pr_settings['min_post_interval_hrs'])
                 self.min_post_interval_hrs = pr_settings['min_post_interval_hrs']
             if 'grace_period_mins' in pr_settings and pr_settings['grace_period_mins'] is not None:
                 self.grace_period_mins = timedelta(minutes=pr_settings['grace_period_mins'])
@@ -457,7 +457,7 @@ def look_for_rule_violations():
     authors = dict()
     logger.debug("gathering recent post(s)" )
     recent_posts = s.query(SubmittedPost) \
-        .filter(SubmittedPost.time_utc > datetime.now(pytz.utc) - timedelta(hours=24)) \
+        .filter(SubmittedPost.time_utc > datetime.now(pytz.utc) - timedelta(hours=10)) \
         .filter(SubmittedPost.flagged_duplicate.is_(False)) \
         .filter(SubmittedPost.reviewed.is_(False)) \
         .filter(SubmittedPost.banned_by.is_(None)) \
@@ -477,18 +477,20 @@ def look_for_rule_violations():
                     tr_sub.update_from_yaml(force_update=True)
                     s.add(tr_sub)
                     s.commit()
-                authors_tuple = s.query(SubmittedPost.author, func.count(SubmittedPost.author).label('qty')) \
-                    .filter(SubmittedPost.subreddit.ilike(subreddit_name)) \
-                    .filter(
-                    SubmittedPost.time_utc > datetime.now(pytz.utc)- tr_sub.min_post_interval + tr_sub.grace_period_mins) \
-                    .group_by(SubmittedPost.author).order_by(desc('qty')).all()
-                authors[subreddit_name] = dict((x, y) for x, y in authors_tuple)
-                #print(authors[subreddit_name])
+        tr_sub = watched_subs[subreddit_name]
+        if subreddit_name not in authors:
+            authors_tuple = s.query(SubmittedPost.author, func.count(SubmittedPost.author).label('qty')) \
+                .filter(SubmittedPost.subreddit.ilike(subreddit_name)) \
+                .filter(
+                SubmittedPost.time_utc > datetime.now(pytz.utc)- tr_sub.min_post_interval + tr_sub.grace_period_mins) \
+                .group_by(SubmittedPost.author).order_by(desc('qty')).all()
+            authors[subreddit_name] = dict((x, y) for x, y in authors_tuple)
+            #print(authors[subreddit_name])
 
         if subreddit_name not in watched_subs:
             print("CANNOT FIND SUBREDDIT!!! {0}".format(recent_post.subreddit))
             continue
-        tr_sub = watched_subs[subreddit_name]
+
 
         #Short cut - ignore authors in the alst time period
         # careful though!! it's from the most recent post not the actual post time!
@@ -498,9 +500,8 @@ def look_for_rule_violations():
 
             if author_count <= tr_sub.max_count_per_interval:
                 recent_post.reviewed = True
-                if author_count>0:
-                    logger.info("{4}-[{3}] skipping, not enough posts to consider this author {0} {1} max: {2} "
-                                .format(recent_post.author, author_count, tr_sub.max_count_per_interval, subreddit_name, index))
+                logger.info("{4}-[{3}] skipping, not enough posts to consider this author {0} {1} max: {2} "
+                            .format(recent_post.author, author_count, tr_sub.max_count_per_interval, subreddit_name, index))
                 s.add(recent_post)
                 continue
 
@@ -508,6 +509,7 @@ def look_for_rule_violations():
         author_flair = recent_post.get_api_handle().author_flair_text
         if tr_sub.author_exempt_flair_keyword and author_flair and tr_sub.author_exempt_flair_keyword in author_flair:
             recent_post.reviewed = True
+            logger.info("{0}-[{1}] skipping,flair exempt ".format( index, subreddit_name))
             s.add(recent_post)
             continue
 
@@ -517,8 +519,14 @@ def look_for_rule_violations():
 
         if tr_sub.author_not_exempt_flair_keyword:
             if author_flair and tr_sub.author_not_exempt_flair_keyword not in author_flair:
+                logger.info("{0}-[{1}] skipping,flair exempt ".format(index, subreddit_name))
+                recent_post.reviewed = True
+                s.add(recent_post)
                 continue
             if not author_flair:
+                logger.info("{0}-[{1}] skipping,flair exempt ".format(index, subreddit_name))
+                recent_post.reviewed = True
+                s.add(recent_post)
                 continue
 
         # check if keyword exempt:
@@ -526,13 +534,20 @@ def look_for_rule_violations():
             if tr_sub.title_exempt_keyword.lower() in recent_post.title.lower():
                 recent_post.reviewed = True
                 s.add(recent_post)
+                logger.info("{0}-[{1}] keyword exempt ".format(index, subreddit_name))
                 continue
 
         # Check if any post type restrictions
         is_self = recent_post.get_api_handle().is_self
         if is_self is True and tr_sub.exempt_self_posts is True:
+            logger.info("{0}-[{1}] post type exempt ".format(index, subreddit_name))
+            recent_post.reviewed = True
+            s.add(recent_post)
             continue
         if is_self is not True and tr_sub.exempt_link_posts is True:
+            logger.info("{0}-[{1}] post type exempt ".format(index, subreddit_name))
+            recent_post.reviewed = True
+            s.add(recent_post)
             continue
 
         # checking if previously removed
@@ -555,6 +570,7 @@ def look_for_rule_violations():
         if tr_sub.exempt_moderator_posts is True and recent_post.author in tr_sub.subreddit_mods:
             recent_post.reviewed = True
             s.add(recent_post)
+            logger.info("{0}-[{1}] mod post exempt ".format(index, subreddit_name))
             continue
 
         logger.info("----------------post time {0} | interval {1}  after {2} sub:{3}"
@@ -613,6 +629,7 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
         .filter(SubmittedPost.flagged_duplicate.is_(True)) \
         .filter(SubmittedPost.author == recent_post.author) \
         .filter(SubmittedPost.subreddit.ilike(tr_sub.subreddit_name)) \
+        .filter(SubmittedPost.time_utc < recent_post.time_utc) \
         .all()
 
     logger.info("Author {0} had {1} rule violations. Banning if more than {2}"
@@ -935,19 +952,19 @@ def handle_direct_messages():
         elif message.subject.startswith('invitation to moderate'):
             subreddit_name = message.subject.replace("invitation to moderate /r/", "")
             sub = reddit_client.subreddit(subreddit_name)
-            #sub.mod.accept_invite()
+            sub.mod.accept_invite()
             message.mark_read()
 
-            """
+
             message.reply("Hi, thank you for inviting me!  I will start working now. Please make sure I have a config. "
                           "It should be at https://www.reddit.com/r/{0}/wiki/moderatelyhelpfulbot . "
                           "You may need to create it. You can find examples at "
                           "https://www.reddit.com/r/moderatelyhelpfulbot/wiki/index . "
                           .format(subreddit_name))
-            """
-            message.reply("Sorry, Moderatelyhelpfulbot is at full capacity and cannot handle any more subreddits at this time")
-            reddit_client.subreddit('moderatelyhelpfulbot').message(subreddit_name, "NOT Added as moderator")
-            #reddit_client.subreddit('moderatelyhelpfulbot').message(subreddit_name, "Added as moderator")
+
+            #message.reply("Sorry, Moderatelyhelpfulbot is at full capacity and cannot handle any more subreddits at this time")
+            #reddit_client.subreddit('moderatelyhelpfulbot').message(subreddit_name, "NOT Added as moderator")
+            reddit_client.subreddit('moderatelyhelpfulbot').message(subreddit_name, "Added as moderator")
         # Respond to author (only once)
         elif author_name and not check_actioned(author_name):
             message.reply("Hi, thank you for messaging me! "
@@ -1099,6 +1116,23 @@ def main_loop():
         #  do_automated_replies()  This is currently disabled!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         handle_direct_messages()
         handle_modmail_messages()
+
+        authors_tuple = s.query(SubmittedPost.author, SubmittedPost.subreddit, func.count(SubmittedPost.author).label('qty')) \
+            .filter(
+            SubmittedPost.time_utc > datetime.now(pytz.utc)- timedelta(days=30)) \
+            .group_by(SubmittedPost.author, SubmittedPost.subreddit).order_by(desc('qty')).limit(80)
+
+        for x, y, z in authors_tuple:
+            print("{1}\t{0}\t{2}".format(x, y, z))
+        """
+        authors_tuple = s.query(SubmittedPost.author, func.count(SubmittedPost.author).label('qty')) \
+            .filter(
+            SubmittedPost.time_utc > datetime.now(pytz.utc)- timedelta(days=90)) \
+            .group_by(SubmittedPost.author).order_by(desc('qty')).limit(40)
+        for x, y in authors_tuple:
+            print("{1}\t\t{0}".format(x, y))
+        """
+
 
 def init_logger(logger_name, filename=None):
     import os
