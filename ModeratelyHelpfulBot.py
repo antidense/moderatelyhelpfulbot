@@ -650,7 +650,7 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
                            "**Repeat infractions result in a permanent ban!**" \
                       "".format(num_days, datetime.now(pytz.utc) + timedelta(days=num_days))
         try:
-            if num_days > 0 and len(other_spam_by_author)-tr_sub.ban_threshold_count < 3:
+            if num_days > 0
 
                 reddit_client.subreddit(tr_sub.subreddit_name).banned.add(
                     recent_post.author, ban_note="ModhelpfulBot: repeated spam", ban_message=ban_message[:999],
