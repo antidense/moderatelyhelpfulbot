@@ -423,6 +423,7 @@ def find_previous_posts(tr_sub: TrackedSubreddit, recent_post: SubmittedPost):
         .filter(SubmittedPost.subreddit.ilike(tr_sub.subreddit_name)) \
         .filter(SubmittedPost.time_utc >
                 recent_post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins) \
+        .filter(SumbittedPost.time_utc < recent_post.time_utc)
         .filter(SubmittedPost.id != recent_post.id) \
         .filter(SubmittedPost.author == recent_post.author) \
         .order_by(SubmittedPost.time_utc) \
