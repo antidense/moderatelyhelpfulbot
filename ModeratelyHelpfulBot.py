@@ -371,19 +371,23 @@ s.rollback()
 
 
 
-def check_new_submissions2(query_limit=400):
+def check_new_submissions2(query_limit=800):
     global reddit_client
     subreddit_names = []
-    subreddit_names_complete=[]
+    subreddit_names_complete = []
+    logger.info("pulling new posts!")
     possible_new_posts = [a for a in reddit_client.subreddit('mod').new(limit=query_limit)]
-    print('found {0} posts'.format(len(possible_new_posts)))
+    logger.info('found {0} posts'.format(len(possible_new_posts)))
     for post_to_review in possible_new_posts:
+        subreddit_name = str(post_to_review.subreddit).lower()
+        if subreddit_name in subreddit_names_complete:
+            continue
         previous_post = s.query(SubmittedPost).get(post_to_review.id)
         if previous_post:
-            break
+            subreddit_names_complete.append(subreddit_name)
+            continue
         if not previous_post:
             post = SubmittedPost(post_to_review)
-            subreddit_name = post.subreddit.lower()
             if subreddit_name not in subreddit_names:
                 subreddit_names.append(subreddit_name)
             logger.info("found submitted post: '{0}...' http://redd.it/{1} ({2})".format(post.title[0:20], post.id,
