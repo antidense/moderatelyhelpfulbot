@@ -374,6 +374,7 @@ s.rollback()
 def check_new_submissions2(query_limit=400):
     global reddit_client
     subreddit_names = []
+    subreddit_names_complete=[]
     possible_new_posts = [a for a in reddit_client.subreddit('mod').new(limit=query_limit)]
     print('found {0} posts'.format(len(possible_new_posts)))
     for post_to_review in possible_new_posts:
@@ -423,7 +424,7 @@ def find_previous_posts(tr_sub: TrackedSubreddit, recent_post: SubmittedPost):
         .filter(SubmittedPost.subreddit.ilike(tr_sub.subreddit_name)) \
         .filter(SubmittedPost.time_utc >
                 recent_post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins) \
-        .filter(SumbittedPost.time_utc < recent_post.time_utc)  \
+        .filter(SubmittedPost.time_utc < recent_post.time_utc)  \
         .filter(SubmittedPost.id != recent_post.id) \
         .filter(SubmittedPost.author == recent_post.author) \
         .order_by(SubmittedPost.time_utc) \
@@ -493,7 +494,7 @@ def look_for_rule_violations():
             continue
 
 
-        #Short cut - ignore authors in the alst time period
+        #Shortcut - ignore authors in the alst time period
         # careful though!! it's from the most recent post not the actual post time!
         if subreddit_name in authors and recent_post.author in authors[subreddit_name]  \
                 and recent_post.time_utc > datetime.now(pytz.utc).replace(tzinfo=None) - timedelta(minutes=30):
@@ -501,8 +502,10 @@ def look_for_rule_violations():
 
             if author_count <= tr_sub.max_count_per_interval:
                 recent_post.reviewed = True
-                logger.info("{4}-[{3}] skipping, not enough posts to consider this author {0} {1} max: {2} "
-                            .format(recent_post.author, author_count, tr_sub.max_count_per_interval, subreddit_name, index))
+                if index % 5 == 0:
+                    logger.info("{4}-[{3}] skipping, not enough posts to consider this author {0} {1} max: {2} "
+                                .format(recent_post.author, author_count,
+                                        tr_sub.max_count_per_interval, subreddit_name, index))
                 s.add(recent_post)
                 continue
 
@@ -953,7 +956,11 @@ def handle_direct_messages():
         elif message.subject.startswith('invitation to moderate'):
             subreddit_name = message.subject.replace("invitation to moderate /r/", "")
             sub = reddit_client.subreddit(subreddit_name)
-            sub.mod.accept_invite()
+            try:
+
+                sub.mod.accept_invite()
+            except praw.exceptions.APIException:
+                message.reply("Error: Invite message has been rescinded?")
             message.mark_read()
 
 
@@ -1016,7 +1023,10 @@ def handle_modmail_messages():
             if recent_posts:
                 response = populate_tags("{summary table}\n\n**Please don't forget to change to 'reply as the "
                                          "subreddit' below!!**", None, prev_posts=recent_posts)
-                convo.reply(response, internal=True)
+                try:
+                    convo.reply(response, internal=True)
+                except prawcore.exceptions.BadRequest:
+                    logger.debug("reply failed {0}".format(response))
             else:
                 logger.debug("to reply {0}".format(tr_sub.modmail_no_posts_reply))
                 if tr_sub.modmail_no_posts_reply:
