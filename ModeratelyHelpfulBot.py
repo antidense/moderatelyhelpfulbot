@@ -101,6 +101,7 @@ class TrackedSubreddit(Base):
     approve = False
     lock_thread = True
     comment_stickied = False
+    title_not_exempt_keyword= None
 
     def __init__(self, subreddit_name):
         self.subreddit_name = subreddit_name.lower()
@@ -168,6 +169,7 @@ class TrackedSubreddit(Base):
                 'lock_thread',
                 'comment_stickied',
                 'exempt_moderator_posts',
+                'title_not_exempt_keyword',
 
             )
             if not pr_settings:
@@ -453,6 +455,9 @@ def find_previous_posts(tr_sub: TrackedSubreddit, recent_post: SubmittedPost):
                 and ((recent_post.time_utc - possible_repost.time_utc) < tr_sub.grace_period_mins):
             continue
         most_recent_reposts.append(possible_repost)
+        #if len(most_recent_reposts)>=tr_sub.max_count_per_interval:
+        #    #stop counting if already more than relevant
+        #    break
     logger.info("----------------total {0} max {1}".format(len(most_recent_reposts), tr_sub.max_count_per_interval))
     return most_recent_reposts
 
@@ -543,6 +548,13 @@ def look_for_rule_violations():
                 recent_post.reviewed = True
                 s.add(recent_post)
                 logger.info("{0}-[{1}] keyword exempt ".format(index, subreddit_name))
+                continue
+        # check if keyword exempt:
+        if tr_sub.title_not_exempt_keyword is not None:
+            if tr_sub.title_exempt_keyword.lower() not in recent_post.title.lower():
+                recent_post.reviewed = True
+                s.add(recent_post)
+                logger.info("{0}-[{1}] keyword not NOT exempt ".format(index, subreddit_name))
                 continue
 
         # Check if any post type restrictions
@@ -974,14 +986,17 @@ def handle_direct_messages():
                           "https://www.reddit.com/r/moderatelyhelpfulbot/wiki/index . "
                           .format(subreddit_name))
 
-            #message.reply("Sorry, Moderatelyhelpfulbot is at full capacity and cannot handle any more subreddits at this time")
+
             #reddit_client.subreddit('moderatelyhelpfulbot').message(subreddit_name, "NOT Added as moderator")
             reddit_client.subreddit('moderatelyhelpfulbot').message(subreddit_name, "Added as moderator")
         # Respond to author (only once)
         elif author_name and not check_actioned(author_name):
-            message.reply("Hi, thank you for messaging me! "
-                          "I am only a non-sentient bot so I can't really help you if you have questions. "
-                          "Please contact the subreddit moderators. There is a link in my original message :)")
+            try:
+                message.reply("Hi, thank you for messaging me! "
+                              "I am only a non-sentient bot so I can't really help you if you have questions. "
+                              "Please contact the subreddit moderators. There is a link in my original message :)")
+            except prawcore.exceptions.Forbidden:
+                pass
             record_actioned(author_name)
         message.mark_read()
         record_actioned(message_id)
@@ -1119,6 +1134,7 @@ def main_loop():
         # scan_comments_for_activity()
         # flag_all_submissions_for_activity()
         # recalculate_active_submissions()
+        print('start_loop')
         subs_to_update = check_new_submissions2()
         print("substoupdate:")
         print(subs_to_update)
@@ -1132,20 +1148,22 @@ def main_loop():
         handle_direct_messages()
         handle_modmail_messages()
 
-        authors_tuple = s.query(SubmittedPost.author, SubmittedPost.subreddit, func.count(SubmittedPost.author).label('qty')) \
-            .filter(
-            SubmittedPost.time_utc > datetime.now(pytz.utc)- timedelta(days=30)) \
-            .group_by(SubmittedPost.author, SubmittedPost.subreddit).order_by(desc('qty')).limit(80)
 
-        for x, y, z in authors_tuple:
-            print("{1}\t{0}\t{2}".format(x, y, z))
-        """
-        authors_tuple = s.query(SubmittedPost.author, func.count(SubmittedPost.author).label('qty')) \
-            .filter(
-            SubmittedPost.time_utc > datetime.now(pytz.utc)- timedelta(days=90)) \
-            .group_by(SubmittedPost.author).order_by(desc('qty')).limit(40)
-        for x, y in authors_tuple:
-            print("{1}\t\t{0}".format(x, y))
+def get_naughty_list():
+    authors_tuple = s.query(SubmittedPost.author, SubmittedPost.subreddit, func.count(SubmittedPost.author).label('qty')) \
+        .filter(
+        SubmittedPost.time_utc > datetime.now(pytz.utc)- timedelta(days=30)) \
+        .group_by(SubmittedPost.author, SubmittedPost.subreddit).order_by(desc('qty')).limit(80)
+
+    for x, y, z in authors_tuple:
+        print("{1}\t{0}\t{2}".format(x, y, z))
+    """
+    authors_tuple = s.query(SubmittedPost.author, func.count(SubmittedPost.author).label('qty')) \
+        .filter(
+        SubmittedPost.time_utc > datetime.now(pytz.utc)- timedelta(days=90)) \
+        .group_by(SubmittedPost.author).order_by(desc('qty')).limit(40)
+    for x, y in authors_tuple:
+        print("{1}\t\t{0}".format(x, y))
         """
 
 
