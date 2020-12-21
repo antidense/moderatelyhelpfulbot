@@ -16,7 +16,9 @@ from sqlalchemy import *
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import pprint
+import pickle
 from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET, BOT_OWNER, DB_ENGINE
+import threading, queue
 
 
 # Set up database
@@ -118,6 +120,16 @@ class TrackedSubreddit(Base):
             self.subreddit_mods = list(moderator.name for moderator in subreddit_handle.moderator())
         except prawcore.exceptions.NotFound:
             pass
+
+        try:
+            with open('subpickles/{0}.pickle'.format(self.subreddit_name), 'rb') as f:
+                # The protocol version used is detected automatically, so we do not
+                # have to specify it.
+                self = pickle.load(f)
+        except pickle.UnpicklingError:
+            pass
+        except FileNotFoundError:
+            pass
         if force_update or self.settings_yaml_txt is None:
             try:
                 logger.warning('accessing wiki config %s' % self.subreddit_name)
@@ -209,6 +221,11 @@ class TrackedSubreddit(Base):
             self.grace_period_mins = timedelta(minutes=30)
 
         self.last_updated = datetime.now()
+
+
+        with open('subpickles/{0}.pickle'.format(self.subreddit_name), 'wb') as f:
+            # Pickle the 'data' dictionary using the highest protocol available.
+            pickle.dump(self, f)
         return True, return_text
 
     @staticmethod
@@ -373,45 +390,7 @@ s.rollback()
 
 
 
-def check_new_submissions2(query_limit=800):
-    global reddit_client
-    subreddit_names = []
-    subreddit_names_complete = []
-    logger.info("pulling new posts!")
-    possible_new_posts = [a for a in reddit_client.subreddit('mod').new(limit=query_limit)]
-    logger.info('found {0} posts'.format(len(possible_new_posts)))
-    for post_to_review in possible_new_posts:
-        subreddit_name = str(post_to_review.subreddit).lower()
-        if subreddit_name in subreddit_names_complete:
-            continue
-        previous_post = s.query(SubmittedPost).get(post_to_review.id)
-        if previous_post:
-            subreddit_names_complete.append(subreddit_name)
-            continue
-        if not previous_post:
-            post = SubmittedPost(post_to_review)
-            if subreddit_name not in subreddit_names:
-                subreddit_names.append(subreddit_name)
-            logger.info("found submitted post: '{0}...' http://redd.it/{1} ({2})".format(post.title[0:20], post.id,
-                                                                                         subreddit_name))
-            s.add(post)
-    possible_spam_posts = [a for a in reddit_client.subreddit('mod').mod.spam(only='submissions')]
-    for post_to_review in possible_spam_posts:
-        previous_post = s.query(SubmittedPost).get(post_to_review.id)
-        if previous_post:
-            break
-        if not previous_post:
-            post = SubmittedPost(post_to_review)
-            subreddit_name = post.subreddit.lower()
-            if subreddit_name not in subreddit_names:
-                subreddit_names.append(subreddit_name)
-            logger.info("found spam post: '{0}...' http://redd.it/{1} ({2})".format(post.title[0:20], post.id,
-                                                                                         subreddit_name))
-            post.reviewed=True
-            s.add(post)
-    logger.debug("updating database...")
-    s.commit()
-    return subreddit_names
+
 
 
 def already_has_bot_comment(submission):
@@ -465,6 +444,8 @@ def find_previous_posts(tr_sub: TrackedSubreddit, recent_post: SubmittedPost):
 def look_for_rule_violations():
     global reddit_client
     global watched_subs
+
+
     authors = dict()
     logger.debug("gathering recent post(s)" )
     recent_posts = s.query(SubmittedPost) \
@@ -488,6 +469,8 @@ def look_for_rule_violations():
                     tr_sub.update_from_yaml(force_update=True)
                     s.add(tr_sub)
                     s.commit()
+
+
         tr_sub = watched_subs[subreddit_name]
         if subreddit_name not in authors:
             authors_tuple = s.query(SubmittedPost.author, func.count(SubmittedPost.author).label('qty')) \
@@ -1094,7 +1077,22 @@ def update_list_with_subreddit(subreddit_name: str):
     if not tr_sub:
         tr_sub = TrackedSubreddit(subreddit_name)
     else:
-        tr_sub.update_from_yaml(force_update=True)
+        try:
+            with open('zzz_{0}.pickle'.format(subreddit_name), 'rb') as f:
+                # The protocol version used is detected automatically, so we do not
+                # have to specify it.
+                tr_sub = pickle.load(f)
+        except pickle.UnpicklingError:
+            pass
+        except FileNotFoundError:
+            pass
+        if not tr_sub:
+
+            tr_sub.update_from_yaml(force_update=True)
+            with open('zzz_{0}.pickle'.format(subreddit_name), 'wb') as f:
+                # Pickle the 'data' dictionary using the highest protocol available.
+                pickle.dump(data, f)
+
 
     watched_subs[subreddit_name] = tr_sub
     s.add(tr_sub)
@@ -1123,22 +1121,116 @@ def purge_old_records_by_subreddit(tr_sub: TrackedSubreddit):
     #to_delete.delete()
     s.commit()
 
+def check_new_submissions2(query_limit=800):
+    global reddit_client
+    subreddit_names = []
+    subreddit_names_complete = []
+    logger.info("pulling new posts!")
+    possible_new_posts = [a for a in reddit_client.subreddit('mod').new(limit=query_limit)]
+    logger.info('found {0} posts'.format(len(possible_new_posts)))
+    for post_to_review in possible_new_posts:
+        subreddit_name = str(post_to_review.subreddit).lower()
+        if subreddit_name in subreddit_names_complete:
+            continue
+        previous_post = s.query(SubmittedPost).get(post_to_review.id)
+        if previous_post:
+            subreddit_names_complete.append(subreddit_name)
+            continue
+        if not previous_post:
+            post = SubmittedPost(post_to_review)
+            if subreddit_name not in subreddit_names:
+                subreddit_names.append(subreddit_name)
+            logger.info("found submitted post: '{0}...' http://redd.it/{1} ({2})".format(post.title[0:20], post.id,
+                                                                                         subreddit_name))
+            s.add(post)
+    possible_spam_posts = [a for a in reddit_client.subreddit('mod').mod.spam(only='submissions')]
+    for post_to_review in possible_spam_posts:
+        previous_post = s.query(SubmittedPost).get(post_to_review.id)
+        if previous_post:
+            break
+        if not previous_post:
+            post = SubmittedPost(post_to_review)
+            subreddit_name = post.subreddit.lower()
+            if subreddit_name not in subreddit_names:
+                subreddit_names.append(subreddit_name)
+            logger.info("found spam post: '{0}...' http://redd.it/{1} ({2})".format(post.title[0:20], post.id,
+                                                                                         subreddit_name))
+            post.reviewed=True
+            s.add(post)
+    logger.debug("updating database...")
+    s.commit()
+    return subreddit_names
+
+q = queue.Queue()
+
+
+
+
+"""
+def worker():
+    global reddit_client
+    sub_times = dict()
+    is_first_run = []
+    for post_to_review in reddit_client.subreddit('mod').new(limit=800):
+        subreddit_name = str(post_to_review.subreddit).lower()
+        if subreddit_name not in sub_times or subreddit_name in is_first_run:
+            sub_times[subreddit_name] = post_to_review.created_utc
+            is_first_run.append(subreddit_name)
+            q.put(post_to_review)
+        else:
+            if post_to_review.created_utc > sub_times[subreddit_name]:
+                sub_times[subreddit_name] = post_to_review.created_utc
+                q.put(post_to_review)
+            else:
+                continue
+
+"""
+
+def worker():
+    for submission in reddit_client.subreddit('mod').stream.submissions():
+        q.put(submission)
+    time.sleep(5)
+
+
+def check_new_submissions3():
+    for i in range(100):
+        item = q.get()
+        subreddit_name = str(item.subreddit).lower()
+        previous_post = s.query(SubmittedPost).get(item.id)
+        if not previous_post:
+            post = SubmittedPost(item)
+            logger.info("f{3} found submitted post: ' {0}...' http://redd.it/{1} ({2})".format(post.title[0:20],
+                                                                                         post.id,subreddit_name, i))
+            s.add(post)
+        q.task_done()
+
 def main_loop():
     global watched_subs
     load_settings()
     purge_old_records()
     tr_subs = dict()
     #update_list_with_all_active_subs()
+
+    first_run=True
+
+    #threading.Thread(target=worker, daemon=True).start()
+
     while True:
         # moderate_debates()
         # scan_comments_for_activity()
         # flag_all_submissions_for_activity()
         # recalculate_active_submissions()
         print('start_loop')
-        subs_to_update = check_new_submissions2()
-        print("substoupdate:")
-        print(subs_to_update)
+        #check_new_submissions3()
 
+        q_size = q.qsize()
+        print("queue size = ", q_size)
+        subs_to_update = check_new_submissions2()
+        if q_size <10 and not first_run:
+
+            print("substoupdate:")
+            print(subs_to_update)
+        first_run=False
         look_for_rule_violations()
 
         # update_TMBR_submissions(look_back=timedelta(days=7))
