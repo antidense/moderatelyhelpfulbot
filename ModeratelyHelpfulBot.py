@@ -55,6 +55,11 @@ class Broadcast(Base):
     def __init__(self, post):
         self.id = post.id
 
+def utcize(dt):
+    return dt.replace(tzinfo=timezone.utc)
+
+def utcnow:
+    return datetime.now.replace(tzinfo=timezone.utc)
 
 class Author():
     __tablename__ = 'Authors'
@@ -72,15 +77,149 @@ class SubAuthor(Base):
     __tablename__ = 'SubAuthors'
     subreddit_name = Column(String(21), nullable=False, primary_key=True)
     author_name = Column(String(21), nullable=False, primary_key=True)
-    currently_banned = Column(Boolean, nullable=True)
-    ban_count = Column(Boolean, nullable=True)
+    currently_banned = Column(Boolean, default=False )
+    ban_count = Column(Boolean, nullable=True, default=0)
     currently_backlisted = Column(Boolean, nullable=True)
     violation_count = Column(Integer, default=0)
     post_ids = Column(UnicodeText, nullable=True)
-    last_updated = Column(DateTime, nullable=True)
-    next_eligible = Column(DateTime, nullable=True)
+    last_updated = Column(DateTime, nullable=True, default=datetime.now())
+    next_eligible = Column(DateTime, nullable=True, default=datetime(2019, 1, 1, 0, 0))
     ban_last_failed = Column(DateTime, nullable=True)
+    #to_keep = Column(Boolean, nullable=True, default=False)
 
+    def __init__(self, subreddit_name: str, author_name: str):
+        self.subreddit_name=subreddit_name
+        self.author_name=author_name
+
+    def get_post_ids(self):
+        return self.post_ids.split(',')
+
+    def append_post_id(self, new_id):
+        post_ids =get_post_ids()
+        if new_id not in post_ids:
+            post_ids.append(new_ids)
+            post_ids = sorted(post_ids)
+            self.post_ids = ','.join(post_ids)
+
+    def find_previous_posts(self):
+        possible_reposts = s.query(SubmittedPost) \
+            .filter(SubmittedPost.flagged_duplicate.is_(False)) \
+            .filter(SubmittedPost.subreddit.ilike(tr_sub.subreddit_name)) \
+            .filter(SubmittedPost.time_utc >
+                    recent_post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins) \
+            .filter(SubmittedPost.time_utc < recent_post.time_utc) \
+            .filter(SubmittedPost.id != recent_post.id) \
+            .filter(SubmittedPost.author == recent_post.author) \
+            .order_by(SubmittedPost.time_utc) \
+            .all()
+        most_recent_reposts = []
+        for possible_repost in possible_reposts:
+            logger.info(
+                "possible repost of: {0}... http://redd.it/{1} -{2}".format(possible_repost.title[0:20], possible_repost.id,
+                                                                           datetime.now(pytz.utc).replace(
+                                                                               tzinfo=timezone.utc) - possible_repost.time_utc.replace(
+                                                                               tzinfo=timezone.utc)))
+            banned_by = possible_repost.get_api_handle().banned_by
+            if tr_sub.ignore_AutoModerator_removed and banned_by == "AutoModerator":
+                continue
+            if tr_sub.ignore_moderator_removed and banned_by in tr_sub.subreddit_mods:
+                continue
+            # ignore delete-and-repost (within the grace period)
+            if tr_sub.title_exempt_keyword is not None:
+                if tr_sub.title_exempt_keyword.lower() in possible_repost.title.lower():
+                    continue
+            if possible_repost.get_status() is not "up" \
+                    and ((recent_post.time_utc.replace(tzinfo=timezone.utc) - possible_repost.time_utc.replace(
+                tzinfo=timezone.utc)) < tr_sub.grace_period_mins):
+                continue
+            most_recent_reposts.append(possible_repost)
+            prev_submission = most_recent_reposts[-1]
+            next_eligibility = most_recent_reposts[0].time_utc + subreddit.min_post_interval
+
+    def find_actionable_violations(self):
+        possible_repost = most_recent_reposts[-1]
+        other_spam_by_author = s.query(SubmittedPost) \
+            .filter(SubmittedPost.flagged_duplicate.is_(True)) \
+            .filter(SubmittedPost.author == recent_post.author) \
+            .filter(SubmittedPost.subreddit.ilike(tr_sub.subreddit_name)) \
+            .filter(SubmittedPost.time_utc < recent_post.time_utc) \
+            .all()
+
+        logger.info("Author {0} had {1} rule violations. Banning if more than {2}"
+                    .format(recent_post.author, len(other_spam_by_author), tr_sub.ban_threshold_count))
+
+        if len(other_spam_by_author) >= tr_sub.ban_threshold_count:
+            num_days = tr_sub.ban_duration_days
+            if num_days < 1:
+                num_days = 1
+            if num_days > 998:
+                num_days = 0
+
+            str_prev_posts = ",".join([" [{0}]({1})".format(a.id, a.get_comments_url()) for a in other_spam_by_author])
+
+            ban_message = "You have made multiple rate-limiting violations (threshold of {0}): {1}.".format(
+                tr_sub.ban_threshold_count, str_prev_posts)
+            if num_days > 0:
+                ban_message += "\n\nYour ban will last {0} days from this message, ending at {1} UTC. " \
+                               "**Repeat infractions result in a permanent ban!**" \
+                               "".format(num_days, datetime.now(pytz.utc) + timedelta(days=num_days))
+            try:
+                if num_days > 0:
+
+                    reddit_client.subreddit(tr_sub.subreddit_name).banned.add(
+                        recent_post.author, ban_note="ModhelpfulBot: repeated spam", ban_message=ban_message[:999],
+                        duration=num_days)
+                else:
+
+                    reddit_client.subreddit(tr_sub.subreddit_name).banned.add(
+                        recent_post.author, ban_note="ModhelpfulBot: repeated spam", ban_message=ban_message[:999])
+                logger.info("Ban for {0} succeeded".format(recent_post.author))
+                response_lines = [
+                    "I banned {0} from this sub due to {1} rule violations over the threshold of {2}. "
+                    "You can adjust the threshold in your wiki settings.  "
+                    "Set 'notify_about_spammers: false' to not receive this message. \n\n.".format(
+                        recent_post.author, len(other_spam_by_author),
+                        tr_sub.ban_threshold_count)]
+
+
+
+
+    def update(self, post: SubmittedPost):
+        self.last_updated = utcnow()
+        if utcnow() < utcize(self.next_eligible):
+            self.violation_count+=1
+            self.to_keep = True
+            return "violation"
+        else:
+            return "no violation"
+
+
+
+
+    # Filter possible reposts (some maybe removed by automoderator or within grace period) - can't do in database
+    most_recent_reposts = []
+    for possible_repost in possible_reposts:
+        logger.info(
+            "possible repost of: {0}... http://redd.it/{1} -{2}".format(possible_repost.title[0:20], possible_repost.id,
+                                                                       datetime.now(pytz.utc).replace(
+                                                                           tzinfo=timezone.utc) - possible_repost.time_utc.replace(
+                                                                           tzinfo=timezone.utc)))
+        banned_by = possible_repost.get_api_handle().banned_by
+        if tr_sub.ignore_AutoModerator_removed and banned_by == "AutoModerator":
+            continue
+        if tr_sub.ignore_moderator_removed and banned_by in tr_sub.subreddit_mods:
+            continue
+        # ignore delete-and-repost (within the grace period)
+        if tr_sub.title_exempt_keyword is not None:
+            if tr_sub.title_exempt_keyword.lower() in possible_repost.title.lower():
+                continue
+        if possible_repost.get_status() is not "up" \
+                and ((recent_post.time_utc.replace(tzinfo=timezone.utc) - possible_repost.time_utc.replace(
+            tzinfo=timezone.utc)) < tr_sub.grace_period_mins):
+            continue
+        most_recent_reposts.append(possible_repost)
+    logger.info("----------------total {0} max {1}".format(len(most_recent_reposts), tr_sub.max_count_per_interval))
+    return most_recent_reposts
 
 class TrackedSubreddit(Base):
     __tablename__ = 'TrackedSubs7'
@@ -576,8 +715,16 @@ def look_for_rule_violations():
             logger.info("{0}-[{1}] mod post exempt ".format(index, subreddit_name))
             continue
 
+        """
+        subauthor = SubAuthor.get((subreddit_name, author_name))
+        if not subauthor:
+        else:
+            subauthor = SubAuthor(subreddit_name, author_name)
 
-
+        subauthor.update(recent_post)
+        if to_keep:
+            s.add(subauthor)
+        """
         associated_reposts = find_previous_posts(tr_sub, recent_post)
         verified_reposts_count = len(associated_reposts)
 
