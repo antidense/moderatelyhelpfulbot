@@ -2,12 +2,10 @@
 import humanize
 import iso8601
 import logging
-import pprint
 import praw
 import prawcore
 import pytz
 import queue
-import threading
 import time
 import yaml
 from datetime import datetime, timedelta, timezone
@@ -17,17 +15,14 @@ from sqlalchemy import *
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from typing import List
-import json
 from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET, BOT_OWNER, DB_ENGINE
-import pickle
+
 """
+To do list:
 add priority to posts
 """
 
-
 # Set up database
-
-
 engine = create_engine(DB_ENGINE)
 Base = declarative_base(bind=engine)
 
@@ -55,22 +50,6 @@ class Broadcast(Base):
     def __init__(self, post):
         self.id = post.id
 
-def utcize(dt):
-    return dt.replace(tzinfo=timezone.utc)
-
-def utcnow():
-    return datetime.now().replace(tzinfo=timezone.utc)
-
-class Author():
-    __tablename__ = 'Authors'
-    name = Column(String(21), nullable=True, primary_key=True)
-    subreddit = Column(String(21), nullable=True)
-    whitelist = []
-
-    # last_replied_to
-
-    def __init__(self, author):
-        self.name = author.name
 
 
 class SubmittedPost(Base):
@@ -171,6 +150,7 @@ class SubAuthor(Base):
     currently_blacklisted = Column(Boolean, nullable=True)
     violation_count = Column(Integer, default=0)
     post_ids = Column(UnicodeText, nullable=True)
+    blacklisted_post_ids = Column(UnicodeText, nullable=True)
     last_updated = Column(DateTime, nullable=True, default=datetime.now())
     next_eligible = Column(DateTime, nullable=True, default=datetime(2019, 1, 1, 0, 0))
     ban_last_failed = Column(DateTime, nullable=True)
@@ -178,19 +158,27 @@ class SubAuthor(Base):
 
     def __init__(self, subreddit_name: str, author_name: str):
         self.subreddit_name=subreddit_name
-        self.author_name=author_name
+        self.author_name = author_name
 
     def update_post_list(self, post_id, date):
-        pass
-        """
+        import json
         if not self.post_ids:
-            self.post_ids = json.dumps({post_id, date})
+            self.post_ids = json.dumps({post_id: date.timestamp()})
         else:
             post_ids_list = json.loads(self.post_ids)
             if post_id not in post_ids_list:
-                post_ids_list[post_id] = date
+                post_ids_list[post_id] = date.timestamp()
                 self.post_ids = json.dumps(post_ids_list)
-        """
+
+    def update_blacklisted_post_list(self, post_id, date):
+        import json
+        if not self.blacklisted_post_ids:
+            self.blacklisted_post_ids = json.dumps({post_id: date.timestamp()})
+        else:
+            blacklisted_post_ids_list = json.loads(self.blacklisted_post_ids)
+            if post_id not in blacklisted_post_ids_list:
+                blacklisted_post_ids_list[post_id] = date.timestamp()
+                self.blacklisted_post_ids = json.dumps(blacklisted_post_ids_list)
 
     def get_post_ids(self):
         return self.post_ids.split(',')
@@ -229,7 +217,7 @@ class SubAuthor(Base):
             if tr_sub.title_exempt_keyword is not None:
                 if tr_sub.title_exempt_keyword.lower() in possible_repost.title.lower():
                     continue
-            if possible_repost.get_status() is not "up" \
+            if possible_repost.get_status() != "up" \
                     and ((recent_post.time_utc.replace(tzinfo=timezone.utc) - possible_repost.time_utc.replace(
                 tzinfo=timezone.utc)) < tr_sub.grace_period_mins):
                 continue
@@ -570,7 +558,7 @@ def find_previous_posts(tr_sub: TrackedSubreddit, recent_post: SubmittedPost):
         if tr_sub.title_exempt_keyword is not None:
             if tr_sub.title_exempt_keyword.lower() in possible_repost.title.lower():
                 continue
-        if possible_repost.get_status() is not "up" \
+        if possible_repost.get_status() != "up" \
                 and ((recent_post.time_utc.replace(tzinfo=timezone.utc) - possible_repost.time_utc.replace(
             tzinfo=timezone.utc)) < tr_sub.grace_period_mins):
             continue
@@ -618,7 +606,7 @@ def look_for_rule_violations():
         if subreddit_author and subreddit_author.currently_blacklisted:
             was_successful = recent_post.mod_remove()
             if was_successful:
-                subreddit_author.update_post_list(recent_post.id, recent_post.time_utc)
+                subreddit_author.update_blacklisted_post_list(recent_post.id, recent_post.time_utc)
                 recent_post.reviewed = True
                 recent_post.pre_duplicate = True
                 logger.info("post removed - blacklisted user {0} {1} {2} {3}".format(recent_post.author, recent_post.get_url(), recent_post.subreddit, recent_post.title))
@@ -873,6 +861,8 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
             if not subreddit_author:
                 subreddit_author = SubAuthor(tr_sub.subreddit_name, recent_post.author)
             if len(other_spam_by_author)>10:
+                for other_spam in other_spam_by_author:
+                    subreddit_author.update_post_list(other_spam.id, other_spam.time_utc)
                 subreddit_author.currently_blacklisted = True
             subreddit_author.ban_count = len(other_spam_by_author) + 1
             #subreddit_author.update_bans(recent_post)
@@ -1075,7 +1065,6 @@ def do_automated_approvals():
 
 def handle_direct_messages():
     # Reply to pms or
-    global BOT_OWNER
     global watched_subs
     for message in reddit_client.inbox.unread(limit=None):
         logger.info("got this email {0} {1} {2} | {3}".format(message, message.body, message.author, message.subject))
@@ -1143,6 +1132,7 @@ def handle_direct_messages():
             subreddit_name = message.subject.lower().replace("re: ", "")
             tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
             if tr_sub:
+                moderators = tr_sub.subreddit_mods
                 if author_name not in moderators and author_name != BOT_OWNER:
                     message.reply(
                         "You do not have permission to do this. Are you sure you are a moderator of {}?".format(
@@ -1245,7 +1235,10 @@ def handle_modmail_messages():
                 logger.debug("to reply {0}".format(tr_sub.modmail_no_posts_reply))
                 if tr_sub.modmail_no_posts_reply:
                     response = populate_tags(tr_sub.modmail_no_posts_reply, None, tr_sub=tr_sub)
-                    convo.reply(response, internal=tr_sub.modmail_no_posts_reply_internal)
+                    try:
+                        convo.reply(response, internal=tr_sub.modmail_no_posts_reply_internal)
+                    except prawcore.exceptions.BadRequest:
+                        pass
             convo.read()
             record_actioned(convo.id)
         else:
@@ -1468,7 +1461,8 @@ def main_loop():
         # subs_to_update = check_new_submissions2()
         # print("substoupdate:")
         # print(subs_to_update)
-        check_spam_submissions()
+
+        #check_spam_submissions()  - don't need to anymore?
 
         #check_new_submissions3()
 
@@ -1530,4 +1524,12 @@ def init_logger(logger_name, filename=None):
 logger = init_logger("mhbot_log")
 EASTERN_TZ = pytz.timezone("US/Eastern")
 
+
+def utcize(dt):
+    return dt.replace(tzinfo=timezone.utc)
+
+def utcnow():
+    return datetime.now().replace(tzinfo=timezone.utc)
+
 main_loop()
+
