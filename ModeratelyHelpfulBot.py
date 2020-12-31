@@ -20,13 +20,15 @@ from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET, BOT_OWNER, DB_E
 """
 To do list:
 add priority to posts
+asyncio 
+
 """
 
 # Set up database
 engine = create_engine(DB_ENGINE)
 Base = declarative_base(bind=engine)
 
-# Set up praw
+# Set up PRAW
 reddit_client = praw.Reddit(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, password=BOT_PW,
                             user_agent="ModeratelyHelpfulBot v0.4", username=BOT_NAME)
 
@@ -49,7 +51,6 @@ class Broadcast(Base):
 
     def __init__(self, post):
         self.id = post.id
-
 
 
 class SubmittedPost(Base):
@@ -179,16 +180,6 @@ class SubAuthor(Base):
             if post_id not in blacklisted_post_ids_list:
                 blacklisted_post_ids_list[post_id] = date.timestamp()
                 self.blacklisted_post_ids = json.dumps(blacklisted_post_ids_list)
-
-    def get_post_ids(self):
-        return self.post_ids.split(',')
-
-    def append_post_id(self, new_id):
-        post_ids =get_post_ids()
-        if new_id not in post_ids:
-            post_ids.append(new_ids)
-            post_ids = sorted(post_ids)
-            self.post_ids = ','.join(post_ids)
 
     def find_previous_posts(self):
         possible_reposts = s.query(SubmittedPost) \
