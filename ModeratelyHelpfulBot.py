@@ -339,7 +339,7 @@ class TrackedSubreddit(Base):
                     #    logger.warning("invalid type in yaml")
                     setattr(self, pr_setting, pr_settings[pr_setting])
                 else:
-                    return_text = "Did not understand variable '{}'".format(pr_setting)
+                    return_text = "Did not understand variable '{}' for {}".format(pr_setting, self.subreddit_name)
                     print(return_text)
 
             if 'min_post_interval_mins' in pr_settings:
@@ -935,19 +935,73 @@ def do_automated_approvals():
             record_actioned("screened_" + convo.id)
 
 
+def handle_dm_command(subreddit_name, author_name, command, parameters):
+    response = ""
+    subreddit_name = subreddit_name[2:] if subreddit_name.startswith('r/') else subreddit_name
+    subreddit_name = subreddit_name[3:] if subreddit_name.startswith('/r/') else subreddit_name
+    command = command[1:] if command.startswith("$") else command
+    tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
+    if not tr_sub:
+        return "Error retrieving information for /r/{}".format(subreddit_name)
+    moderators = tr_sub.subreddit_mods
+    if author_name not in moderators and author_name != BOT_OWNER:
+        return "You do not have permission to do this. Are you sure you are a moderator of {}?"\
+            .format(subreddit_name)
+
+    if command == "summary":
+        author_name_to_check = parameters[0] if parameters else None
+        if not author_name_to_check:
+            return "No author name given"
+        return tr_sub.get_author_summary(author_name_to_check)
+    elif command == "stats":
+        return tr_sub.get_sub_stats()
+    elif command == "hallpass":
+        author_name_to_check = parameters[0] if parameters else None
+        if not author_name_to_check:
+            return "No author name given"
+        subreddit_author = s.query(SubAuthor).get((subreddit_name, author_name_to_check))
+        if not subreddit_author:
+            subreddit_author = SubAuthor(tr_sub.subreddit_name, author_name_to_check)
+        subreddit_author.hall_pass = 1
+        s.add(subreddit_author)
+        return_text = "User {} has been granted a hall pass. "\
+                      "This means the next post by the user in this subreddit will not be automatically removed."\
+                      .format(author_name_to_check)
+        return return_text
+
+    elif command == "update":
+        worked, status = tr_sub.update_from_yaml(force_update=True)
+        reply_text = "Received message to update config for {0}.  See the output below. " \
+                     "If you get a 404 error, it means that the config page needs to be created. " \
+                     "If you get a 503 error, it means the bot doesn't have wiki permissions. " \
+                     "If you get a 'yaml' error, there is an error in your syntax. " \
+                     "Please message [/r/moderatelyhelpfulbot](https://www.reddit.com/" \
+                     "message/compose?to=%2Fr%2Fmoderatelyhelpfulbot) if you have any questions \n\n" \
+                     "Update report: \n\n >{1}" \
+            .format(subreddit_name, status, )
+        bot_owner_message = "subreddit: {0}\n\nrequestor: {1}\n\nreport: {2}" \
+            .format(subreddit_name, author_name, status)
+        reddit_client.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
+        s.add(tr_sub)
+        s.commit()
+        return reply_text
+    else:
+        return "I did not understand that command"
+
+
 def handle_direct_messages():
     # Reply to pms or
     global watched_subs
     for message in reddit_client.inbox.unread(limit=None):
-        logger.info("got this email author:{} subj:{}  body:{} ".format(message.subject, message.body, message.author))
+        logger.info("got this email author:{} subj:{}  body:{} ".format(message.author, message.subject, message.body))
 
         # Get author name, message_id if available
         author_name = message.author.name if message.author else None
         message_id = reddit_client.comment(message.id).link_id if message.was_comment else message.name
         body_parts = message.body.split(' ')
-        command = body_parts[0] if len(body_parts) > 1 else None
+        command = body_parts[0].lower() if len(body_parts) > 0 else None
         subreddit_name = message.subject.replace("re: ", "") if command else None
-
+        print("command: {}".format(command))
         # First check if already actioned
         if check_actioned(message_id):
             message.mark_read()  # should have already been "read"
@@ -971,70 +1025,10 @@ def handle_direct_messages():
         # Respond to an invitation to moderate
         elif message.subject.startswith('invitation to moderate'):
             mod_mail_invitation_to_moderate(message)
-        elif message.body.lower().startswith("summary"):
+        elif command in ("summary", "update", "stats") or command.startswith("$"):
             subreddit_name = message.subject.lower().replace("re: ", "")
-            tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
-            author_name_to_check = message.body.lower().replace("summary ", "")
-            if tr_sub:
-                message.reply(tr_sub.get_author_summary(author_name_to_check)[:999])
-        elif message.body.lower().startswith("unblacklist"):
-            subreddit_name = message.subject.lower().replace("re: ", "")
-            subreddit_name = subreddit_name.replace("r/", "")
-            subreddit_name = subreddit_name.replace("/r/", "")
-            tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
-            moderators = tr_sub.subreddit_mods
-            if author_name not in moderators and author_name != BOT_OWNER:
-                message.reply(
-                    "You do not have permission to do this. Are you sure you are a moderator of {}?".format(
-                        subreddit_name))
-
-            else:
-                if tr_sub:
-                    username = message.body.lower().replace("unblacklist ", "")
-                    subauthor = s.query(SubAuthor).filter(SubAuthor.author_name.ilike(username)).filter(SubAuthor.subreddit_name==subreddit_name).first()
-                    if subauthor and subauthor.currently_blacklisted:
-                        subauthor.currently_blacklisted = False
-                        s.add(subauthor)
-                        s.commit()
-                        message.reply("user {0} for subreddit {1} successfully unblacklisted".format(username, subreddit_name))
-                    else:
-                        message.reply("user {0} for subreddit {1} is currently not blacklisted".format(username, subreddit_name))
-            # Respond to a command (update)
-        elif message.body.lower() == "stats":
-            subreddit_name = message.subject.lower().replace("re: ", "")
-            tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
-            if tr_sub:
-                message.reply(tr_sub.get_sub_stats())
-            message.mark_read()
-        elif message.body.lower() == "update":
-            subreddit_name = message.subject.lower().replace("re: ", "")
-            tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
-            if tr_sub:
-                moderators = tr_sub.subreddit_mods
-                if author_name not in moderators and author_name != BOT_OWNER:
-                    message.reply(
-                        "You do not have permission to do this. Are you sure you are a moderator of {}?".format(
-                            subreddit_name))
-                else:
-                    worked, status = tr_sub.update_from_yaml(force_update=True)
-                    reply_text = "Received message to update config for {0}.  See the output below. " \
-                                 "If you get a 404 error, it means that the config page needs to be created. " \
-                                 "If you get a 503 error, it means the bot doesn't have wiki permissions. " \
-                                 "If you get a 'yaml' error, there is an error in your syntax. " \
-                                 "Please message [/r/moderatelyhelpfulbot](https://www.reddit.com/" \
-                                 "message/compose?to=%2Fr%2Fmoderatelyhelpfulbot) if you have any questions \n\n" \
-                                 "Update report: \n\n >{1}" \
-                        .format(subreddit_name, status, )
-                    message.reply(reply_text)
-                    bot_owner_message = "subreddit: {0}\n\nrequestor: {1}\n\nreport: {2}" \
-                        .format(subreddit_name, author_name, status)
-                    reddit_client.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
-                    s.add(tr_sub)
-                    s.commit()
-            message.mark_read()
-            continue
-
-        # Respond to author (only once)
+            response = handle_dm_command(subreddit_name, author_name, command, body_parts[1:])
+            message.reply(response[:999])
         elif author_name and not check_actioned(author_name):
             try:
                 message.reply("Hi, thank you for messaging me! "
@@ -1068,7 +1062,6 @@ def mod_mail_invitation_to_moderate(message):
 
 def handle_modmail_messages():
     global watched_subs
-    subs_to_purge = []
     for convo in reddit_client.subreddit('all').modmail.conversations(state="all", sort='unread', limit=15):
         last_updated_dt = iso8601.parse_date(convo.last_updated)
         if last_updated_dt < datetime.now(timezone.utc) - timedelta(hours=24):
@@ -1076,17 +1069,17 @@ def handle_modmail_messages():
             continue
         author_name = convo.authors[0].name
         subreddit_name = convo.owner.display_name
-        # tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
         if subreddit_name not in watched_subs:
             update_list_with_subreddit(subreddit_name)
         tr_sub = watched_subs[subreddit_name]
         if not tr_sub:
             continue
-        subs_to_purge.append(tr_sub)
-        if author_name in tr_sub.subreddit_mods:
+        # Ignore conversations initiated by Automoderator
+        if author_name == "AutoModerator":
             convo.read()
             continue
-        if author_name == "AutoModerator":
+        # Ignore conversations initiated by moderators
+        if author_name in tr_sub.subreddit_mods:
             convo.read()
             continue
         print(
@@ -1132,10 +1125,7 @@ def handle_modmail_messages():
             convo.read()
             record_actioned(last_message.id)
         convo.read()
-    # for sub in subs_to_purge:
-    #    if sub:
-    #        print("purging "+sub.subreddit_name)
-    #        sub.modmail.bulk_read(state='new')
+
 
     # properties for message: body_markdown, author.name, id, is_internal, date
     # properties for convo: authors (list), messages,
@@ -1213,16 +1203,6 @@ def check_new_submissions2a(query_limit=800):
             post = SubmittedPost(post_to_review)
             if subreddit_name not in subreddit_names:
                 subreddit_names.append(subreddit_name)
-            #logger.info("found submitted post:")
-            """
-            subauthor = s.query(SubAuthor).get((subreddit_name, post_to_review.author.name))
-            if subauthor and subauthor.currently_blacklisted:
-                was_successful = post.mod_remove()
-                if was_successful:
-                    post.reviewed = True
-                    post.pre_duplicate = True
-                    logger.info("post removed - blacklisted user")
-            """
             s.add(post)
             count += 1
     logger.info('found {0} posts'.format(count))
@@ -1286,44 +1266,6 @@ def worker():
             already_seen = already_seen[:(10000 - len(already_seen))]
 
         time.sleep(30)
-
-
-def check_new_submissions3():
-    #already_seen = []
-    count = 0
-    for i in range(200):
-        post = SubmittedPost(q.get())
-        subreddit_name = post.subreddit.lower()
-        previous_post = s.query(SubmittedPost).get(post.id)
-        if not previous_post:
-            count += 1
-            logger.info("f{0}/{4} found submitted post: ' {1}...' http://redd.it/{2} ({3})".format(i, post.title[0:20],
-                                                                                               post.id, subreddit_name,
-                                                                                                   count ))
-            #already_seen.append(post.id)
-            #check if blacklisted:
-
-            subauthor = s.query(SubAuthor).get((subreddit_name, post.author))
-            if subauthor and subauthor.currently_blacklisted:
-                was_successful = post.mod_remove()
-                if was_successful:
-                    post.reviewed = True
-                    post.pre_duplicate = True
-                    logger.info("post should be removed - blacklisted user")
-
-
-            s.add(post)
-        q.task_done()
-    #if len(already_seen) > 2000:
-     #   already_seen = already_seen[:(2000 - len(already_seen))]
-    # open a file, where you ant to store the data
-   # file = open('already_seen.pickle', 'wb')
-    # dump information to that file
-    #pickle.dump(already_seen, open("already_seen.pickle", "wb"))
-    # close the file
-    #file.close()
-    s.commit()
-
 
 def main_loop():
     global watched_subs
