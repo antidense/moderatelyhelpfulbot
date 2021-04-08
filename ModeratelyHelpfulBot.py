@@ -17,6 +17,8 @@ from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET, BOT_OWNER, DB_E
 import json
 """
 To do list:
+Post restricting by flair!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 put back "i couldn't find posts from you" for /r/dating
 foreverignore
 add priority to posts
@@ -32,7 +34,7 @@ citerulelong
 ban
 """
 
-ACCEPTING_NEW_SUBS = True
+ACCEPTING_NEW_SUBS = False
 LOOK_BACK_INTERVAL_HRS = 24
 link_regex = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
 reddit_regex = '/r/dating/comments/([^/]*)/'
@@ -245,6 +247,7 @@ class TrackedSubreddit(Base):
     title_exempt_keyword = None
     action = None
     modmail = None
+    message = None
     report_reason = None
     comment = None
     distinguish = True
@@ -252,7 +255,7 @@ class TrackedSubreddit(Base):
     exempt_link_posts = False
     exempt_moderator_posts = True
     exempt_oc = False
-    modmail_posts_reply = None
+    modmail_posts_reply = True
     modmail_no_posts_reply = None
     modmail_no_posts_reply_internal = False
     modmail_notify_replied_internal = True
@@ -321,6 +324,7 @@ class TrackedSubreddit(Base):
                 'action': str,
                 'modmail': str,
                 'comment': str,
+                'message': str,
                 'report_reason': str,
                 'distinguish': bool,
                 'exempt_link_posts': bool,
@@ -336,6 +340,7 @@ class TrackedSubreddit(Base):
                 'exempt_oc': bool,
                 'title_not_exempt_keyword': str,
                 'blacklist_enabled': bool,
+
 
 
                 }
@@ -567,6 +572,32 @@ def check_for_post_exemptions(tr_sub, recent_post):
 
 
 
+def look_for_rule_violations2():
+    global reddit_client
+    global watched_subs
+    logger.debug("querying recent post(s)")
+
+    current_datetime = datetime.now(pytz.utc)
+
+    subreddit_names = s.query(SubmittedPost.subreddit)\
+        .filter(SubmittedPost.reviewed.is_(False)) \
+        .order_by(desc(SubmittedPost.time_utc)) \
+        .limit(100) \
+        .distinct()
+    for subreddit_name in subreddit_names:
+        subreddit_name = subreddit_name.lower()
+        tr_sub = None
+        if subreddit_name not in watched_subs:
+            tr_sub = update_list_with_subreddit(subreddit_name)
+        if not tr_sub:
+            continue
+
+        author_tuples = s.query(SubmittedPost.author, func.count(SubmittedPost.author).label('qty')) \
+            .filter(SubmittedPost.subreddit.ilike(subreddit_name)) \
+            .filter(SubmittedPost.time_utc > current_datetime - tr_sub.min_post_interval + tr_sub.grace_period_mins) \
+            .group_by(SubmittedPost.author).order_by(desc('qty')).all()
+
+
 def look_for_rule_violations():
     global reddit_client
     global watched_subs
@@ -609,8 +640,10 @@ def look_for_rule_violations():
         tr_sub = watched_subs[subreddit_name]
 
         # Check if they're on the watchlist
-        recent_post.author = recent_post.author.lower()
+        #recent_post.author = recent_post.author.lower()
         subreddit_author = s.query(SubAuthor).get((subreddit_name, recent_post.author))
+#        if not subreddit_author:
+#            subreddit_author = s.query(SubAuthor).filter(SubAuthor.subreddit_name == subreddit_name, SubAuthor)
         # hall pass
         if subreddit_author and subreddit_author.hall_pass > 0:
             subreddit_author.hall_pass -= 1
@@ -619,7 +652,7 @@ def look_for_rule_violations():
             recent_post.counted_status = 1
             s.add(recent_post)
             send_modmail(tr_sub, recent_post, None, "Hall pass was used by {}: http://redd.it/{}".format(
-                             subreddit_author, recent_post.id))
+                             subreddit_author.name, recent_post.id))
 
             continue
 
@@ -682,7 +715,7 @@ def look_for_rule_violations():
             recent_post.author,
             recent_post.id,
             recent_post.subreddit,
-            result
+            recent_post.time_utc
         ))
         if counted_status == 0:
             recent_post.counted_status = 0
@@ -737,6 +770,10 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
             recent_post.get_api_handle().report(("ModeratelyHelpfulBot:" + rp_reason)[0:99])
         else:
             recent_post.get_api_handle().report("ModeratelyHelpfulBot: repeatedly exceeding posting threshold")
+    if tr_sub.message and recent_post.author:
+        recent_post.get_api_handle().author.message("Regarding your post",
+                                                    populate_tags(tr_sub.message, recent_post, tr_sub=tr_sub,
+                                                                        prev_posts=most_recent_reposts))
 
 
 def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: SubmittedPost,
@@ -821,7 +858,7 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
 def populate_tags(input_text, recent_post, tr_sub=None, prev_post=None, prev_posts=None):
     if not isinstance(input_text, str):
         print("error: {0} is not a string".format(input_text))
-        return "error: {0} is not a string"
+        return "error: `{0}` is not a string in your config".format(str(input_text))
     if prev_posts and not prev_post:
         prev_post = prev_posts[0]
     if prev_posts and "{summary table}" in input_text:
@@ -843,7 +880,6 @@ def populate_tags(input_text, recent_post, tr_sub=None, prev_post=None, prev_pos
         input_text = input_text.replace("{timedelta}", humanize.naturaltime(datetime.now() - prev_post.time_utc))
     if recent_post:
         input_text = input_text.replace("{author}", recent_post.author)
-        input_text = input_text.replace("{title}", recent_post.title)
         input_text = input_text.replace("{title}", recent_post.title)
         input_text = input_text.replace("{url}", recent_post.get_url())
 
@@ -911,6 +947,9 @@ def check_actioned(comment_id):
 
 
 def record_actioned(comment_id):
+    response = s.query(ActionedComments).get(comment_id)
+    if response:
+        return
     s.add(ActionedComments(comment_id))
     s.commit()
 
@@ -990,14 +1029,19 @@ def handle_dm_command(subreddit_name, author_name, command, parameters) -> (str,
         if author_name_to_check.startswith('u/'):
             author_name_to_check = author_name_to_check.replace("u/", "")
         author_name_to_check = author_name_to_check.lower()
-        subreddit_author = s.query(SubAuthor).get((subreddit_name, author_name_to_check))
+        actual_author = reddit_client.redditor(author_name_to_check)
+        _ = actual_author.id  # force load actual username capitalization
+        if not actual_author:
+            return "could not find that username `{}`".format(author_name_to_check), True
+
+        subreddit_author = s.query(SubAuthor).get((subreddit_name, actual_author.name))
         if not subreddit_author:
-            subreddit_author = SubAuthor(tr_sub.subreddit_name, author_name_to_check)
+            subreddit_author = SubAuthor(tr_sub.subreddit_name, actual_author.name)
         subreddit_author.hall_pass = 1
         s.add(subreddit_author)
         return_text = "User {} has been granted a hall pass. "\
                       "This means the next post by the user in this subreddit will not be automatically removed."\
-                      .format(author_name_to_check)
+                      .format(actual_author.name)
         return return_text, False
     elif command == "citerule" or command == "testciterule":
         if not parameters:
@@ -1112,6 +1156,10 @@ def handle_direct_messages():
         elif message.subject.startswith('username mention'):
             message.mark_read()
             continue
+        # Check if this a user mention (just ignore this)
+        elif message.subject.startswith('moderator added'):
+            message.mark_read()
+            continue
         # Check if this is a ban notice (not new modmail)
         elif message.subject.startswith("re: You've been temporarily banned from participating"):
             message.mark_read()
@@ -1123,7 +1171,7 @@ def handle_direct_messages():
                         message.reply(tr_sub.get_author_summary(author_name))
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
-            record_actioned(check_actioned("ban_note: {0}".format(author_name)))
+            record_actioned("ban_note: {0}".format(author_name))
         # Respond to an invitation to moderate
         elif message.subject.startswith('invitation to moderate'):
             mod_mail_invitation_to_moderate(message)
@@ -1224,14 +1272,18 @@ def handle_modmail_message(convo):
                         .filter(SubmittedPost.subreddit.ilike(subreddit_name)) \
                         .filter(SubmittedPost.author == initiating_author_name).all()
                 if recent_posts:
-                    response = ">" + convo.messages[0].body_markdown.replace("\n\n", "\n\n>")
-                    response += populate_tags("\n\n{summary table}\n\n**Please don't forget to change to 'reply as the "
-                                             "subreddit' below!!**\n\n"
-                                             "Available Commands: $summary `username`, $update, $hallpass `username`, "
-                                             "$unban `username`, $approve `postid`, $remove `postid`, $citerule `#` "
-                                             "\n\nPlease subscribe to /r/ModeratelyHelpfulBot for updates"
-                                             , None, prev_posts=recent_posts)
-                    response_internal = True
+                    if tr_sub.modmail_posts_reply and tr_sub.modmail_posts_reply is not True:
+                        response = populate_tags(tr_sub.modmail_posts_reply, None,  prev_posts=recent_posts)
+                        response_internal = False
+                    elif tr_sub.modmail_posts_reply:
+                        response = ">" + convo.messages[0].body_markdown.replace("\n\n", "\n\n>")
+                        response += populate_tags("\n\n{summary table}\n\n**Please don't forget to change to 'reply as the "
+                                                 "subreddit' below!!**\n\n"
+                                                 "Available Commands: $summary `username`, $update, $hallpass `username`, "
+                                                 "$unban `username`, $approve `postid`, $remove `postid`, $citerule `#` "
+                                                 "\n\nPlease subscribe to /r/ModeratelyHelpfulBot for updates"
+                                                 , None, prev_posts=recent_posts)
+                        response_internal = True
                 elif tr_sub.modmail_no_posts_reply:
                     response = ">" + convo.messages[0].body_markdown.replace("\n\n", "\n\n>") + "\n\n\n\n"
                     response += populate_tags(tr_sub.modmail_no_posts_reply, None, tr_sub=tr_sub)
@@ -1279,7 +1331,7 @@ def handle_modmail_messages():
         #     print("from {} body: {}".format(reply.author.name, reply.body))
         # Message is type of SubredditMessage
         subreddit_name = message.subreddit.display_name
-        if len(message.replies) == 1:
+        if len(message.replies) == 0:
             if subreddit_name not in watched_subs:
                 update_list_with_subreddit(subreddit_name)
             tr_sub = watched_subs[subreddit_name]
@@ -1288,6 +1340,9 @@ def handle_modmail_messages():
         message.mark_read()
 
     for convo in reddit_client.subreddit('all').modmail.conversations(state="mod", sort='unread', limit=15):
+        handle_modmail_message(convo)
+
+    for convo in reddit_client.subreddit('all').modmail.conversations(state="join_requests", sort='unread', limit=15):
         handle_modmail_message(convo)
 
     for convo in reddit_client.subreddit('all').modmail.conversations(state="all", sort='unread', limit=15):
@@ -1405,6 +1460,7 @@ def main_loop():
     purge_old_records()
     # update_list_with_all_active_subs()
     # threading.Thread(target=worker, daemon=True).start()
+    dating_handle = reddit_client.subreddit("dating")
 
     while True:
         # moderate_debates()
@@ -1412,6 +1468,8 @@ def main_loop():
         # flag_all_submissions_for_activity()
         # recalculate_active_submissions()
         print('start_loop')
+
+
 
         check_new_submissions2a()
 
