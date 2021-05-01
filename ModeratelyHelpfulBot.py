@@ -231,13 +231,15 @@ class TrackedSubreddit(Base):
     last_updated = Column(DateTime, nullable=True)
     last_error_msg = Column(DateTime, nullable=True)
     save_text = Column(Boolean, nullable=True)
+    max_count_per_interval = Column(Integer, nullable=False, default=1)
+    min_post_interval_mins = Column(Integer, nullable=False, default=60*72)
+
     subreddit_mods = []
     rate_limiting_enabled = False
     min_post_interval_hrs = 72
     min_post_interval = timedelta(hours=72)
     grace_period_mins = timedelta(minutes=30)
     ban_duration_days = 0
-    max_count_per_interval = 1
     ignore_AutoModerator_removed = True
     ignore_moderator_removed = True
     ban_threshold_count = 5
@@ -361,10 +363,12 @@ class TrackedSubreddit(Base):
             if 'min_post_interval_hrs' in pr_settings:
                 self.min_post_interval = timedelta(hours=pr_settings['min_post_interval_hrs'])
                 self.min_post_interval_hrs = pr_settings['min_post_interval_hrs']
+            self.min_post_interval_mins = self.min_post_interval.total_seconds()//60
             if 'grace_period_mins' in pr_settings and pr_settings['grace_period_mins'] is not None:
                 self.grace_period_mins = timedelta(minutes=pr_settings['grace_period_mins'])
             if not self.ban_threshold_count:
                 self.ban_threshold_count = 5
+
 
         if 'modmail' in self.settings_yaml:
             m_settings = self.settings_yaml['modmail']
@@ -383,6 +387,9 @@ class TrackedSubreddit(Base):
             self.min_post_interval = timedelta(hours=72)
         if not self.grace_period_mins:
             self.grace_period_mins = timedelta(minutes=30)
+
+        if not self.max_count_per_interval:
+            self.max_count_per_interval = 1
 
         self.last_updated = datetime.now()
         return True, return_text
@@ -1210,7 +1217,7 @@ def mod_mail_invitation_to_moderate(message):
                       .format(subreddit_name))
     else:
         message.reply("Unfortunately ModeratelyHelpfulBot is not **automatically** accepting new subreddits at this time"
-                      "due to high usage load.")
+                      " due to high usage load.")
     message.mark_read()
 
 
@@ -1387,6 +1394,9 @@ def purge_old_records(days=14):
         .filter(SubmittedPost.time_utc < datetime.now() - timedelta(days=days)) \
         .filter(SubmittedPost.flagged_duplicate.is_(False)) \
         .filter(SubmittedPost.pre_duplicate.is_(False)) \
+        .delete()
+    to_delete = s.query(SubmittedPost) \
+        .filter(SubmittedPost.time_utc < datetime.now() - timedelta(days=90)) \
         .delete()
     s.commit()
 
