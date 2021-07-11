@@ -1536,21 +1536,6 @@ def handle_modmail_messages():
     print("checking modmail")
     global watched_subs
 
-    # Old modmail
-    for message in reddit_client.subreddit("mod").mod.inbox(limit=5):
-        # print("from {} body: {}".format(message.author.name, message.body))
-        # for reply in message.replies:
-        #     print("from {} body: {}".format(reply.author.name, reply.body))
-        # Message is type of SubredditMessage
-        subreddit_name = message.subreddit.display_name
-        if len(message.replies) == 0:
-            if subreddit_name not in watched_subs:
-                update_list_with_subreddit(subreddit_name)
-            tr_sub = watched_subs[subreddit_name]
-            if tr_sub and tr_sub.modmail_all_reply:
-                message.reply(populate_tags(tr_sub.modmail_all_reply, None, tr_sub=tr_sub))
-        message.mark_read()
-
     for convo in reddit_client.subreddit('all').modmail.conversations(state="mod", sort='unread', limit=15):
         handle_modmail_message(convo)
 
