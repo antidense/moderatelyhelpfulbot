@@ -403,8 +403,8 @@ class TrackedSubreddit(Base):
         self.last_updated = datetime.now()
 
         if self.ban_duration_days == 0:
-            return False, "ban_duration_days can no longer be zero. Use `ban_duration_days:~` to disable or use " \
-                          "`ban_duration_days:999` for permanent bans"
+            return False, "ban_duration_days can no longer be zero. Use `ban_duration_days: ~` to disable or use " \
+                          "`ban_duration_days: 999` for permanent bans. Make sure there is a space after the colon."
 
         return True, return_text
 
@@ -908,11 +908,14 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
                 "Please note that you are close approaching your posting limit for {}".format(
                     recent_post.subreddit_name),
                 "This subreddit only allows {} post(s) per {} hour(s). "
+                "This may include self-deleted and mod-removed posts depending on "
+                "how the subreddit moderators configured this bot. "
                 "Further posting may result in a ban from the subreddit. "
                 "After this post, your next eligibility to post is: {} UTC. "
-                "This is an automated message.".format(tr_sub.max_count_per_interval, tr_sub.min_post_interval_hrs,
-                                                       recent_post.subreddit_name,
-                                                       most_recent_reposts[0].time_utc + tr_sub.min_post_interval)
+                "This is an automated message sent out to anyone who is close to their limit. "
+                "It may not always get sent out, however, due to reddit limitations. "
+                .format(tr_sub.max_count_per_interval, tr_sub.min_post_interval_hrs,
+                        most_recent_reposts[0].time_utc + tr_sub.min_post_interval)
             )
         except praw.exceptions.APIException:
             pass
@@ -1215,6 +1218,26 @@ def handle_dm_command(subreddit_name, requestor_name, command, parameters) -> (s
                       "This means the next post by the user in this subreddit will not be automatically removed." \
             .format(actual_author.name)
         return return_text, False
+    elif command == "blacklist":
+        author_name_to_check = parameters[0] if parameters else None
+        if not author_name_to_check:
+            return "No author name given", True
+        if author_name_to_check.startswith('u/'):
+            author_name_to_check = author_name_to_check.replace("u/", "")
+        author_name_to_check = author_name_to_check.lower()
+        actual_author = reddit_client.redditor(author_name_to_check)
+        _ = actual_author.id  # force load actual username capitalization
+        if not actual_author:
+            return "could not find that username `{}`".format(author_name_to_check), True
+
+        subreddit_author = s.query(SubAuthor).get((subreddit_name, actual_author.name))
+        if not subreddit_author:
+            subreddit_author = SubAuthor(tr_sub.subreddit_name, actual_author.name)
+        subreddit_author.currently_blacklisted = True
+        s.add(subreddit_author)
+        return_text = "User {} has been blacklisted from modmail. " \
+            .format(actual_author.name)
+        return return_text, True
     elif command == "citerule" or command == "testciterule":
         if not parameters:
             return "No rule # given", True
@@ -1381,7 +1404,8 @@ def handle_direct_messages():
                 message.reply("Hi, thank you for messaging me! "
                               "I am a non-sentient bot, and I act only in the accordance of the rules set by the "
                               "moderators "
-                              "of the subreddit. Unfortunately, I am unable to answer or direct requests.")
+                              "of the subreddit. Unfortunately, I am unable to answer or direct requests. Please "
+                              "see this [link](https://www.reddit.com/r/SolariaHues/comments/mz7zdp/guide_how_to_send_a_modmail_to_the_mods_of_a/) for further help on how to contact the moderators.")
                 import pprint
 
                 # assume you have a Reddit instance bound to variable `reddit`
@@ -1442,6 +1466,11 @@ def handle_modmail_message(convo):
     if convo.num_messages == 1 \
             and initiating_author_name not in tr_sub.subreddit_mods \
             and initiating_author_name != "AutoModerator":
+
+        subreddit_author = s.query(SubAuthor).get((subreddit_name, initiating_author_name))
+        if subreddit_author and subreddit_author.currently_blacklisted:
+            convo.reply("This author is modmail-blacklisted", internal=True)
+            convo.archive()
 
         # Automated approvals
         if tr_sub.modmail_auto_approve_messages_with_links:
