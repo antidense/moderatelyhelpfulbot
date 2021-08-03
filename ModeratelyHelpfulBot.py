@@ -303,7 +303,8 @@ class TrackedSubreddit(Base):
                 if wiki_page:
                     self.settings_yaml_txt = wiki_page.content_md
                     self.settings_revision_date = wiki_page.revision_date
-                    self.bot_mod = wiki_page.revision_by.name
+                    if  wiki_page.revision_by:
+                        self.bot_mod = wiki_page.revision_by.name
             except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden) as e:
                 logger.warning('no config accessible for %s' % self.subreddit_name)
                 self.rate_limiting_enabled = False
@@ -727,7 +728,7 @@ def look_for_rule_violations(do_cleanup=False):
             recent_post.counted_status = 1
             s.add(recent_post)
             send_modmail(tr_sub, recent_post, None, "Hall pass was used by {}: http://redd.it/{}".format(
-                subreddit_author.name, recent_post.id))
+                subreddit_author.author_name, recent_post.id))
             logger.debug(">>>hallpassed")
             continue
 
@@ -903,19 +904,22 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
 
     if len(other_spam_by_author) == tr_sub.ban_threshold_count - 1 and tr_sub.ban_threshold_count > 1:
         try:
+            #tr_sub.ignore_AutoModerator_removed
 
             reddit_client.redditor(recent_post.author).message(
                 "Please note that you are close approaching your posting limit for {}".format(
                     recent_post.subreddit_name),
-                "This subreddit only allows {} post(s) per {} hour(s). "
-                "This may include self-deleted and mod-removed posts depending on "
-                "how the subreddit moderators configured this bot. "
+                "This subreddit (/r/{}) only allows {} post(s) per {} hour(s). "
+                "This {} include mod-removed posts. "
                 "Further posting may result in a ban from the subreddit. "
                 "After this post, your next eligibility to post is: {} UTC. "
+                "If you made a title mistake you have STRICTLY {} to delete it and repost it. "
                 "This is an automated message sent out to anyone who is close to their limit. "
                 "It may not always get sent out, however, due to reddit limitations. "
-                .format(tr_sub.max_count_per_interval, tr_sub.min_post_interval_hrs,
-                        most_recent_reposts[0].time_utc + tr_sub.min_post_interval)
+                .format(recent_post.subreddit_name, tr_sub.max_count_per_interval, tr_sub.min_post_interval_hrs,
+                        "does NOT" if tr_sub.ignore_moderator_removed else "DOES",
+                        most_recent_reposts[0].time_utc + tr_sub.min_post_interval,
+                        humanize.precisedelta(tr_sub.grace_period_mins))
             )
         except praw.exceptions.APIException:
             pass
@@ -930,10 +934,12 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
         if num_days == 0:
             num_days = 999
 
-        str_prev_posts = ",".join([" [{0}]({1})".format(a.id, a.get_comments_url()) for a in other_spam_by_author])
+        str_prev_posts = ",".join([" [{0}]({1})".format(a.id, "http://redd.it/{}".format(a.id)) for a in other_spam_by_author])
 
-        ban_message = "For this subreddit, you have posted too soon too many times (threshold of {0}): {1}. THIS INCLUDES SELF DELETIONS. If this was not intentional, your account may have been hacked and you should change your passwords.".format(
-            tr_sub.ban_threshold_count, str_prev_posts)
+        ban_message = "For this subreddit, you have posted too soon too many times (threshold of {0}): {1}. " \
+                      "THIS INCLUDES SELF DELETIONS. " \
+                      "If you think you may have been hacked, please change your passwords NOW."\
+            .format(tr_sub.ban_threshold_count, str_prev_posts)
         time_next_eligible = datetime.now(pytz.utc) + timedelta(days=num_days)
 
         # If banning is specified but not enabled, just go to blacklist. Don't bother trying to ban without access.
@@ -1156,6 +1162,8 @@ def handle_dm_command(subreddit_name, requestor_name, command, parameters) -> (s
     print("asking for permission: {}, mod list: {}".format(requestor_name, ",".join(moderators)))
     if requestor_name is not None and requestor_name not in moderators and requestor_name != BOT_OWNER \
             and requestor_name != "[modmail]":
+        if subreddit_name is "subredditname":
+            return "Please change 'subredditname' to the name of your subreddit so I know what subreddit you mean!", True
         return "You do not have permission to do this. Are you sure you are a moderator of {}?\n\n " \
                "/r/{} moderator list: {}, your name: {}" \
                    .format(subreddit_name, subreddit_name, str(moderators), requestor_name), True
@@ -1303,24 +1311,31 @@ def handle_dm_command(subreddit_name, requestor_name, command, parameters) -> (s
             return "Unban failed, I don't have permission to do that", True
     elif command == "ban":
         author_name_to_check = parameters[0] if parameters else None
+        author_name_to_check = author_name_to_check.replace('/u/', '')
+        author_name_to_check = author_name_to_check.replace('u/', '')
+
         ban_length = int(parameters[1]) if parameters and len(parameters) >= 2 else None
 
         ban_reason = "per modmail command"
         if not author_name_to_check:
             return "No author name given", True
-        else:
-            try:
-                if ban_length:
-                    reddit_client.subreddit(tr_sub.subreddit_name).banned.add(
-                        author_name_to_check, ban_note="ModhelpfulBot: per modmail command", ban_message=ban_reason,
-                        ban_length=ban_length)
-                    return "Ban for {} was successful".format(author_name_to_check), True
-                else:
-                    reddit_client.subreddit(tr_sub.subreddit_name).banned.add(
-                        author_name_to_check, ban_note="ModhelpfulBot: per modmail command", ban_message=ban_reason)
-                    return "Ban for {} was successful".format(author_name_to_check), True
-            except prawcore.exceptions.Forbidden:
-                return "Ban failed, I don't have permission to do that", True
+        actual_author = reddit_client.redditor(author_name_to_check)
+        if not actual_author:
+            return "Invalid author name or deleted account", True
+        print('trying to ban: {}'.format(author_name_to_check))
+
+        try:
+            if ban_length:
+                reddit_client.subreddit(tr_sub.subreddit_name).banned.add(
+                    author_name_to_check, ban_note="ModhelpfulBot: per modmail command", ban_message=ban_reason,
+                    ban_length=ban_length)
+                return "Ban for {} was successful".format(author_name_to_check), True
+            else:
+                reddit_client.subreddit(tr_sub.subreddit_name).banned.add(
+                    author_name_to_check, ban_note="ModhelpfulBot: per modmail command", ban_message=ban_reason)
+                return "Ban for {} was successful".format(author_name_to_check), True
+        except prawcore.exceptions.Forbidden:
+            return "Ban failed, I don't have permission to do that", True
 
     elif command == "update":
         worked, status = tr_sub.update_from_yaml(force_update=True)
@@ -1521,7 +1536,8 @@ def handle_modmail_message(convo):
                                 "\n\n{summary table}\n\n**Please don't forget to change to 'reply as the "
                                 "subreddit' below!!**\n\n"
                                 "Available Commands: $summary `username`, $update, $hallpass `username`, "
-                                "$unban `username`, $approve `postid`, $remove `postid`, $citerule `#` "
+                                "$unban `username`, $approve `postid`, $remove `postid`, $citerule `#`, "
+                                "$blacklist `username` (modmail blacklist)"
                                 "\n\nPlease subscribe to /r/ModeratelyHelpfulBot for updates"
                                 , None, prev_posts=recent_posts)
                             response_internal = True
