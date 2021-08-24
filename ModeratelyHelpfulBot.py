@@ -21,8 +21,6 @@ from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET, BOT_OWNER, DB_E
 To do list:
 Post restricting by flair!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 asyncio 
-rate limit modspam/ forever ignore
-metapost/ post type limit across usernames
 incorporate toolbox? https://www.reddit.com/r/nostalgia/wiki/edit/toolbox check usernotes?
 upgrade python and praw version
 """
@@ -911,8 +909,7 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
                     recent_post.subreddit_name),
                 "This subreddit (/r/{}) only allows {} post(s) per {} hour(s). "
                 "This {} include mod-removed posts. "
-                "Further posting may result in a ban from the subreddit. "
-                "After this post, your next eligibility to post is: {} UTC. "
+                "Any new posts you make before {} UTC may result in a ban. "
                 "If you made a title mistake you have STRICTLY {} to delete it and repost it. "
                 "This is an automated message sent out to anyone who is close to their limit. "
                 "It may not always get sent out, however, due to reddit limitations. "
@@ -936,10 +933,17 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
 
         str_prev_posts = ",".join([" [{0}]({1})".format(a.id, "http://redd.it/{}".format(a.id)) for a in other_spam_by_author])
 
-        ban_message = "For this subreddit, you have posted too soon too many times (threshold of {0}): {1}. " \
-                      "THIS INCLUDES SELF DELETIONS. " \
-                      "If you think you may have been hacked, please change your passwords NOW."\
-            .format(tr_sub.ban_threshold_count, str_prev_posts)
+        ban_message = "This subreddit (/r/{0}) only allows {1} post(s) per {2} hour(s), and it only allows for {3} " \
+                      "violation(s) of this rule. This is a rolling limit and includes self-deletions. " \
+                      "Per our records, there were {4} post(s) from you that went beyond the limit: {5} " \
+                      "If you think you may have been hacked, please change your passwords NOW. "\
+                      .format(
+                            recent_post.subreddit_name,
+                            tr_sub.max_count_per_interval,
+                            tr_sub.min_post_interval_hrs,
+                            tr_sub.ban_threshold_count,
+                            len(other_spam_by_author),
+                            str_prev_posts)
         time_next_eligible = datetime.now(pytz.utc) + timedelta(days=num_days)
 
         # If banning is specified but not enabled, just go to blacklist. Don't bother trying to ban without access.
@@ -962,9 +966,9 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
                 logger.info("PERMANENT ban for {0} succeeded ".format(recent_post.author))
             else:
                 # Not permanent ban
-                ban_message += "\n\nYour ban will last {0} days from this message, ending at {1} UTC. " \
+                ban_message += "\n\nYour ban will last {0} days from this message. " \
                                "**Repeat infractions result in a permanent ban!**" \
-                               "".format(num_days, time_next_eligible)
+                               "".format(num_days)
                 reddit_client.subreddit(tr_sub.subreddit_name).banned.add(
                     recent_post.author, ban_note="ModhelpfulBot: repeated spam", ban_message=ban_message[:999],
                     duration=num_days)
@@ -1609,8 +1613,6 @@ def update_list_with_all_active_subs():
 
 def update_list_with_subreddit(subreddit_name: str):
     global watched_subs
-    if subreddit_name in ["pokinsfw3"]:
-        return None
     tr_sub = s.query(TrackedSubreddit).get(subreddit_name)
     if not tr_sub:
         tr_sub = TrackedSubreddit(subreddit_name)
@@ -1623,7 +1625,10 @@ def update_list_with_subreddit(subreddit_name: str):
     return tr_sub
 
 
-def purge_old_records(days=14):
+def purge_old_records():
+    #purge_statement = "delete t  from RedditPost t inner join TrackedSubs7 s on t.subreddit_name = s.subreddit_name where  t.time_utc  < utc_timestamp() - INTERVAL greatest(s.min_post_interval_mins, 60*24*14) MINUTE  and t.flagged_duplicate=0 and t.pre_duplicate=0"
+    #rs = s.execute(purge_statement)
+
     to_delete = s.query(SubmittedPost) \
         .filter(SubmittedPost.time_utc < datetime.now() - timedelta(days=days)) \
         .filter(SubmittedPost.flagged_duplicate.is_(False)) \
