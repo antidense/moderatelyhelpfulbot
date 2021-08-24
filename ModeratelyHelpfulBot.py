@@ -1626,19 +1626,8 @@ def update_list_with_subreddit(subreddit_name: str):
 
 
 def purge_old_records():
-    #purge_statement = "delete t  from RedditPost t inner join TrackedSubs7 s on t.subreddit_name = s.subreddit_name where  t.time_utc  < utc_timestamp() - INTERVAL greatest(s.min_post_interval_mins, 60*24*14) MINUTE  and t.flagged_duplicate=0 and t.pre_duplicate=0"
-    #rs = s.execute(purge_statement)
-
-    to_delete = s.query(SubmittedPost) \
-        .filter(SubmittedPost.time_utc < datetime.now() - timedelta(days=days)) \
-        .filter(SubmittedPost.flagged_duplicate.is_(False)) \
-        .filter(SubmittedPost.pre_duplicate.is_(False)) \
-        .delete()
-    to_delete = s.query(SubmittedPost) \
-        .filter(SubmittedPost.time_utc < datetime.now() - timedelta(days=120)) \
-        .delete()
-    s.commit()
-
+    purge_statement = "delete t  from RedditPost t inner join TrackedSubs7 s on t.subreddit_name = s.subreddit_name where  t.time_utc  < utc_timestamp() - INTERVAL greatest(s.min_post_interval_mins, 60*24*14) MINUTE  and t.flagged_duplicate=0 and t.pre_duplicate=0"
+    rs = s.execute(purge_statement)
 
 def purge_old_records_by_subreddit(tr_sub: TrackedSubreddit):
     print("looking for old records to purge from ", tr_sub.subreddit_name, tr_sub.min_post_interval)
