@@ -46,6 +46,7 @@ main_settings['sleep_interval'] = 60
 active_submissions = []
 watched_subs = dict()
 SUBS_WITH_NO_BAN_ACCESS = []
+SUBWIKI_CHECK_INTERVAL_HRS = 24
 
 
 class Broadcast(Base):
@@ -628,14 +629,18 @@ def look_for_rule_violations(do_cleanup=False):
     # reviewed - may not pick up old reviewed ones?
     # clean_up_statement = "select max(t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 from RedditPost t inner join TrackedSubs7 s on t.subreddit_name = s.subreddit_name where t.flagged_duplicate = 0 and t.reviewed = 0 and t.time_utc> now() - Interval s.min_post_interval_mins  minute  group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval  order by max(t.time_utc) desc ;"
 
-    usual_statement = "select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 from RedditPost t inner join TrackedSubs7 s on t.subreddit_name = s.subreddit_name where counted_status !=0 and t.time_utc> now() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 72 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
+    usual_statement = "select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 from RedditPost t inner join TrackedSubs7 s on t.subreddit_name = s.subreddit_name where counted_status !=0 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 72 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
+
+    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 FROM RedditPost t INNER JOIN TrackedSubs7 s ON t.subreddit_name = s.subreddit_name WHERE counted_status !=0 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
 
     recent_posts = list()
 
-    clean_up_statement = usual_statement
     if do_cleanup:
-        rs = s.execute(clean_up_statement)
+        print("doing more accurate")
+        rs = s.execute(more_accurate_statement)
     else:
+
+
         rs = s.execute(usual_statement)
 
     tick = datetime.now(pytz.utc)
@@ -678,7 +683,7 @@ def look_for_rule_violations(do_cleanup=False):
     for index, recent_post in enumerate(recent_posts):
 
         tock = datetime.now(pytz.utc) - tick
-        if tock > timedelta(minutes=3) and last_author != recent_post.author:
+        if tock > timedelta(minutes=3) and last_author != recent_post.author and do_cleanup is False:
             logger.debug("Aborting, taking more than 3 min")
             s.commit()
             break
@@ -696,7 +701,7 @@ def look_for_rule_violations(do_cleanup=False):
         if subreddit_name not in watched_subs:
             tr_sub = update_list_with_subreddit(subreddit_name)
             if tr_sub:
-                if tr_sub.last_updated < datetime.now() - timedelta(hours=24):
+                if tr_sub.last_updated < datetime.now() - timedelta(hours=SUBWIKI_CHECK_INTERVAL_HRS):
                     purge_old_records_by_subreddit(tr_sub)
                     worked, status = tr_sub.update_from_yaml(force_update=True)
                     if not worked and hasattr(tr_sub, "settings_revision_date"):
@@ -725,8 +730,10 @@ def look_for_rule_violations(do_cleanup=False):
             recent_post.last_checked = datetime.now(pytz.utc)
             recent_post.counted_status = 1
             s.add(recent_post)
-            send_modmail(tr_sub, recent_post, None, "Hall pass was used by {}: http://redd.it/{}".format(
-                subreddit_author.author_name, recent_post.id))
+            notification_text = "Hall pass was used by {}: http://redd.it/{}".format(
+                subreddit_author.author_name, recent_post.id)
+            reddit_client.redditor(BOT_OWNER).message(subreddit_name, notification_text)
+            send_modmail(tr_sub, recent_post, None, notification_text)
             logger.debug(">>>hallpassed")
             continue
 
@@ -1398,16 +1405,16 @@ def handle_direct_messages():
             message.mark_read()
             subreddit_name = message.subject.replace("re: You've been temporarily banned from participating in r/", "")
             if not check_actioned("ban_note: {0}".format(requestor_name)):
+                # record actioned first out of safety in case of error
+                # TODO: write help message for other types of bans - or detect removal reason
+                record_actioned("ban_note: {0}".format(message.author))
+
                 tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
                 if tr_sub and tr_sub.modmail_posts_reply:
-                    pass
-                    """
                     try:
-                        message.reply(tr_sub.get_author_summary(author_name))
+                        message.reply(tr_sub.get_author_summary(message.author))
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
-                    """
-            record_actioned("ban_note: {0}".format(author_name))
         # Respond to an invitation to moderate
         elif message.subject.startswith('invitation to moderate'):
             mod_mail_invitation_to_moderate(message)
@@ -1419,7 +1426,12 @@ def handle_direct_messages():
                 .format(subreddit_name, requestor_name, command, response)
             reddit_client.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
         elif requestor_name and not check_actioned(requestor_name):
+            record_actioned(requestor_name)
+            message.mark_read()
             try:
+                #ignore profanity
+                if "fuck" in message.body:
+                    continue
                 message.reply("Hi, thank you for messaging me! "
                               "I am a non-sentient bot, and I act only in the accordance of the rules set by the "
                               "moderators "
@@ -1435,7 +1447,7 @@ def handle_direct_messages():
                 pass
             except praw.exceptions.APIException:
                 pass
-            record_actioned(requestor_name)
+
         message.mark_read()
         record_actioned(message_id)
 
@@ -1705,7 +1717,7 @@ def main_loop():
     # update_list_with_all_active_subs()
     # threading.Thread(target=worker, daemon=True).start()
 
-    i = 0
+    i = -1
     while True:
         # moderate_debates()
         # scan_comments_for_activity()
