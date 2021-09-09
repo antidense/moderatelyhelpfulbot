@@ -19,7 +19,6 @@ from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET, BOT_OWNER, DB_E
 
 """
 To do list:
-Post restricting by flair!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 asyncio 
 incorporate toolbox? https://www.reddit.com/r/nostalgia/wiki/edit/toolbox check usernotes?
 upgrade python and praw version
@@ -623,30 +622,21 @@ def check_for_post_exemptions(tr_sub, recent_post):
 def look_for_rule_violations(do_cleanup=False):
     global reddit_client
     global watched_subs
-
     logger.debug("querying recent post(s)")
 
-    # reviewed - may not pick up old reviewed ones?
-    # clean_up_statement = "select max(t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 from RedditPost t inner join TrackedSubs7 s on t.subreddit_name = s.subreddit_name where t.flagged_duplicate = 0 and t.reviewed = 0 and t.time_utc> now() - Interval s.min_post_interval_mins  minute  group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval  order by max(t.time_utc) desc ;"
-
-    usual_statement = "select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 from RedditPost t inner join TrackedSubs7 s on t.subreddit_name = s.subreddit_name where counted_status !=0 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 72 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
+    faster_statement = "select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 from RedditPost t inner join TrackedSubs7 s on t.subreddit_name = s.subreddit_name where counted_status !=0 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 72 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
 
     more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 FROM RedditPost t INNER JOIN TrackedSubs7 s ON t.subreddit_name = s.subreddit_name WHERE counted_status !=0 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
-
     recent_posts = list()
 
     if do_cleanup:
         print("doing more accurate")
         rs = s.execute(more_accurate_statement)
     else:
-
-
-        rs = s.execute(usual_statement)
-
+        rs = s.execute(faster_statement)
     tick = datetime.now(pytz.utc)
 
     max_index = 0
-
     for row in rs:
         print(row[0], row[1], row[2], row[3], row[4])
         # post = s.query(SubmittedPost).get(row[0])
@@ -655,40 +645,29 @@ def look_for_rule_violations(do_cleanup=False):
 
         for p, t in zip(predecessors, predecessors_times):
             # print(p,t)
-            if t == "0":
+            if t == "0":  #Add if not yet reviewed
                 post = s.query(SubmittedPost).get(p)
                 if post:
                     recent_posts.append(post)
                 else:
                     print("could not find", p)
-        # if post.reviewed:
-        #    #logger.debug("already done!")
-        #    continue
-        # recent_posts.append(post)
         max_index += 1
 
-    """
-    recent_posts = s.query(SubmittedPost).filter(
-        SubmittedPost.time_utc > datetime.now(pytz.utc) - timedelta(hours=LOOK_BACK_INTERVAL_HRS),
-        SubmittedPost.flagged_duplicate.is_(False),
-        SubmittedPost.reviewed.is_(False),
-        SubmittedPost.banned_by.is_(None)) \
-        .order_by(desc(SubmittedPost.time_utc)) \
-        .limit(100).all()
-    """
     logger.info("found {} to review".format(max_index))
 
-    index = 0
     last_author = "blah"
     for index, recent_post in enumerate(recent_posts):
-
         tock = datetime.now(pytz.utc) - tick
+
+        # Cut short if taking too long, but not if in the middle of the same author
         if tock > timedelta(minutes=3) and last_author != recent_post.author and do_cleanup is False:
             logger.debug("Aborting, taking more than 3 min")
             s.commit()
             break
+
         last_author = recent_post.author
 
+        #Periodically save work to db
         if (index + 1) % 20 == 0:
             s.commit()
             logger.info("$$$ -{0} current time".format(
@@ -711,7 +690,6 @@ def look_for_rule_violations(do_cleanup=False):
                                          "There was an error loading your ModeratelyHelpfulBot configuration: {} \n\n https://www.reddit.com/r/{}/wiki/edit/moderatelyhelpfulbot".format(
                                              status, subreddit_name))
                             record_actioned("wu-{}-{}".format(subreddit_name, tr_sub.settings_revision_date))
-
                     s.add(tr_sub)
                     s.commit()
         tr_sub = watched_subs[subreddit_name]
@@ -720,9 +698,7 @@ def look_for_rule_violations(do_cleanup=False):
         # recent_post.author = recent_post.author.lower()
         subreddit_author = s.query(SubAuthor).get((subreddit_name, recent_post.author))
 
-        #        if not subreddit_author:
-        #            subreddit_author = s.query(SubAuthor).filter(SubAuthor.subreddit_name == subreddit_name, SubAuthor)
-        # hall pass
+        # check for hall pass  - should be done when querying posts instead?
         if subreddit_author and subreddit_author.hall_pass > 0:
             subreddit_author.hall_pass -= 1
             s.add(subreddit_author)
@@ -771,34 +747,9 @@ def look_for_rule_violations(do_cleanup=False):
                 # Maybe recheck permissions if not allowed to remove posts
                 tr_sub.update_from_yaml(force_update=True)
 
-        """
-        # See which authors we can skip - find any authors in the min post interval that have posted more than once
-        if subreddit_name not in authors_to_watch_for_subreddit:
-            authors_tuple = s.query(SubmittedPost.author, func.count(SubmittedPost.author).label('qty')) \
-                .filter(SubmittedPost.subreddit_name.ilike(subreddit_name)) \
-                .filter(
-                SubmittedPost.time_utc > datetime.now(pytz.utc) - tr_sub.min_post_interval + tr_sub.grace_period_mins) \
-                .group_by(SubmittedPost.author).order_by(desc('qty')).all()
-            authors_to_watch_for_subreddit[subreddit_name] = dict((x, y) for x, y in authors_tuple)
-        """
-
-        if subreddit_name not in watched_subs:
+           if subreddit_name not in watched_subs:
             print("CANNOT FIND SUBREDDIT!!! {0}".format(recent_post.subreddit_name))
             continue
-
-        """
-        # Shortcut - ignore authors in the alst time period
-        # careful though!! it's from the most recent post not the actual post time!
-        if subreddit_name in authors_to_watch_for_subreddit\
-                and recent_post.author in authors_to_watch_for_subreddit[subreddit_name] \
-                and recent_post.time_utc.replace(tzinfo=timezone.utc) > \
-                datetime.now(pytz.utc).replace(tzinfo=timezone.utc) - timedelta(minutes=30):
-            author_count = authors_to_watch_for_subreddit[subreddit_name][recent_post.author]
-            if author_count <= tr_sub.max_count_per_interval:
-                recent_post.reviewed = True
-                s.add(recent_post)
-                continue
-        """
 
         # check for post exemptions
         counted_status, result = check_for_post_exemptions(tr_sub, recent_post)
@@ -859,7 +810,7 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
     if tr_sub.action == "remove":
         try:
             was_successful = recent_post.mod_remove()
-            logger.debug("....post removed")
+            logger.debug("....removed post now")
             if not was_successful:
                 return
         except praw.exceptions.APIException:
