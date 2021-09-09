@@ -24,11 +24,6 @@ incorporate toolbox? https://www.reddit.com/r/nostalgia/wiki/edit/toolbox check 
 upgrade python and praw version
 """
 
-ACCEPTING_NEW_SUBS = False
-LOOK_BACK_INTERVAL_HRS = 24
-link_regex =  'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
-reddit_regex = '/r/dating/comments/([^/]*)/'
-
 # Set up database
 engine = create_engine(DB_ENGINE)
 Base = declarative_base(bind=engine)
@@ -38,16 +33,14 @@ reddit_client = praw.Reddit(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, pa
                             user_agent="ModeratelyHelpfulBot v0.4", username=BOT_NAME)
 
 # Set up some global variables
-last_checked = datetime.now() - timedelta(days=1)  # type: datetime
-response_tail = ""
-main_settings = dict()
-main_settings['sleep_interval'] = 60
-active_submissions = []
-watched_subs = dict()
-SUBS_WITH_NO_BAN_ACCESS = []
+ACCEPTING_NEW_SUBS = False
+LINK_REGEX = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+REDDIT_LINK_REGEX = 'r/([a-zA-Z0-9_]*)/comments/([a-z0-9_]*)/([a-zA-Z0-9_]{0,50})'
+RESPONSE_TAIL = ""
+MAIN_SETTINGS = dict()
 SUBWIKI_CHECK_INTERVAL_HRS = 24
 
-
+# For messaging subreddits that use bot
 class Broadcast(Base):
     __tablename__ = 'Broadcast'
     id = Column(String(10), nullable=True, primary_key=True)
@@ -58,7 +51,6 @@ class Broadcast(Base):
 
     def __init__(self, post):
         self.id = post.id
-
 
 class SubmittedPost(Base):
     __tablename__ = 'RedditPost'
@@ -72,7 +64,7 @@ class SubmittedPost(Base):
     flagged_duplicate = Column(Boolean, nullable=True)
     pre_duplicate = Column(Boolean, nullable=True)
     self_deleted = Column(Boolean, nullable=True)
-    reviewed = Column(Boolean, nullable=True)  # may be able to take this out later..
+    reviewed = Column(Boolean, nullable=True)
     last_checked = Column(DateTime, nullable=False)
     bot_comment_id = Column(String(10), nullable=True)  # don't need this?
     is_self = Column(Boolean, nullable=True)
@@ -1044,7 +1036,7 @@ def make_comment(subreddit: TrackedSubreddit, recent_post: SubmittedPost, most_r
 
     ids = ids.replace(" ", " ^^")
     comment = None
-    response = populate_tags(comment_template + response_tail + ids,
+    response = populate_tags(comment_template + RESPONSE_TAIL + ids,
                              recent_post, tr_sub=subreddit, prev_post=prev_submission)
     try:
         comment = recent_post.reply(response, distinguish=distinguish, approve=approve, lock_thread=lock_thread)
@@ -1064,14 +1056,14 @@ def send_modmail(subreddit: TrackedSubreddit, recent_post, prev_submission, comm
 
 
 def load_settings():
-    global main_settings
-    global response_tail
+    global MAIN_SETTINGS
+    global RESPONSE_TAIL
 
     wiki_settings = reddit_client.subreddit('moderatelyhelpfulbot').wiki['moderatelyhelpfulbot']
-    main_settings = yaml.safe_load(wiki_settings.content_md)
+    MAIN_SETTINGS = yaml.safe_load(wiki_settings.content_md)
 
-    if 'response_tail' in main_settings:
-        response_tail = main_settings['response_tail']
+    if 'response_tail' in MAIN_SETTINGS:
+        RESPONSE_TAIL = MAIN_SETTINGS['response_tail']
     # load_subs(main_settings)
 
 
@@ -1457,10 +1449,10 @@ def handle_modmail_message(convo):
         # Automated approvals
         if tr_sub.modmail_auto_approve_messages_with_links:
             import re
-            urls = re.findall(reddit_regex, convo.messages[0].body)
+            urls = re.findall(REDDIT_LINK_REGEX, convo.messages[0].body)
             if len(urls) == 2:  # both link and link description
                 submission = reddit_client.submission(urls[0])
-                in_submission_urls = re.findall(link_regex, submission.selftext)
+                in_submission_urls = re.findall(LINK_REGEX, submission.selftext)
                 bad_words = "Raya", 'raya', 'dating app'
                 if not in_submission_urls and 'http' not in submission.selftext \
                         and submission.banned_by == "AutoModerator" \
@@ -1478,7 +1470,7 @@ def handle_modmail_message(convo):
                 # check if any links
                 if tr_sub.modmail_no_link_reply:
                     import re
-                    urls = re.findall(reddit_regex, convo.messages[0].body)
+                    urls = re.findall(REDDIT_LINK_REGEX, convo.messages[0].body)
                     if len(urls) < 2:  # both link and link description
 
                         response = tr_sub.modmail_no_link_reply
