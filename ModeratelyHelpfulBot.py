@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.6
 import humanize
 import iso8601
 import json
@@ -262,7 +262,7 @@ class TrackedSubreddit(Base):
         if force_update or self.settings_yaml_txt is None:
             try:
                 logger.warning('accessing wiki config %s' % self.subreddit_name)
-                wiki_page = REDDIT_CLIENT.subreddit(self.subreddit_name).wiki['moderatelyhelpfulbot']
+                wiki_page = REDDIT_CLIENT.subreddit(self.subreddit_name).wiki[BOT_NAME]
                 if wiki_page:
                     self.settings_yaml_txt = wiki_page.content_md
                     self.settings_revision_date = wiki_page.revision_date
@@ -372,12 +372,14 @@ class TrackedSubreddit(Base):
         return True, return_text
 
     @staticmethod
-    def get_subreddit_by_name(subreddit_name: str):
+    def get_subreddit_by_name(subreddit_name: str, create_if_not_exist=True) -> TrackedSubreddit:
         if subreddit_name.startswith("/r/"):
             subreddit_name = subreddit_name.replace('/r/', '')
         subreddit_name: str = subreddit_name.lower()
         tr_sub: TrackedSubreddit = s.query(TrackedSubreddit).get(subreddit_name)
         if not tr_sub:
+            if not create_if_not_exist:
+                return None
             try:
                 tr_sub = TrackedSubreddit(subreddit_name)
             except prawcore.PrawcoreException:
@@ -593,11 +595,16 @@ def look_for_rule_violations(do_cleanup: bool = False):
     more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 FROM RedditPost t INNER JOIN TrackedSubs7 s ON t.subreddit_name = s.subreddit_name WHERE counted_status !=0 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
     recent_posts = list()
 
+    tick = datetime.now()
     if do_cleanup:
         print("doing more accurate")
         rs = s.execute(more_accurate_statement)
     else:
+        print("doing usual")
         rs = s.execute(faster_statement)
+    print(f"query took this long {datetime.now()-tick}")
+
+
     tick = datetime.now(pytz.utc)
 
     max_index = 0
@@ -641,27 +648,150 @@ def look_for_rule_violations(do_cleanup: bool = False):
 
         # Load subreddit settings
         subreddit_name = recent_post.subreddit_name.lower()
-        if subreddit_name not in WATCHED_SUBS:
-            tr_sub = update_list_with_subreddit(subreddit_name)
-            if tr_sub:
-                if tr_sub.last_updated < datetime.now() - timedelta(hours=SUBWIKI_CHECK_INTERVAL_HRS):
-                    purge_old_records_by_subreddit(tr_sub)
-                    worked, status = tr_sub.update_from_yaml(force_update=True)
-                    if not worked and hasattr(tr_sub, "settings_revision_date"):
-                        if not check_actioned(f"wu-{subreddit_name}-{tr_sub.settings_revision_date}"):
-                            send_modmail(tr_sub,
-                                         "There was an error loading your ModeratelyHelpfulBot configuration: {status} "
-                                         "\n\n https://www.reddit.com/r/{subreddit_name}"
-                                         "/wiki/edit/moderatelyhelpfulbot",
-                                         recent_post=recent_post)
-                            record_actioned(f"wu-{subreddit_name}-{tr_sub.settings_revision_date}")
-                    s.add(tr_sub)
-                    s.commit()
-        tr_sub = WATCHED_SUBS[subreddit_name]
+        tr_sub = update_list_with_subreddit(subreddit_name, request_update_if_needed=True)
+
 
         # Check if they're on the watchlist
         # recent_post.author = recent_post.author.lower()
         subreddit_author: SubAuthor = s.query(SubAuthor).get((subreddit_name, recent_post.author))
+
+        # check for hall pass  - should be done when querying posts instead?
+        if subreddit_author and subreddit_author.hall_pass > 0:
+            subreddit_author.hall_pass -= 1
+            s.add(subreddit_author)
+            recent_post.reviewed = True
+            recent_post.last_checked = datetime.now(pytz.utc)
+            recent_post.counted_status = 1
+            s.add(recent_post)
+            notification_text = f"Hall pass was used by {subreddit_author.author_name}: http://redd.it/{recent_post.id}"
+            REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, notification_text)
+            send_modmail(tr_sub, recent_post, None, notification_text)
+            logger.debug(">>>hallpassed")
+            continue
+
+        if subreddit_author and subreddit_author.next_eligible:
+            print(f"next eligible {subreddit_author.next_eligible}")
+        if subreddit_author and subreddit_author.next_eligible and subreddit_author.next_eligible.replace(
+                tzinfo=timezone.utc) > datetime.now(pytz.utc):
+            was_successful = recent_post.mod_remove()
+            if was_successful:
+                try:
+                    if tr_sub.comment:
+                        print('last_valid_post', subreddit_author.last_valid_post)
+                        last_valid_post: SubmittedPost = s.query(SubmittedPost).get(
+                            subreddit_author.last_valid_post) if subreddit_author.last_valid_post is not None else None
+                        make_comment(tr_sub, recent_post, [last_valid_post, ],
+                                     tr_sub.comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve,
+                                     lock_thread=tr_sub.lock_thread, stickied=tr_sub.comment_stickied,
+                                     next_eligibility=subreddit_author.next_eligible, blacklist=True)
+                except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
+                    logger.warning('something went wrong in creating comment %s', str(e))
+
+                recent_post.reviewed = True
+                recent_post.flagged_duplicate = True
+                recent_post.last_checked = datetime.now(pytz.utc)
+                recent_post.counted_status = 3
+
+                logger.info(f"post removed - prior to eligibility for user {recent_post.author} {recent_post.get_url()}"
+                            f" {recent_post.subreddit_name} {recent_post.title}")
+                s.add(subreddit_author)
+                s.add(recent_post)
+                continue
+            else:
+                # Maybe recheck permissions if not allowed to remove posts
+                tr_sub.update_from_yaml(force_update=True)
+
+            if subreddit_name not in WATCHED_SUBS:
+                print(f"CANNOT FIND SUBREDDIT!!! {recent_post.subreddit_name}")
+                continue
+
+        # check for post exemptions
+        counted_status, result = check_for_post_exemptions(tr_sub, recent_post)
+        logger.info("does this {} count? {}".format(recent_post.get_url(), result))
+        since_post = datetime.now(pytz.utc) - recent_post.time_utc.replace(tzinfo=timezone.utc)
+        logger.info(
+            f"=================================================\n"
+            f"{index}-Checking '{recent_post.title[0:20]}...' by '{recent_post.author}' http://redd.it/{recent_post.id}"
+            f" subreddit:({recent_post.subreddit_name}): >-{since_post}<")
+        if counted_status == 0:
+            recent_post.counted_status = 0
+            recent_post.reviewed = True
+            recent_post.last_checked = datetime.now(pytz.utc)
+            s.add(recent_post)
+            continue
+        associated_reposts = find_previous_posts(tr_sub, recent_post)
+        verified_reposts_count = len(associated_reposts)
+
+        # Now check if actually went over threshold
+        if verified_reposts_count >= tr_sub.max_count_per_interval:
+            logger.info("----------------post time {0} | interval {1}  after {2} sub:{3}".format(
+                datetime.now(pytz.utc) - recent_post.time_utc.replace(tzinfo=timezone.utc),
+                tr_sub.min_post_interval,
+                recent_post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins,
+                recent_post.subreddit_name, recent_post.time_utc))
+
+            do_requested_action_for_valid_reposts(tr_sub, recent_post, associated_reposts)
+            recent_post.flagged_duplicate = True
+            # Keep preduplicate posts to keep track of later
+            for post in associated_reposts:
+                post.pre_duplicate = True
+                s.add(post)
+            check_for_actionable_violations(tr_sub, recent_post, associated_reposts)
+        recent_post.reviewed = True
+        recent_post.last_checked = datetime.now(pytz.utc)
+        s.add(recent_post)
+    s.commit()
+    return
+
+
+def look_for_rule_violations2(do_cleanup: bool = False):
+    global REDDIT_CLIENT
+    global WATCHED_SUBS
+    logger.debug("querying recent post(s)")
+
+    faster_statement = "select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 from RedditPost t inner join TrackedSubs7 s on t.subreddit_name = s.subreddit_name where counted_status !=0 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 72 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
+
+    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 FROM RedditPost t INNER JOIN TrackedSubs7 s ON t.subreddit_name = s.subreddit_name WHERE counted_status !=0 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
+
+    tick = datetime.now()
+    if do_cleanup:
+        print("doing more accurate")
+        rs = s.execute(more_accurate_statement)
+    else:
+        print("doing usual")
+        rs = s.execute(faster_statement)
+    print(f"query took this long {datetime.now()-tick}")
+
+    tick = datetime.now(pytz.utc)
+
+    for row in rs:
+        print(row[0], row[1], row[2], row[3], row[4])
+    for row in rs:
+        s.commit()  # put this at end of loop
+
+        # most_recent_post_id = row[0]
+        post_ids = row[1].split(',')
+        posts: List[SubmittedPost] = [s.query(SubmittedPost).get(p) for p in post_ids]
+        most_recent_post: SubmittedPost = posts[-1]
+        reviewed_status = row[2].split(',')
+        author_name: str = row[3]
+        subreddit_name: str = row[4].lower()
+
+        # Break if taking too long
+        tock = datetime.now(pytz.utc) - tick
+        if tock > timedelta(minutes=3) and do_cleanup is False:
+            logger.debug("Aborting, taking more than 3 min")
+            s.commit()
+            break
+
+        # Load subreddit settings
+        tr_sub = update_list_with_subreddit(subreddit_name, request_update_if_needed=True)
+
+        # Check if they're on the watchlist
+        subreddit_author: SubAuthor = s.query(SubAuthor).get((subreddit_name, recent_post.author))
+        if subreddit_author:
+            next_eligible = subreddit_author.next_eligible
+
 
         # check for hall pass  - should be done when querying posts instead?
         if subreddit_author and subreddit_author.hall_pass > 0:
@@ -1063,7 +1193,7 @@ def handle_dm_command(subreddit_name, requestor_name, command, parameters) -> (s
     subreddit_name = subreddit_name[3:] if subreddit_name.startswith('/r/') else subreddit_name
     command = command[1:] if command.startswith("$") else command
 
-    tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
+    tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=False)
     if not tr_sub:
         return "Error retrieving information for /r/{}".format(subreddit_name), True
     moderators = tr_sub.subreddit_mods
@@ -1310,7 +1440,7 @@ def handle_direct_messages():
                 # TODO: write help message for other types of bans - or detect removal reason
                 record_actioned("ban_note: {0}".format(message.author))
 
-                tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
+                tr_sub: TrackedSubreddit = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
                 if tr_sub and tr_sub.modmail_posts_reply:
                     try:
                         message.reply(tr_sub.get_author_summary(message.author))
@@ -1354,30 +1484,32 @@ def handle_direct_messages():
 
 
 def mod_mail_invitation_to_moderate(message):
-    if ACCEPTING_NEW_SUBS:
-        subreddit_name = message.subject.replace("invitation to moderate /r/", "")
+    subreddit_name = message.subject.replace("invitation to moderate /r/", "")
+    tr_sub: TrackedSubreddit = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=False)
+
+    # accept invite if accepting invites or had been accepted previously
+    if ACCEPTING_NEW_SUBS or tr_sub:
         sub = REDDIT_CLIENT.subreddit(subreddit_name)
         try:
             sub.mod.accept_invite()
         except praw.exceptions.APIException:
             message.reply("Error: Invite message has been rescinded?")
 
-        message.reply("Hi, thank you for inviting me!  I will start working now. Please make sure I have a config. "
-                      "It should be at https://www.reddit.com/r/{0}/wiki/moderatelyhelpfulbot . "
-                      "You may need to create it. You can find examples at "
-                      "https://www.reddit.com/r/moderatelyhelpfulbot/wiki/index . "
-                      .format(subreddit_name))
+        message.reply(f"Hi, thank you for inviting me!  I will start working now. Please make sure I have a config. "
+                      f"It should be at https://www.reddit.com/r/{subreddit_name}/wiki/{BOT_NAME} . "
+                      f"You may need to create it. You can find examples at "
+                      f"https://www.reddit.com/r/{BOT_NAME}/wiki/index . ")
     else:
-        message.reply("Invitation received. Please wait for approval by bot owner.")
+        message.reply(f"Invitation received. Please wait for approval by bot owner. In the mean time, "
+                      f"you may create a config at https://www.reddit.com/r/{subreddit_name}/wiki/{BOT_NAME} .")
     message.mark_read()
 
 
 def handle_modmail_message(convo):
-    # Ignore old messages
+    # Ignore old messages past 24h
     if iso8601.parse_date(convo.last_updated) < datetime.now(timezone.utc) - timedelta(hours=24):
         convo.read()
         return
-
     initiating_author_name = convo.authors[0].name
     subreddit_name = convo.owner.display_name
     if subreddit_name not in WATCHED_SUBS:
@@ -1411,7 +1543,7 @@ def handle_modmail_message(convo):
             if len(urls) == 2:  # both link and link description
                 print(f"found url: {urls[0]}")
                 submission = REDDIT_CLIENT.submission(urls[0])
-                if submission:
+                try:
                     in_submission_urls = re.findall(LINK_REGEX, submission.selftext)
                     bad_words = "Raya", 'raya', 'dating app'
                     if not in_submission_urls and 'http' not in submission.selftext \
@@ -1422,6 +1554,8 @@ def handle_modmail_message(convo):
                                    "has approved your post on a preliminary basis. " \
                                    " The subreddit moderators may override this decision, however\n\n Your text:\n\n>" \
                                    + submission.selftext.replace("\n\n", "\n\n>")
+                except prawcore.exceptions.NotFound:
+                    pass
         if not response:
             # Create a canned reply (All reply)
             if tr_sub.modmail_all_reply:
@@ -1432,7 +1566,6 @@ def handle_modmail_message(convo):
                     import re
                     urls = re.findall(REDDIT_LINK_REGEX, convo.messages[0].body)
                     if len(urls) < 2:  # both link and link description
-
                         response = tr_sub.modmail_no_link_reply
                 else:
                     # No posts reply
@@ -1484,7 +1617,7 @@ def handle_modmail_message(convo):
                     record_actioned(f"ic-{convo.id}")
     if response:
         try:
-            convo.reply(response, internal=response_internal)
+            convo.reply(response[0:9999], internal=response_internal)
 
             bot_owner_message = "subreddit: {0}\n\nrequestor: {1}\n\ncommand: {2}\n\nreport: {3}" \
                 .format(subreddit_name, "modmail", command, response)
@@ -1526,17 +1659,41 @@ def update_list_with_all_active_subs():
             update_list_with_subreddit(sub.subreddit_name)
 
 
-def update_list_with_subreddit(subreddit_name: str):
+def update_list_with_subreddit(subreddit_name: str, request_update_if_needed=False):
     global WATCHED_SUBS
-    tr_sub: TrackedSubreddit = s.query(TrackedSubreddit).get(subreddit_name)
-    if not tr_sub:
-        tr_sub = TrackedSubreddit(subreddit_name)
-    else:
-        tr_sub.update_from_yaml(force_update=False)
+    to_update = False
 
-    WATCHED_SUBS[subreddit_name] = tr_sub
-    s.add(tr_sub)
-    s.commit()
+    if subreddit_name in WATCHED_SUBS:  # check if loaded
+        tr_sub = WATCHED_SUBS[subreddit_name]
+    else:  # not loaded into memory
+        tr_sub: TrackedSubreddit = s.query(TrackedSubreddit).get(subreddit_name)  # check if in database
+        if tr_sub:
+            tr_sub.update_from_yaml(force_update=False) # load from database
+        else:  # not in database -> create it
+            tr_sub = TrackedSubreddit(subreddit_name)
+            to_update = True
+        WATCHED_SUBS[subreddit_name] = tr_sub  # store in memory
+
+
+    # request updated if needed
+    if request_update_if_needed and \
+            tr_sub.last_updated < datetime.now() - timedelta(hours=SUBWIKI_CHECK_INTERVAL_HRS):
+        worked, status = tr_sub.update_from_yaml(force_update=True)
+
+        #  Notify (only once) if updating did not work.
+        if not worked and hasattr(tr_sub, "settings_revision_date"):
+            if not check_actioned(f"wu-{subreddit_name}-{tr_sub.settings_revision_date}"):
+                send_modmail(tr_sub,
+                             f"There was an error loading your {BOT_NAME} configuration: {{status}} "
+                             f"\n\n https://www.reddit.com/r/{{subreddit_name}}"
+                             f"/wiki/edit/{BOT_NAME}",
+                             recent_post=recent_post)
+                record_actioned(f"wu-{subreddit_name}-{tr_sub.settings_revision_date}")
+        else:
+            to_update = True
+    if to_update:
+        s.add(tr_sub)
+        s.commit()
     return tr_sub
 
 
@@ -1615,33 +1772,25 @@ def check_spam_submissions(subreddit_name='mod'):
 
 
 def main_loop():
-    global WATCHED_SUBS
     load_settings()
-    purge_old_records()
-    # update_list_with_all_active_subs()
-    # threading.Thread(target=worker, daemon=True).start()
 
     i = -1
     while True:
-        # moderate_debates()
-        # scan_comments_for_activity()
-        # flag_all_submissions_for_activity()
-        # recalculate_active_submissions()
         print('start_loop')
 
         i += 1
         check_new_submissions2a()
-
-        # only do this if not too busy
-        # if last_index < 30:
-
         check_spam_submissions()
 
         start = datetime.now()
 
-        look_for_rule_violations()
-        if i % 30 == 0:
-            look_for_rule_violations(do_cleanup=True)
+        # only do this if not too busy
+        # if last_index < 30:
+        look_for_rule_violations(do_cleanup=(i % 30 != 0))
+
+        if i % 75 == 0:
+
+            purge_old_records()
 
         print("$$$checking rule violations took this long", datetime.now() - start)
 
