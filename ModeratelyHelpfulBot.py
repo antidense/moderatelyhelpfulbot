@@ -245,7 +245,7 @@ class TrackedSubreddit(Base):
         self.update_from_yaml(force_update=True)
         self.settings_revision_date = None
 
-    def get_mods_list(self, subreddit_handle=None):
+    def get_mods_list(self, subreddit_handle=None) -> List[str]:
         subreddit_handle = REDDIT_CLIENT.subreddit(self.subreddit_name) if not subreddit_handle else subreddit_handle
         try:
             return list(moderator.name for moderator in subreddit_handle.moderator())
@@ -372,21 +372,22 @@ class TrackedSubreddit(Base):
         return True, return_text
 
     @staticmethod
-    def get_subreddit_by_name(subreddit_name: str, create_if_not_exist=True) -> TrackedSubreddit:
+    def get_subreddit_by_name(subreddit_name: str, create_if_not_exist=True) -> (TrackedSubreddit, bool):
         if subreddit_name.startswith("/r/"):
             subreddit_name = subreddit_name.replace('/r/', '')
         subreddit_name: str = subreddit_name.lower()
         tr_sub: TrackedSubreddit = s.query(TrackedSubreddit).get(subreddit_name)
-        if not tr_sub:
+        if not tr_sub:  # does not exist in database
             if not create_if_not_exist:
-                return None
+                return None, False  # don't create, did not exist in db
             try:
                 tr_sub = TrackedSubreddit(subreddit_name)
+                return tr_sub, False  # try to create, did not exist in db
             except prawcore.PrawcoreException:
-                return None
+                return None, False  # couldn't create, did not exist in db
         else:
             tr_sub.update_from_yaml(force_update=False)
-        return tr_sub
+        return tr_sub, True  # existed in database
 
     def get_author_summary(self, author_name: str) -> str:
         if author_name.startswith('u/'):
@@ -1188,15 +1189,15 @@ def send_broadcast_messages():
     s.commit()
 
 
-def handle_dm_command(subreddit_name, requestor_name, command, parameters) -> (str, bool):
-    subreddit_name = subreddit_name[2:] if subreddit_name.startswith('r/') else subreddit_name
-    subreddit_name = subreddit_name[3:] if subreddit_name.startswith('/r/') else subreddit_name
-    command = command[1:] if command.startswith("$") else command
+def handle_dm_command(subreddit_name: str, requestor_name, command, parameters) -> (str, bool):
+    subreddit_name: str = subreddit_name[2:] if subreddit_name.startswith('r/') else subreddit_name
+    subreddit_name: str = subreddit_name[3:] if subreddit_name.startswith('/r/') else subreddit_name
+    command: str = command[1:] if command.startswith("$") else command
 
-    tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=False)
-    if not tr_sub:
+    tr_sub, already_existed_in_db = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=False)
+    if not already_existed_in_db:
         return "Error retrieving information for /r/{}".format(subreddit_name), True
-    moderators = tr_sub.subreddit_mods
+    moderators: List[str] = tr_sub.get_mods_list()
     print("asking for permission: {}, mod list: {}".format(requestor_name, ",".join(moderators)))
     if requestor_name is not None and requestor_name not in moderators and requestor_name != BOT_OWNER \
             and requestor_name != "[modmail]":
@@ -1244,7 +1245,7 @@ def handle_dm_command(subreddit_name, requestor_name, command, parameters) -> (s
         submission.mod.remove()
         return "Submission was removed.", True
     elif command == "hallpass":
-        author_name_to_check = parameters[0] if parameters else None
+        author_name_to_check: str = parameters[0] if parameters else None
         if not author_name_to_check:
             return "No author name given", True
         if author_name_to_check.startswith('u/'):
@@ -1441,9 +1442,9 @@ def handle_direct_messages():
                 record_actioned("ban_note: {0}".format(message.author))
 
                 tr_sub: TrackedSubreddit = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
-                if tr_sub and tr_sub.modmail_posts_reply:
+                if tr_sub and tr_sub.modmail_posts_reply and message.author:
                     try:
-                        message.reply(tr_sub.get_author_summary(message.author))
+                        message.reply(tr_sub.get_author_summary(message.author.name))
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
         # Respond to an invitation to moderate
@@ -1598,10 +1599,10 @@ def handle_modmail_message(convo):
                         response += populate_tags(tr_sub.modmail_no_posts_reply, None, tr_sub=tr_sub)
                         response_internal = tr_sub.modmail_no_posts_reply_internal
     else:
-        last_author_name = convo.messages[-1].author.name
+        last_author_name: str = convo.messages[-1].author.name
         last_message = convo.messages[-1]
-        body_parts = last_message.body_markdown.split(' ')
-        command = body_parts[0].lower() if len(body_parts) > 0 else None
+        body_parts: List[str] = last_message.body_markdown.split(' ')
+        command: str = body_parts[0].lower() if len(body_parts) > 0 else None
         if last_author_name != BOT_NAME and last_author_name in tr_sub.subreddit_mods:
             # check if forgot to reply as the subreddit
             if command.startswith("$") or command in ('summary', 'update'):
@@ -1661,19 +1662,16 @@ def update_list_with_all_active_subs():
 
 def update_list_with_subreddit(subreddit_name: str, request_update_if_needed=False):
     global WATCHED_SUBS
-    to_update = False
+    to_update_db = False
 
     if subreddit_name in WATCHED_SUBS:  # check if loaded
         tr_sub = WATCHED_SUBS[subreddit_name]
     else:  # not loaded into memory
-        tr_sub: TrackedSubreddit = s.query(TrackedSubreddit).get(subreddit_name)  # check if in database
-        if tr_sub:
-            tr_sub.update_from_yaml(force_update=False) # load from database
-        else:  # not in database -> create it
+        tr_sub: TrackedSubreddit = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=False)
+        if not tr_sub:  # not in database -> create it
             tr_sub = TrackedSubreddit(subreddit_name)
-            to_update = True
+            to_update_db = True
         WATCHED_SUBS[subreddit_name] = tr_sub  # store in memory
-
 
     # request updated if needed
     if request_update_if_needed and \
@@ -1690,8 +1688,8 @@ def update_list_with_subreddit(subreddit_name: str, request_update_if_needed=Fal
                              recent_post=recent_post)
                 record_actioned(f"wu-{subreddit_name}-{tr_sub.settings_revision_date}")
         else:
-            to_update = True
-    if to_update:
+            to_update_db = True
+    if to_update_db:
         s.add(tr_sub)
         s.commit()
     return tr_sub
