@@ -35,8 +35,8 @@ REDDIT_CLIENT = praw.Reddit(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, pa
 
 # Set up some global variables
 ACCEPTING_NEW_SUBS = False
-LINK_REGEX = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
-REDDIT_LINK_REGEX = 'r/([a-zA-Z0-9_]*)/comments/([a-z0-9_]*)/([a-zA-Z0-9_]{0,50})'
+LINK_REGEX = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+REDDIT_LINK_REGEX = r'r/([a-zA-Z0-9_]*)/comments/([a-z0-9_]*)/([a-zA-Z0-9_]{0,50})'
 RESPONSE_TAIL = ""
 MAIN_SETTINGS = dict()
 WATCHED_SUBS = dict()
@@ -54,6 +54,7 @@ class Broadcast(Base):
 
     def __init__(self, post):
         self.id = post.id
+
 
 class SubmittedPost(Base):
     __tablename__ = 'RedditPost'
