@@ -4,9 +4,6 @@ iso8601
 pytz
 sqlalchemy
 pyyaml
-humanize
 prawcore
-pytz
 iso8601
 praw
-pytz

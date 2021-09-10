@@ -244,7 +244,8 @@ class TrackedSubreddit(Base):
         self.update_from_yaml(force_update=True)
         self.settings_revision_date = None
 
-    def get_mods_list(self, subreddit_handle=REDDIT_CLIENT.subreddit(self.subreddit_name)):
+    def get_mods_list(self, subreddit_handle=None):
+        subreddit_handle = REDDIT_CLIENT.subreddit(self.subreddit_name) if not subreddit_handle else subreddit_handle
         try:
             return list(moderator.name for moderator in subreddit_handle.moderator())
         except prawcore.exceptions.NotFound:
@@ -316,7 +317,6 @@ class TrackedSubreddit(Base):
                 'exempt_oc': bool,
                 'title_not_exempt_keyword': str,
                 'blacklist_enabled': bool,
-
             }
             if not pr_settings:
                 return False, "Bad config"
@@ -717,15 +717,9 @@ def look_for_rule_violations(do_cleanup=False):
         # check for post exemptions
         counted_status, result = check_for_post_exemptions(tr_sub, recent_post)
         logger.info("does this {} count? {}".format(recent_post.get_url(), result))
+        since_post = datetime.now(pytz.utc) - recent_post.time_utc.replace(tzinfo=timezone.utc)
         logger.info(
-            "=================================================\n{0}-Checking '{1}...' by '{2}' http://redd.it/{3} subreddit:({4}): >-{5}<".format(
-                index,
-                recent_post.title[0:20],
-                recent_post.author,
-                recent_post.id,
-                recent_post.subreddit_name,
-                datetime.now(pytz.utc) - recent_post.time_utc.replace(tzinfo=timezone.utc)
-            ))
+            f"=================================================\n{index}-Checking '{recent_post.title[0:20]}...' by '{recent_post.author}' http://redd.it/{recent_post.id} subreddit:({recent_post.subreddit_name}): >-{since_post}<" )
         if counted_status == 0:
             recent_post.counted_status = 0
             recent_post.reviewed = True
