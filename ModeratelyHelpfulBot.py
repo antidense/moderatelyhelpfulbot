@@ -1,19 +1,19 @@
 #!/usr/bin/env python3.6
+import logging
+from datetime import datetime, timedelta, timezone
+from typing import List
+
 import humanize
 import iso8601
-import json
-import logging
 import praw
 import prawcore
 import pytz
 import yaml
-from datetime import datetime, timedelta, timezone
 from praw import exceptions
 from praw.models import Submission
 from sqlalchemy import *
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from typing import List
 
 from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET, BOT_OWNER, DB_ENGINE
 
@@ -157,6 +157,15 @@ class SubmittedPost(Base):
             return "Bot-removed"
         else:
             return "Mod-removed"
+
+    def update(self, reviewed=None, flagged_duplicate=None, counted_status=None):
+        if reviewed is not None:
+            self.reviewed = reviewed
+        if flagged_duplicate is not None:
+            self.flagged_duplicate = flagged_duplicate
+        if counted_status is not None:
+            self.counted_status = counted_status
+        self.last_checked = datetime.now(pytz.utc)
 
 
 class SubAuthor(Base):
@@ -372,22 +381,22 @@ class TrackedSubreddit(Base):
         return True, return_text
 
     @staticmethod
-    def get_subreddit_by_name(subreddit_name: str, create_if_not_exist=True) -> (TrackedSubreddit, bool):
+    def get_subreddit_by_name(subreddit_name: str, create_if_not_exist=True):
         if subreddit_name.startswith("/r/"):
             subreddit_name = subreddit_name.replace('/r/', '')
         subreddit_name: str = subreddit_name.lower()
         tr_sub: TrackedSubreddit = s.query(TrackedSubreddit).get(subreddit_name)
         if not tr_sub:  # does not exist in database
             if not create_if_not_exist:
-                return None, False  # don't create, did not exist in db
+                return None
             try:
                 tr_sub = TrackedSubreddit(subreddit_name)
-                return tr_sub, False  # try to create, did not exist in db
+                return tr_sub
             except prawcore.PrawcoreException:
-                return None, False  # couldn't create, did not exist in db
+                return None
         else:
-            tr_sub.update_from_yaml(force_update=False)
-        return tr_sub, True  # existed in database
+            tr_sub.update_from_yaml(force_update=False)  # load variables from stored yaml
+        return tr_sub
 
     def get_author_summary(self, author_name: str) -> str:
         if author_name.startswith('u/'):
@@ -438,6 +447,12 @@ class TrackedSubreddit(Base):
         return "total_reviewed: {}\n\n" \
                "total_identified: {}" \
                "\n\n{}".format(total_reviewed, total_identified, "\n\n".join(response_lines))
+
+    def send_modmail(self, subject=f"Message from {BOT_NAME}", body="Something here"):
+        try:
+            REDDIT_CLIENT.subreddit(self.subreddit_name).message(subject, body)
+        except (praw.exceptions.APIException, prawcore.exceptions.Forbidden, AttributeError):
+            logger.warning('something went wrong in sending modmail')
 
 
 class ActionedComments(Base):
@@ -517,11 +532,11 @@ def find_previous_posts(tr_sub: TrackedSubreddit, recent_post: SubmittedPost):
 def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPost):
     # check if removed
     banned_by = recent_post.get_api_handle().banned_by
-    logger.debug("banned status: {}".format(banned_by))
+    # logger.debug(">>>>exemption status: {}".format(banned_by))
     if banned_by is True or ((tr_sub.ignore_AutoModerator_removed and banned_by == "AutoModerator")
                              or (tr_sub.ignore_moderator_removed and banned_by in tr_sub.subreddit_mods)):
-        logger.debug("...already removed")
-        return 0, "post is removed"
+        # logger.debug("...already removed")
+        return 0, "post is removed by a mod"
 
     # check if oc exempt:
     if tr_sub.exempt_oc and recent_post.get_api_handle().is_original_content:
@@ -603,8 +618,7 @@ def look_for_rule_violations(do_cleanup: bool = False):
     else:
         print("doing usual")
         rs = s.execute(faster_statement)
-    print(f"query took this long {datetime.now()-tick}")
-
+    print(f"query took this long {datetime.now() - tick}")
 
     tick = datetime.now(pytz.utc)
 
@@ -640,7 +654,7 @@ def look_for_rule_violations(do_cleanup: bool = False):
         last_author = recent_post.author
 
         # Periodically save work to db
-        if (index + 1) % 20 == 0:
+        if (index + 1) % 40 == 0:
             s.commit()
             logger.info("$$$ -{0} current time".format(
                 datetime.now(pytz.utc).replace(tzinfo=timezone.utc) - recent_post.time_utc.replace(
@@ -650,7 +664,6 @@ def look_for_rule_violations(do_cleanup: bool = False):
         # Load subreddit settings
         subreddit_name = recent_post.subreddit_name.lower()
         tr_sub = update_list_with_subreddit(subreddit_name, request_update_if_needed=True)
-
 
         # Check if they're on the watchlist
         # recent_post.author = recent_post.author.lower()
@@ -666,7 +679,7 @@ def look_for_rule_violations(do_cleanup: bool = False):
             s.add(recent_post)
             notification_text = f"Hall pass was used by {subreddit_author.author_name}: http://redd.it/{recent_post.id}"
             REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, notification_text)
-            send_modmail(tr_sub, recent_post, None, notification_text)
+            tr_sub.send_modmail(body= notification_text)
             logger.debug(">>>hallpassed")
             continue
 
@@ -761,20 +774,17 @@ def look_for_rule_violations2(do_cleanup: bool = False):
     else:
         print("doing usual")
         rs = s.execute(faster_statement)
-    print(f"query took this long {datetime.now()-tick}")
+    print(f"query took this long {datetime.now() - tick}")
 
     tick = datetime.now(pytz.utc)
 
-    for row in rs:
+    for i, row in enumerate(rs):
+        print(f"========================{i}=================================")
         print(row[0], row[1], row[2], row[3], row[4])
-    for row in rs:
-        s.commit()  # put this at end of loop
-
-        # most_recent_post_id = row[0]
         post_ids = row[1].split(',')
-        posts: List[SubmittedPost] = [s.query(SubmittedPost).get(p) for p in post_ids]
-        most_recent_post: SubmittedPost = posts[-1]
-        reviewed_status = row[2].split(',')
+        posts = []
+        for post_id in post_ids:
+            posts.append(s.query(SubmittedPost).get(post_id))
         author_name: str = row[3]
         subreddit_name: str = row[4].lower()
 
@@ -787,100 +797,163 @@ def look_for_rule_violations2(do_cleanup: bool = False):
 
         # Load subreddit settings
         tr_sub = update_list_with_subreddit(subreddit_name, request_update_if_needed=True)
+        max_count = tr_sub.max_count_per_interval
 
-        # Check if they're on the watchlist
-        subreddit_author: SubAuthor = s.query(SubAuthor).get((subreddit_name, recent_post.author))
-        if subreddit_author:
-            next_eligible = subreddit_author.next_eligible
+        # Check if they're on the soft blacklist
+        subreddit_author: SubAuthor = s.query(SubAuthor).get((subreddit_name, author_name))
 
+        # Remove any posts that are prior to eligibility
+        left_over_posts = []
+        print(f"---max_count: {max_count}, interval:{tr_sub.min_post_interval_hrs} "
+              f"grace_period:{tr_sub.grace_period_mins}")
+        for j, post in enumerate(posts):
 
-        # check for hall pass  - should be done when querying posts instead?
-        if subreddit_author and subreddit_author.hall_pass > 0:
-            subreddit_author.hall_pass -= 1
-            s.add(subreddit_author)
-            recent_post.reviewed = True
-            recent_post.last_checked = datetime.now(pytz.utc)
-            recent_post.counted_status = 1
-            s.add(recent_post)
-            notification_text = f"Hall pass was used by {subreddit_author.author_name}: http://redd.it/{recent_post.id}"
-            REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, notification_text)
-            send_modmail(tr_sub, recent_post, None, notification_text)
-            logger.debug(">>>hallpassed")
-            continue
+            logger.info(f"{i}-{j}Checking: r/{subreddit_name}  {author_name}  {post.time_utc}  "
+                        f"url:{post.get_url()}  title:{post.title[0:30]}")
+            # Check for soft blacklist
 
-        if subreddit_author and subreddit_author.next_eligible:
-            print(f"next eligible {subreddit_author.next_eligible}")
-        if subreddit_author and subreddit_author.next_eligible and subreddit_author.next_eligible.replace(
-                tzinfo=timezone.utc) > datetime.now(pytz.utc):
-            was_successful = recent_post.mod_remove()
-            if was_successful:
+            if subreddit_author and post.time_utc < subreddit_author.next_eligible:
+                post.update(reviewed=True, flagged_duplicate=True, counted_status=3)
+                s.add(post)
+                logger.info(
+                    f"{i}-{j}\t\tpost removed - prior to eligibility")
                 try:
+                    post.mod_remove()
                     if tr_sub.comment:
-                        print('last_valid_post', subreddit_author.last_valid_post)
                         last_valid_post: SubmittedPost = s.query(SubmittedPost).get(
                             subreddit_author.last_valid_post) if subreddit_author.last_valid_post is not None else None
-                        make_comment(tr_sub, recent_post, [last_valid_post, ],
+                        make_comment(tr_sub, post, [last_valid_post, ],
                                      tr_sub.comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve,
                                      lock_thread=tr_sub.lock_thread, stickied=tr_sub.comment_stickied,
                                      next_eligibility=subreddit_author.next_eligible, blacklist=True)
                 except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
-                    logger.warning('something went wrong in creating comment %s', str(e))
-
-                recent_post.reviewed = True
-                recent_post.flagged_duplicate = True
-                recent_post.last_checked = datetime.now(pytz.utc)
-                recent_post.counted_status = 3
-
-                logger.info(f"post removed - prior to eligibility for user {recent_post.author} {recent_post.get_url()}"
-                            f" {recent_post.subreddit_name} {recent_post.title}")
-                s.add(subreddit_author)
-                s.add(recent_post)
-                continue
+                    logger.warning('something went wrong in removing post %s', str(e))
+            # Check for post exemptions
+            if not post.reviewed:
+                counted_status, result = check_for_post_exemptions(tr_sub, post)
+                logger.info(f"\t\tpost status: {result}")
+                if counted_status == 0:
+                    post.update(counted_status=0)
+                    s.add(post)
+                else:
+                    left_over_posts.append(post)
             else:
-                # Maybe recheck permissions if not allowed to remove posts
-                tr_sub.update_from_yaml(force_update=True)
+                logger.info(f"{i}-{j}\t\tpost status: already reviewed")
 
-            if subreddit_name not in WATCHED_SUBS:
-                print(f"CANNOT FIND SUBREDDIT!!! {recent_post.subreddit_name}")
+        """
+        # Skip if we don't need to go through each post
+        if len(left_over_posts) < max_count:
+            logger.info("Did not collect enough counted posts")
+            s.commit()
+            continue
+        """
+
+
+
+        # Collect all relevant posts
+        back_posts = s.query(SubmittedPost) \
+            .filter(SubmittedPost.flagged_duplicate.is_(False),
+                    SubmittedPost.subreddit_name.ilike(tr_sub.subreddit_name),
+                    SubmittedPost.time_utc > posts[0].time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins,
+                    SubmittedPost.time_utc < posts[-1].time_utc,  # posts not after last post in question
+                    SubmittedPost.author == author_name,
+                    SubmittedPost.counted_status != 0) \
+            .order_by(SubmittedPost.time_utc) \
+            .all()
+
+        possible_pre_posts = []
+        logger.info(f"Found {len(back_posts)} backposts")
+        if len(back_posts) == 0:
+            logger.info("Nothing to do, moving on.")
+            break
+        # Look for exempted posts
+        for j, post in enumerate(back_posts):
+            logger.info(f"{i}-{j} Backpost: r/{subreddit_name}  {author_name}  {post.time_utc}  "
+                        f"url:{post.get_url()}  title:{post.title[0:30]}")
+            if post.counted_status == 1:
+                logger.info(f"\tpost_counted_status counted status: {post.counted_status} Including")
+                possible_pre_posts.append(post)
+            elif post.counted_status == -1:
+                counted_status, result = check_for_post_exemptions(tr_sub, post)
+                if counted_status == 0:
+                    logger.info(f"\tpost exempt: {counted_status} {result}")
+                    post.update(counted_status=0)
+                    s.add(post)
+                elif counted_status == 1:
+                    logger.info(f"\tpost not exempt:{counted_status}  {result}")
+                    post.update(counted_status=1)
+                    possible_pre_posts.append(post)
+                    s.add(post)
+                else:
+                    logger.info(f"\tcounted status:{counted_status}  {result}. Not including")
+                    post.update(counted_status=counted_status)
+                    s.add(post)
+            else:
+                logger.info(f"\tpost_counted_status counted status: {post.counted_status}. Not including")
+
+
+        for j, post in enumerate(left_over_posts):
+            logger.info(f"{i}-{j} Reviewing: r/{subreddit_name}  {author_name}  {post.time_utc}  "
+                        f"url:{post.get_url()}  title:{post.title[0:30]}")
+            if post.reviewed:
+                print("\tAlready reviewed - skipping")
                 continue
 
-        # check for post exemptions
-        counted_status, result = check_for_post_exemptions(tr_sub, recent_post)
-        logger.info("does this {} count? {}".format(recent_post.get_url(), result))
-        since_post = datetime.now(pytz.utc) - recent_post.time_utc.replace(tzinfo=timezone.utc)
-        logger.info(
-            f"=================================================\n"
-            f"{index}-Checking '{recent_post.title[0:20]}...' by '{recent_post.author}' http://redd.it/{recent_post.id}"
-            f" subreddit:({recent_post.subreddit_name}): >-{since_post}<")
-        if counted_status == 0:
-            recent_post.counted_status = 0
-            recent_post.reviewed = True
-            recent_post.last_checked = datetime.now(pytz.utc)
-            s.add(recent_post)
-            continue
-        associated_reposts = find_previous_posts(tr_sub, recent_post)
-        verified_reposts_count = len(associated_reposts)
+            # filter those that are relevant to this particular post (within range but not in grace period)
+            """
+            associated_reposts = [x for x in relevant_posts if x.time_utc < post.time_utc and
+                                  (x.time_utc > post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins)
+                                  and not (x.get_status() == "self-deleted"  # grace period thing
+                                           and post.time_utc - x.time_utc < tr_sub.grace_period_mins)]
+            """
+            associated_reposts = []
+            for x in possible_pre_posts:
+                print(f"\tpost time:{post.time_utc} prev:{x.time_utc} furthestback: {post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins}")
+                if x.id == post.id:
+                    print("\t\t Same post")
+                    continue
+                if x.time_utc < post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins or x.time_utc > post.time_utc:
+                    print("\t\t Not in correct time period")
+                    continue
+                status = x.get_status()
+                print(f"\t\tpost status: {status} grace_period:{tr_sub.grace_period_mins} diff: {post.time_utc - x.time_utc}")
+                if status == "self-deleted" and post.time_utc - x.time_utc < tr_sub.grace_period_mins:
+                    print("\t\t Grace period exempt")
+                associated_reposts.append(x)
 
-        # Now check if actually went over threshold
-        if verified_reposts_count >= tr_sub.max_count_per_interval:
-            logger.info("----------------post time {0} | interval {1}  after {2} sub:{3}".format(
-                datetime.now(pytz.utc) - recent_post.time_utc.replace(tzinfo=timezone.utc),
-                tr_sub.min_post_interval,
-                recent_post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins,
-                recent_post.subreddit_name, recent_post.time_utc))
 
-            do_requested_action_for_valid_reposts(tr_sub, recent_post, associated_reposts)
-            recent_post.flagged_duplicate = True
-            # Keep preduplicate posts to keep track of later
-            for post in associated_reposts:
-                post.pre_duplicate = True
+
+            if len(associated_reposts) < tr_sub.max_count_per_interval:
+                logger.info(f"\tNot enough previous posts: {len(associated_reposts)}/{max_count}: "
+                            f"{','.join([x.id for x in associated_reposts])}")
+                post.update(reviewed=True, counted_status=0)
                 s.add(post)
-            check_for_actionable_violations(tr_sub, recent_post, associated_reposts)
-        recent_post.reviewed = True
-        recent_post.last_checked = datetime.now(pytz.utc)
-        s.add(recent_post)
+                s.commit()
+                continue
+
+            # check for hall pass  - should be done when querying posts instead?
+            if subreddit_author and subreddit_author.hall_pass > 0:
+                subreddit_author.hall_pass -= 1
+                notification_text = f"Hall pass was used by {subreddit_author.author_name}: http://redd.it/{post.id}"
+                REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, notification_text)
+                tr_sub.send_modmail(subject="Hall pass was used", body=notification_text)
+                logger.debug(">>>hallpassed")
+                post.update(reviewed=True, counted_status=1, flagged_duplicate=False)
+                s.add(subreddit_author)
+                s.add(post)
+            else:
+                do_requested_action_for_valid_reposts(tr_sub, post, associated_reposts)
+                post.update(reviewed=True, counted_status=1, flagged_duplicate=True)
+                s.add(post)
+                # Keep preduplicate posts to keep track of later
+                for post in associated_reposts:
+                    post.pre_duplicate = True
+                    s.add(post)
+
+                check_for_actionable_violations(tr_sub, post, associated_reposts)
+        s.commit()
+
     s.commit()
-    return
 
 
 def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post: SubmittedPost,
@@ -896,15 +969,19 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
             message = "Repost that violates rules: [{title}]({url}) by [{author}](/u/{author})"
         send_modmail(tr_sub, message, recent_post=recent_post, prev_post=possible_repost, )
     if tr_sub.action == "remove":
-        try:
-            was_successful = recent_post.mod_remove()
-            logger.debug("....removed post now")
-            if not was_successful:
-                return
-        except praw.exceptions.APIException:
-            pass
-        except prawcore.exceptions.Forbidden:
-            pass
+        post_status = recent_post.get_status()
+        if post_status == "up":
+            try:
+                was_successful = recent_post.mod_remove()
+                logger.debug("\tremoved post now")
+                if not was_successful:
+                    logger.debug("\tcould not remove post")
+            except praw.exceptions.APIException:
+                logger.debug("\tcould not remove post")
+            except prawcore.exceptions.Forbidden:
+                logger.debug("\tcould not remove post: Forbidden")
+        else:
+            logger.debug("\tpost not up")
 
     if tr_sub.action == "report":
         if tr_sub.report_reason:
@@ -951,14 +1028,16 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
             # tr_sub.ignore_AutoModerator_removed
 
             REDDIT_CLIENT.redditor(recent_post.author).message(
-                f"Please note that you are close approaching your posting limit for {recent_post.subreddit_name}",
+                f"Beep! Boop! Please note that you are close approaching "
+                f"your posting limit for {recent_post.subreddit_name}",
                 f"This subreddit (/r/{recent_post.subreddit_name}) only allows {tr_sub.max_count_per_interval} post(s) "
                 f"per {tr_sub.min_post_interval_hrs} hour(s). "
                 f"This {'does NOT' if tr_sub.ignore_moderator_removed else 'DOES'} include mod-removed posts. "
-                f"Any new posts you make before {most_recent_reposts[0].time_utc + tr_sub.min_post_interval} UTC "
+                f"While this post was within the rule, please do not make any new posts before "
+                f"{most_recent_reposts[0].time_utc + tr_sub.min_post_interval} UTC, as it "
                 f"may result in a ban. If you made a title mistake you have "
                 f"STRICTLY {humanize.precisedelta(tr_sub.grace_period_mins)} to delete it and repost it. "
-                f"It may not always get sent out, however, due to reddit limitations. "
+                f"This is an automated message. "
             )
         except praw.exceptions.APIException:
             pass
@@ -1005,11 +1084,11 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
             else:
                 # Not permanent ban
                 ban_message += f"\n\nYour ban will last {num_days} days from this message. " \
-                               f"**Repeat infractions result in a permanent ban!**" \
+                               f"**Repeat infractions result in a permanent ban!**"
 
                 REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                    recent_post.author, ban_note="ModhelpfulBot: repeated spam", ban_message=ban_message[:999],
-                    duration=num_days)
+                            recent_post.author, ban_note="ModhelpfulBot: repeated spam", ban_message=ban_message[:999],
+                            duration=num_days)
                 logger.info(f"Ban for {recent_post.author} succeeded for {num_days} days")
         except praw.exceptions.APIException:
             pass
@@ -1164,7 +1243,7 @@ def record_actioned(comment_id: str):
     if response:
         return
     s.add(ActionedComments(comment_id))
-    s.commit()
+    # s.commit()
 
 
 def send_broadcast_messages():
@@ -1194,8 +1273,8 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters) 
     subreddit_name: str = subreddit_name[3:] if subreddit_name.startswith('/r/') else subreddit_name
     command: str = command[1:] if command.startswith("$") else command
 
-    tr_sub, already_existed_in_db = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=False)
-    if not already_existed_in_db:
+    tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=False)
+    if not tr_sub:
         return "Error retrieving information for /r/{}".format(subreddit_name), True
     moderators: List[str] = tr_sub.get_mods_list()
     print("asking for permission: {}, mod list: {}".format(requestor_name, ",".join(moderators)))
@@ -1441,7 +1520,7 @@ def handle_direct_messages():
                 # TODO: write help message for other types of bans - or detect removal reason
                 record_actioned("ban_note: {0}".format(message.author))
 
-                tr_sub: TrackedSubreddit = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
+                tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
                 if tr_sub and tr_sub.modmail_posts_reply and message.author:
                     try:
                         message.reply(tr_sub.get_author_summary(message.author.name))
@@ -1468,7 +1547,7 @@ def handle_direct_messages():
                               "I am a non-sentient bot, and I act only in the accordance of the rules set by the "
                               "moderators "
                               "of the subreddit. Unfortunately, I am unable to answer or direct requests. Please "
-                              "see this [link](https://www.reddit.com/r/SolariaHues/comments/mz7zdp/")
+                              "see this [link](https://www.reddit.com/r/SolariaHues/comments/mz7zdp/)")
                 import pprint
 
                 # assume you have a Reddit instance bound to variable `reddit`
@@ -1482,11 +1561,12 @@ def handle_direct_messages():
 
         message.mark_read()
         record_actioned(message_id)
+    s.commit()
 
 
 def mod_mail_invitation_to_moderate(message):
     subreddit_name = message.subject.replace("invitation to moderate /r/", "")
-    tr_sub: TrackedSubreddit = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=False)
+    tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=False)
 
     # accept invite if accepting invites or had been accepted previously
     if ACCEPTING_NEW_SUBS or tr_sub:
@@ -1542,8 +1622,8 @@ def handle_modmail_message(convo):
             import re
             urls = re.findall(REDDIT_LINK_REGEX, convo.messages[0].body)
             if len(urls) == 2:  # both link and link description
-                print(f"found url: {urls[0]}")
-                submission = REDDIT_CLIENT.submission(urls[0])
+                print(f"found url: {urls[0][1]}")
+                submission = REDDIT_CLIENT.submission(urls[0][1])
                 try:
                     in_submission_urls = re.findall(LINK_REGEX, submission.selftext)
                     bad_words = "Raya", 'raya', 'dating app'
@@ -1628,6 +1708,7 @@ def handle_modmail_message(convo):
             logger.debug("reply failed {0}".format(response))
     record_actioned("mm{}-{}".format(convo.id, convo.num_messages))
     convo.read()
+    s.commit()
 
 
 def handle_modmail_messages():
@@ -1648,10 +1729,6 @@ def handle_modmail_messages():
     # mod_actions, num_messages, obj_ids, owner (subreddit obj), state, subject, user
 
 
-def most_common(lst):
-    return max(set(lst), key=lst.count)
-
-
 def update_list_with_all_active_subs():
     global WATCHED_SUBS
     subs = s.query(TrackedSubreddit).filter(TrackedSubreddit.last_updated > datetime.now() - timedelta(days=3)).all()
@@ -1667,7 +1744,7 @@ def update_list_with_subreddit(subreddit_name: str, request_update_if_needed=Fal
     if subreddit_name in WATCHED_SUBS:  # check if loaded
         tr_sub = WATCHED_SUBS[subreddit_name]
     else:  # not loaded into memory
-        tr_sub: TrackedSubreddit = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=False)
+        tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=False)
         if not tr_sub:  # not in database -> create it
             tr_sub = TrackedSubreddit(subreddit_name)
             to_update_db = True
@@ -1681,11 +1758,10 @@ def update_list_with_subreddit(subreddit_name: str, request_update_if_needed=Fal
         #  Notify (only once) if updating did not work.
         if not worked and hasattr(tr_sub, "settings_revision_date"):
             if not check_actioned(f"wu-{subreddit_name}-{tr_sub.settings_revision_date}"):
-                send_modmail(tr_sub,
+                tr_sub.send_modmail(
                              f"There was an error loading your {BOT_NAME} configuration: {{status}} "
                              f"\n\n https://www.reddit.com/r/{{subreddit_name}}"
-                             f"/wiki/edit/{BOT_NAME}",
-                             recent_post=recent_post)
+                             f"/wiki/edit/{BOT_NAME}")
                 record_actioned(f"wu-{subreddit_name}-{tr_sub.settings_revision_date}")
         else:
             to_update_db = True
@@ -1725,6 +1801,7 @@ def check_new_submissions2a(query_limit=800):
 
         subreddit_name = str(post_to_review.subreddit).lower()
         if subreddit_name in subreddit_names_complete:
+            # print(f'done w/ {subreddit_name}')
             continue
         previous_post: SubmittedPost = s.query(SubmittedPost).get(post_to_review.id)
         if previous_post:
@@ -1784,10 +1861,10 @@ def main_loop():
 
         # only do this if not too busy
         # if last_index < 30:
-        look_for_rule_violations(do_cleanup=(i % 30 != 0))
+
+        look_for_rule_violations2(do_cleanup=(i % 30 == 0))  # uses a lot of resources
 
         if i % 75 == 0:
-
             purge_old_records()
 
         print("$$$checking rule violations took this long", datetime.now() - start)
