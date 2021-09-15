@@ -139,24 +139,28 @@ class SubmittedPost(Base):
             logger.warning(f'Something with replying to this post:: http://redd.it/{self.id}')
             return False
 
-    def get_status(self) -> str:
+    def get_posted_status(self) -> str:
         _ = self.get_api_handle()
         self.self_deleted = False if self.api_handle.author else True
         self.banned_by = self.api_handle.banned_by
         if not self.banned_by and not self.self_deleted:
             return "up"
-        elif self.banned_by is True:
-            return "spam filtered"
+        elif self.banned_by:
+            if self.banned_by is True:
+                return "spam filtered"
+            elif self.banned_by == "AutoModerator":
+                return "Automod-removed"
+            elif self.banned_by == BOT_NAME:
+                return "MHB-removed"
+            elif "bot" in self.banned_by.lower():
+                return "Bot-removed"
+            else:
+                return "Mod-removed"
         elif self.self_deleted:
             return "self-deleted"
-        elif self.banned_by == "AutoModerator":
-            return "Automod-removed"
-        elif self.banned_by == BOT_NAME:
-            return "MHB-removed"
-        elif "bot" in self.banned_by.lower():
-            return "Bot-removed"
         else:
-            return "Mod-removed"
+            print(f"unknown status: {self.banned_by}")
+            return "Unknown status"
 
     def update(self, reviewed=None, flagged_duplicate=None, counted_status=None):
         if reviewed is not None:
@@ -190,7 +194,7 @@ class SubAuthor(Base):
 
 
 class TrackedSubreddit(Base):
-    __tablename__ = 'TrackedSubs7'
+    __tablename__ = 'TrackedSubs'
     subreddit_name = Column(String(21), nullable=False, primary_key=True)
     checking_mail_enabled = Column(Boolean, nullable=True)
     settings_yaml_txt = Column(UnicodeText, nullable=True)
@@ -419,7 +423,7 @@ class TrackedSubreddit(Base):
             response_lines.append(
                 "|{}|{}|u/{}|[{}]({})|{}|\n".format(post.time_utc, diff_str, post.author, post.title[0:15],
                                                     post.get_comments_url(),
-                                                    post.get_status()))
+                                                    post.get_posted_status()))
             diff = post.time_utc
         response_lines.append("Current settings: {} post(s) per {} hour(s)"
                               .format(self.max_count_per_interval, self.min_post_interval_hrs))
@@ -482,7 +486,7 @@ def already_has_bot_comment(submission: praw.models.Submission):  # repurpose to
 
 def find_previous_posts(tr_sub: TrackedSubreddit, recent_post: SubmittedPost):
     # Find other possible reposts by author
-    tick = datetime.now()
+    tick = datetime.now(pytz.utc)
     possible_reposts = s.query(SubmittedPost) \
         .filter(SubmittedPost.flagged_duplicate.is_(False),
                 SubmittedPost.subreddit_name.ilike(tr_sub.subreddit_name),
@@ -524,19 +528,22 @@ def find_previous_posts(tr_sub: TrackedSubreddit, recent_post: SubmittedPost):
     logger.info(">>>total {} max {} query time: {}".format(
         len(most_recent_reposts),
         tr_sub.max_count_per_interval,
-        datetime.now() - tick
+        datetime.now(pytz.utc) - tick
     ))
     return most_recent_reposts
 
 
 def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPost):
     # check if removed
-    banned_by = recent_post.get_api_handle().banned_by
+
+    status = recent_post.get_posted_status()
+    # banned_by = recent_post.get_api_handle().banned_by
     # logger.debug(">>>>exemption status: {}".format(banned_by))
-    if banned_by is True or ((tr_sub.ignore_AutoModerator_removed and banned_by == "AutoModerator")
-                             or (tr_sub.ignore_moderator_removed and banned_by in tr_sub.subreddit_mods)):
+
+    if status == "spam filtered" or ((tr_sub.ignore_AutoModerator_removed and status == "Automod_removed")
+                                     or (tr_sub.ignore_moderator_removed and status == "Mod-removed")):
         # logger.debug("...already removed")
-        return 0, "post is removed by a mod"
+        return 0, f"post is {status}"
 
     # check if oc exempt:
     if tr_sub.exempt_oc and recent_post.get_api_handle().is_original_content:
@@ -577,7 +584,7 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
                 (isinstance(tr_sub.title_exempt_keyword, list)
                  and any(x in flex_title for x in [y.lower() for y in tr_sub.title_exempt_keyword])):
             logger.debug(">>>title keyword exempted")
-            return 0, "title keyword  exempt {}".format(tr_sub.title_exempt_keyword)
+            return 0, "title keyword exempt {tr_sub.title_exempt_keyword} -> exemption"
 
     # title keywords only to restrict:
     if tr_sub.title_not_exempt_keyword:
@@ -591,7 +598,7 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
                 (isinstance(tr_sub.title_not_exempt_keyword, list)
                  and all(x not in flex_title for x in [y.lower() for y in tr_sub.title_not_exempt_keyword])):
             logger.debug(">>>title keyword restricted")
-            return 0, "title keyword not exempt {}".format(tr_sub.title_exempt_keyword)
+            return 0, f"title does not have {tr_sub.title_not_exempt_keyword} -> exemption"
 
     # Ignore posts by mods
     if tr_sub.exempt_moderator_posts is True and recent_post.author in tr_sub.subreddit_mods:
@@ -606,9 +613,9 @@ def look_for_rule_violations(do_cleanup: bool = False):
     global WATCHED_SUBS
     logger.debug("querying recent post(s)")
 
-    faster_statement = "select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 from RedditPost t inner join TrackedSubs7 s on t.subreddit_name = s.subreddit_name where counted_status !=0 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 72 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
+    faster_statement = "select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 from RedditPost t inner join TrackedSubs s on t.subreddit_name = s.subreddit_name where counted_status !=0 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 72 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
 
-    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 FROM RedditPost t INNER JOIN TrackedSubs7 s ON t.subreddit_name = s.subreddit_name WHERE counted_status !=0 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
+    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE counted_status !=0 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
     recent_posts = list()
 
     tick = datetime.now()
@@ -758,14 +765,20 @@ def look_for_rule_violations(do_cleanup: bool = False):
     return
 
 
+class PostingGroup:
+    def __init__(self, author_name=None, subreddit_name=None, posts=None):
+        self.author_name=author_name
+        self.subreddit_name = subreddit_name
+        self.posts = posts
+
 def look_for_rule_violations2(do_cleanup: bool = False):
     global REDDIT_CLIENT
     global WATCHED_SUBS
     logger.debug("querying recent post(s)")
 
-    faster_statement = "select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 from RedditPost t inner join TrackedSubs7 s on t.subreddit_name = s.subreddit_name where counted_status !=0 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 72 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
+    faster_statement = "select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 from RedditPost t inner join TrackedSubs s on t.subreddit_name = s.subreddit_name where counted_status !=0 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 72 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
 
-    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 FROM RedditPost t INNER JOIN TrackedSubs7 s ON t.subreddit_name = s.subreddit_name WHERE counted_status !=0 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
+    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE counted_status !=0 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
 
     tick = datetime.now()
     if do_cleanup:
@@ -776,17 +789,25 @@ def look_for_rule_violations2(do_cleanup: bool = False):
         rs = s.execute(faster_statement)
     print(f"query took this long {datetime.now() - tick}")
 
-    tick = datetime.now(pytz.utc)
 
-    for i, row in enumerate(rs):
-        print(f"========================{i}=================================")
+    posting_groups=[]
+    for row in rs:
         print(row[0], row[1], row[2], row[3], row[4])
         post_ids = row[1].split(',')
         posts = []
         for post_id in post_ids:
+            # print(f"\t{post_id}")
             posts.append(s.query(SubmittedPost).get(post_id))
-        author_name: str = row[3]
-        subreddit_name: str = row[4].lower()
+        # print(row[0], row[1], row[2], row[3], row[4])
+        # post = s.query(SubmittedPost).get(row[0])
+        # predecessors = row[1].split(',')
+        # predecessors_times = row[2].split(',')
+        posting_groups.append(PostingGroup(author_name=row[3], subreddit_name=row[4].lower(), posts=posts))
+    print(f"Total found: {len(posting_groups)}")
+    tick = datetime.now(pytz.utc)
+    for i, pg in enumerate(posting_groups):
+        print(f"========================{i}/{len(posting_groups)}=================================")
+
 
         # Break if taking too long
         tock = datetime.now(pytz.utc) - tick
@@ -796,19 +817,19 @@ def look_for_rule_violations2(do_cleanup: bool = False):
             break
 
         # Load subreddit settings
-        tr_sub = update_list_with_subreddit(subreddit_name, request_update_if_needed=True)
+        tr_sub = update_list_with_subreddit(pg.subreddit_name, request_update_if_needed=True)
         max_count = tr_sub.max_count_per_interval
 
         # Check if they're on the soft blacklist
-        subreddit_author: SubAuthor = s.query(SubAuthor).get((subreddit_name, author_name))
+        subreddit_author: SubAuthor = s.query(SubAuthor).get((pg.subreddit_name, pg.author_name))
 
         # Remove any posts that are prior to eligibility
         left_over_posts = []
         print(f"---max_count: {max_count}, interval:{tr_sub.min_post_interval_hrs} "
               f"grace_period:{tr_sub.grace_period_mins}")
-        for j, post in enumerate(posts):
+        for j, post in enumerate(pg.posts):
 
-            logger.info(f"{i}-{j}Checking: r/{subreddit_name}  {author_name}  {post.time_utc}  "
+            logger.info(f"{i}-{j}Checking: r/{pg.subreddit_name}  {pg.author_name}  {post.time_utc}  "
                         f"url:{post.get_url()}  title:{post.title[0:30]}")
             # Check for soft blacklist
 
@@ -854,9 +875,9 @@ def look_for_rule_violations2(do_cleanup: bool = False):
         back_posts = s.query(SubmittedPost) \
             .filter(SubmittedPost.flagged_duplicate.is_(False),
                     SubmittedPost.subreddit_name.ilike(tr_sub.subreddit_name),
-                    SubmittedPost.time_utc > posts[0].time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins,
-                    SubmittedPost.time_utc < posts[-1].time_utc,  # posts not after last post in question
-                    SubmittedPost.author == author_name,
+                    SubmittedPost.time_utc > pg.posts[0].time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins,
+                    SubmittedPost.time_utc < pg.posts[-1].time_utc,  # posts not after last post in question
+                    SubmittedPost.author == pg.author_name,
                     SubmittedPost.counted_status != 0) \
             .order_by(SubmittedPost.time_utc) \
             .all()
@@ -864,11 +885,15 @@ def look_for_rule_violations2(do_cleanup: bool = False):
         possible_pre_posts = []
         logger.info(f"Found {len(back_posts)} backposts")
         if len(back_posts) == 0:
+            if pg.posts[-1].counted_status != 3:
+                pg.posts[-1].update(reviewed=True, counted_status=0)
+                s.add(pg.posts[-1])
+
             logger.info("Nothing to do, moving on.")
-            break
+            continue
         # Look for exempted posts
         for j, post in enumerate(back_posts):
-            logger.info(f"{i}-{j} Backpost: r/{subreddit_name}  {author_name}  {post.time_utc}  "
+            logger.info(f"{i}-{j} Backpost: r/{pg.subreddit_name}  {pg.author_name}  {post.time_utc}  "
                         f"url:{post.get_url()}  title:{post.title[0:30]}")
             if post.counted_status == 1:
                 logger.info(f"\tpost_counted_status counted status: {post.counted_status} Including")
@@ -893,9 +918,9 @@ def look_for_rule_violations2(do_cleanup: bool = False):
 
 
         for j, post in enumerate(left_over_posts):
-            logger.info(f"{i}-{j} Reviewing: r/{subreddit_name}  {author_name}  {post.time_utc}  "
+            logger.info(f"{i}-{j} Reviewing: r/{pg.subreddit_name}  {pg.author_name}  {post.time_utc}  "
                         f"url:{post.get_url()}  title:{post.title[0:30]}")
-            if post.reviewed:
+            if post.reviewed or post.counted_status == 3:
                 print("\tAlready reviewed - skipping")
                 continue
 
@@ -910,15 +935,19 @@ def look_for_rule_violations2(do_cleanup: bool = False):
             for x in possible_pre_posts:
                 print(f"\tpost time:{post.time_utc} prev:{x.time_utc} furthestback: {post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins}")
                 if x.id == post.id:
-                    print("\t\t Same post")
-                    continue
-                if x.time_utc < post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins or x.time_utc > post.time_utc:
+                    print("\t\t Same post - breaking loop")
+                    break
+                if x.time_utc > post.time_utc:
+                    print("\t\t Post is ahead - breaking loop")
+                    break
+                if x.time_utc < post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins:
                     print("\t\t Not in correct time period")
                     continue
-                status = x.get_status()
-                print(f"\t\tpost status: {status} grace_period:{tr_sub.grace_period_mins} diff: {post.time_utc - x.time_utc}")
+                status = x.get_posted_status()
+                print(f"\t\tpost status: {status} gp:{tr_sub.grace_period_mins} diff: {post.time_utc - x.time_utc}")
                 if status == "self-deleted" and post.time_utc - x.time_utc < tr_sub.grace_period_mins:
                     print("\t\t Grace period exempt")
+                    continue
                 associated_reposts.append(x)
 
 
@@ -935,7 +964,7 @@ def look_for_rule_violations2(do_cleanup: bool = False):
             if subreddit_author and subreddit_author.hall_pass > 0:
                 subreddit_author.hall_pass -= 1
                 notification_text = f"Hall pass was used by {subreddit_author.author_name}: http://redd.it/{post.id}"
-                REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, notification_text)
+                REDDIT_CLIENT.redditor(BOT_OWNER).message(pg.subreddit_name, notification_text)
                 tr_sub.send_modmail(subject="Hall pass was used", body=notification_text)
                 logger.debug(">>>hallpassed")
                 post.update(reviewed=True, counted_status=1, flagged_duplicate=False)
@@ -969,7 +998,7 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
             message = "Repost that violates rules: [{title}]({url}) by [{author}](/u/{author})"
         send_modmail(tr_sub, message, recent_post=recent_post, prev_post=possible_repost, )
     if tr_sub.action == "remove":
-        post_status = recent_post.get_status()
+        post_status = recent_post.get_posted_status()
         if post_status == "up":
             try:
                 was_successful = recent_post.mod_remove()
@@ -1150,7 +1179,7 @@ def populate_tags(input_text, recent_post, tr_sub=None, prev_post=None, prev_pos
             response_lines.append(
                 "|{5}|{0}|[{1}](/u/{1})|[{2}]({3})|{4}|\n".format(post.time_utc, post.author, post.title,
                                                                   post.get_comments_url(),
-                                                                  post.get_status(), post.id))
+                                                                  post.get_posted_status(), post.id))
         final_response = "".join(response_lines)
         input_text = input_text.replace("{summary table}", final_response)
 
@@ -1273,7 +1302,7 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters) 
     subreddit_name: str = subreddit_name[3:] if subreddit_name.startswith('/r/') else subreddit_name
     command: str = command[1:] if command.startswith("$") else command
 
-    tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=False)
+    tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=True)
     if not tr_sub:
         return "Error retrieving information for /r/{}".format(subreddit_name), True
     moderators: List[str] = tr_sub.get_mods_list()
@@ -1704,7 +1733,7 @@ def handle_modmail_message(convo):
                 .format(subreddit_name, "modmail", command, response)
             if "no_command" is not command:
                 REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
-        except prawcore.exceptions.BadRequest:
+        except (prawcore.exceptions.BadRequest, praw.exceptions.RedditAPIException):
             logger.debug("reply failed {0}".format(response))
     record_actioned("mm{}-{}".format(convo.id, convo.num_messages))
     convo.read()
@@ -1772,7 +1801,7 @@ def update_list_with_subreddit(subreddit_name: str, request_update_if_needed=Fal
 
 
 def purge_old_records():
-    purge_statement = "delete t  from RedditPost t inner join TrackedSubs7 s on t.subreddit_name = s.subreddit_name where  t.time_utc  < utc_timestamp() - INTERVAL greatest(s.min_post_interval_mins, 60*24*14) MINUTE  and t.flagged_duplicate=0 and t.pre_duplicate=0"
+    purge_statement = "delete t  from RedditPost t inner join TrackedSubs s on t.subreddit_name = s.subreddit_name where  t.time_utc  < utc_timestamp() - INTERVAL greatest(s.min_post_interval_mins, 60*24*14) MINUTE  and t.flagged_duplicate=0 and t.pre_duplicate=0"
     _ = s.execute(purge_statement)
 
 
@@ -1849,7 +1878,7 @@ def check_spam_submissions(subreddit_name='mod'):
 def main_loop():
     load_settings()
 
-    i = -1
+    i = 0
     while True:
         print('start_loop')
 
