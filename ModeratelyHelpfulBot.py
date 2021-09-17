@@ -9,6 +9,7 @@ import praw
 import prawcore
 import pytz
 import yaml
+import re
 from praw import exceptions
 from praw.models import Submission
 from sqlalchemy import *
@@ -30,6 +31,11 @@ clean actioned comments after 3 months
 fix logging
 """
 
+MINOR_KWS = []
+
+#ASL_REGEX =r"((?P<age>[0-9]){2}[/ \\]?(?P<g>[mMFf]{1}))|((?P<g2>[mMFf]{1})[/ \\]?(?P<age2>[0-9]){2})"
+ASL_REGEX = r"((?P<age>[0-9]{2})([/ \\-]?|(\]? \[))(?P<g>[mMFf]{1}))|((?P<g2>[mMFf]{1})([/ \\-]?|(\]? \[))(?P<age2>[0-9]{2}))"
+# Non binary?
 
 # Set up database
 engine = create_engine(DB_ENGINE)
@@ -58,6 +64,7 @@ class PostedStatus(Enum):
     BOT_RM = "Bot-removed"
     SPAM_FLT = "Spam-filtered"
     UNKNOWN = "Unknown status"
+    FH_RM = "Flair_Helper removed"
 
 
 class CountedStatus(Enum):
@@ -80,6 +87,7 @@ class CountedStatus(Enum):
     TITLE_KW_NOT_EXEMPT = 15
     MODPOST_EXEMPT = 16
     GRACE_PERIOD_EXEMPT = 17
+    FLAIR_HELPER = 18
 
 
 # For messaging subreddits that use bot
@@ -97,9 +105,9 @@ class Broadcast(Base):
 
 class TrackedAuthor(Base):
     __tablename__ = 'TrackedAuthor'
-    author_name = Column(String(21), nullable=True)
+    author_name = Column(String(21), nullable=True, primary_key=True)
     nsfw_pct = Column(Integer)
-    last_calculated = Column(DateTime, nullable=False)
+    last_calculated = Column(DateTime, nullable=True)
     created_date = Column(DateTime, nullable=False)
     gender = Column(String(5), nullable=True)
     age = Column(Integer)
@@ -120,16 +128,45 @@ class TrackedAuthor(Base):
     def calculate_nsfw(self):
         total =50
         count = 0
+        age = 0
         api_handle = self.get_api_handle()
         sublisting: SubListing = api_handle.comments
         comments_generator: ListingGenerator = sublisting.new(limit=total)
-        comments: List[praw.models.reddit.comment.Comment] = list(comments_generator)
-        for comment in comments:
-            if comment.subreddit.over18:
-                count += 1
-        self.nsfw_pct = (count*100)/total
+        try:
+            comments: List[praw.models.reddit.comment.Comment] = list(comments_generator)
+            for comment in comments:
+                if comment.subreddit.over18:
+                    count += 1
+                if not age:
+                    age = get_age(comment.body)
+                    if age > 10:
+                        self.age = age
+            self.nsfw_pct = (count*100)/total
+        except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden):
+            pass
         return self.nsfw_pct
 
+
+def get_age(input_text: str):
+    matches = re.search(ASL_REGEX, input_text)
+    age = -1
+    if matches:
+        if matches.group('age'):
+            age = int(matches.group('age'))
+        if matches.group('age2'):
+            age = int(matches.group('age2'))
+    else:
+        matches = re.match(r'(?P<age>[0-9]{2})', input_text[0:2])
+        if matches:
+            if matches.group('age'):
+                age = int(matches.group('age'))
+        else:
+            matches = re.match(r"[iI]'?m (?P<age>[0-9]{2})", input_text)
+            if matches:
+                if matches.group('age'):
+                    age = int(matches.group('age'))
+    # print(f"age: {age}  text:{input_text} ")
+    return age
 
 class SubmittedPost(Base):
     __tablename__ = 'RedditPost'
@@ -155,9 +192,7 @@ class SubmittedPost(Base):
     response_time = Column(DateTime, nullable=True)  # need to add everywhere
     review_debug = Column(String(191), nullable=True)
     flushed_to_log = Column(Boolean, nullable=False)
-
-
-
+    nsfw_repliers_checked = Column(Boolean, nullable=False)
 
     api_handle = None
 
@@ -180,6 +215,12 @@ class SubmittedPost(Base):
         self.post_flair = submission.link_flair_text
         self.author_flair = submission.author_flair_text
         self.response_time = None
+
+
+
+        age = get_age(self.title)
+        if 21 > age > 13:
+            self.post_flair = "strict sfw"
 
     def get_url(self) -> str:
         return f"http://redd.it/{self.id}"
@@ -264,6 +305,8 @@ class SubmittedPost(Base):
 
             if self.banned_by == "AutoModerator":
                 return PostedStatus.AUTOMOD_RM
+            elif self.banned_by == "Flair_Helper":
+                return PostedStatus.FH_RM
             elif self.banned_by == BOT_NAME:
                 return PostedStatus.MHB_RM
             elif "bot" in self.banned_by.lower():
@@ -616,6 +659,8 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
         return CountedStatus.SPAMMED_EXMPT, ""
     elif tr_sub.ignore_AutoModerator_removed and status == PostedStatus.AUTOMOD_RM:
         return CountedStatus.AM_RM_EXEMPT, ""
+    elif tr_sub.ignore_moderator_removed and status == PostedStatus.FH_RM:
+        return CountedStatus.FLAIR_HELPER
     elif tr_sub.ignore_moderator_removed and status == PostedStatus.MOD_RM:
         return CountedStatus.MOD_RM_EXEMPT, ""
     elif tr_sub.exempt_oc and recent_post.get_api_handle().is_original_content:
@@ -784,7 +829,8 @@ def look_for_rule_violations2(do_cleanup: bool = False):
 
         # Collect all relevant posts
         back_posts = s.query(SubmittedPost) \
-            .filter(SubmittedPost.flagged_duplicate.is_(False),
+            .filter(
+                    # SubmittedPost.flagged_duplicate.is_(False), # redundant with new flag
                     SubmittedPost.subreddit_name.ilike(tr_sub.subreddit_name),
                     SubmittedPost.time_utc > pg.posts[0].time_utc - tr_sub.min_post_interval + tr_sub.grace_period_mins,
                     SubmittedPost.time_utc < pg.posts[-1].time_utc,  # posts not after last post in question
@@ -937,7 +983,8 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
     possible_repost = most_recent_reposts[-1]
     tick = datetime.now()
     other_spam_by_author = s.query(SubmittedPost).filter(
-        SubmittedPost.flagged_duplicate.is_(True),
+        # SubmittedPost.flagged_duplicate.is_(True),
+        SubmittedPost.counted_status == CountedStatus.FLAGGED.value,
         SubmittedPost.author == recent_post.author,
         SubmittedPost.subreddit_name.ilike(tr_sub.subreddit_name),
         SubmittedPost.time_utc < recent_post.time_utc) \
@@ -1352,10 +1399,12 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters) 
             subreddit_author.next_eligible = datetime(2019, 1, 1, 0, 0)
             return "User was removed from blacklist", False
         posts = s.query(SubmittedPost).filter(SubmittedPost.author == author_name_to_check,
-                                              SubmittedPost.flagged_duplicate.is_(True),
+                                              # SubmittedPost.flagged_duplicate.is_(True),
+                                              SubmittedPost.counted_status == CountedStatus.FLAGGED.value,
                                               SubmittedPost.subreddit_name == tr_sub.subreddit_name).all()
         for post in posts:
             post.flagged_duplicate = False
+            post.counted_status = CountedStatus.EXEMPTED
             s.add(post)
         s.commit()
     elif command == "unban":
@@ -1421,7 +1470,8 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters) 
                      "Update report: \n\n >{1}".format(subreddit_name, status, help_text)
         bot_owner_message = "subreddit: {0}\n\nrequestor: {1}\n\nreport: {2}" \
             .format(subreddit_name, requestor_name, status)
-        REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
+        # REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
+        send_modmail(TrackedSubreddit.get_subreddit_by_name("ModeratelyHelpfulBot"),  bot_owner_message)
         s.add(tr_sub)
         s.commit()
         return reply_text, True
@@ -1478,6 +1528,7 @@ def handle_direct_messages():
             bot_owner_message = "subreddit: {0}\n\nrequestor: {1}\n\nreport: {2}\n\nreport: {3}" \
                 .format(subreddit_name, requestor_name, command, response)
             REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
+
         elif requestor_name and not check_actioned(requestor_name):
             record_actioned(requestor_name)
             message.mark_read()
@@ -1532,6 +1583,7 @@ def handle_modmail_message(convo):
     # Ignore old messages past 24h
     if iso8601.parse_date(convo.last_updated) < datetime.now(timezone.utc) - timedelta(hours=24):
         convo.read()
+
         return
     initiating_author_name = convo.authors[0].name
     subreddit_name = convo.owner.display_name
@@ -1544,6 +1596,7 @@ def handle_modmail_message(convo):
     # Ignore if already actioned (at this many message #s)
     if check_actioned("mm{}-{}".format(convo.id, convo.num_messages)):
         convo.read()
+
         return
 
     if initiating_author_name:
@@ -1551,6 +1604,7 @@ def handle_modmail_message(convo):
         if subreddit_author and subreddit_author.currently_blacklisted:
             convo.reply("This author is modmail-blacklisted", internal=True)
             convo.archive()
+
             return
 
     response = None
@@ -1565,6 +1619,10 @@ def handle_modmail_message(convo):
             and initiating_author_name != "AutoModerator"\
             and initiating_author_name != "Sub_Mentions":
 
+        # Join request
+        if "ADD USER" in convo.messages[0].body:
+            record_actioned("mm{}-{}".format(convo.id, convo.num_messages))
+            return
 
         # Automated approval (used for new account screening - like in /r/dating)
         if tr_sub.modmail_auto_approve_messages_with_links:
@@ -1638,7 +1696,7 @@ def handle_modmail_message(convo):
                         # Add removal reason if found
                         if removal_reason:
                             response += f"\n\nIf so, does this answer your question?\n\n>{removal_reason}"
-                    debug_notify = True
+                    #debug_notify = True
 
             # Having previous posts reply
             if not response and recent_posts and tr_sub.modmail_posts_reply:
@@ -1703,7 +1761,8 @@ def handle_modmail_message(convo):
                                 f"https://mod.reddit.com/mail/all/{convo.id}"[0:9999]
 
             if debug_notify:
-                REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
+                # REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
+                send_modmail(TrackedSubreddit.get_subreddit_by_name("ModeratelyHelpfulBot"), bot_owner_message)
         except (prawcore.exceptions.BadRequest, praw.exceptions.RedditAPIException):
             logger.debug("reply failed {0}".format(response))
     record_actioned("mm{}-{}".format(convo.id, convo.num_messages))
@@ -1778,12 +1837,12 @@ def purge_old_records():
 
 def purge_old_records_by_subreddit(tr_sub: TrackedSubreddit):
     print("looking for old records to purge from ", tr_sub.subreddit_name, tr_sub.min_post_interval)
-    _ = s.query(SubmittedPost) \
-        .filter(SubmittedPost.time_utc < datetime.now(pytz.utc).replace(tzinfo=None) - tr_sub.min_post_interval) \
-        .filter(SubmittedPost.flagged_duplicate.is_(False)) \
-        .filter(SubmittedPost.pre_duplicate.is_(False)) \
-        .filter(SubmittedPost.subreddit_name == tr_sub.subreddit_name) \
-        .delete()
+    _ = s.query(SubmittedPost).filter(
+        SubmittedPost.time_utc < datetime.now(pytz.utc).replace(tzinfo=None) - tr_sub.min_post_interval,
+        SubmittedPost.counted_status != CountedStatus.FLAGGED.value, SubmittedPost.pre_duplicate.is_(False),
+        SubmittedPost.subreddit_name == tr_sub.subreddit_name).delete()
+
+    # SubmittedPost.flagged_duplicate.is_(False),
     # print("purging {} old records from {}", len(to_delete), tr_sub.subreddit_name)
     # to_delete.delete()
     s.commit()
@@ -1849,6 +1908,10 @@ def check_spam_submissions(subreddit_name='mod'):
 def main_loop():
     load_settings()
 
+    users_to_check = []
+    for u in users_to_check:
+        u1 = TrackedAuthor(u)
+        print(u1.calculate_nsfw())
     i = 0
     while True:
         print('start_loop')
@@ -1875,6 +1938,82 @@ def main_loop():
         handle_direct_messages()
         handle_modmail_messages()
 
+        nsfw_checking()
+
+
+def nsfw_checking():  # Does not expand comments
+
+    posts_to_check = s.query(SubmittedPost).filter(
+        SubmittedPost.post_flair.ilike("%strict sfw%"),
+        SubmittedPost.nsfw_repliers_checked == False,
+        SubmittedPost.counted_status < 3) \
+        .order_by(desc(SubmittedPost.time_utc)) \
+        .all()
+
+    # send_modmail(tr_sub, "\n\n".join(response_lines), recent_post=recent_post, prev_post=possible_repost)
+
+
+    author_list = dict()
+    tick = datetime.now()
+
+    for post in posts_to_check:
+        op_age = get_age(post.title)
+        if op_age <10:
+            continue
+        dms_disabled = "not checked"
+
+        warning_message = "You have specified your age as being younger than 18 or enabled 'strict sfw' mode. " \
+                          "The subreddit mods will screen for potential sexual predators and block posts, however " \
+                          "for this to work, you will have to temporarily disable chat requests and private messages. "\
+                          "You can do that here: https://www.reddit.com/settings/messaging  "
+        if post.time_utc > datetime.now()-timedelta(hours=10):
+            try:
+                REDDIT_CLIENT.redditor(post.author).message("Strict SFW Mode", warning_message)
+                dms_disabled = "NOT DISABLED"
+            except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
+                dms_disabled = "disabled"
+
+        tr_sub = TrackedSubreddit.get_subreddit_by_name(post.subreddit_name)
+        tock = datetime.now()
+        if tock-tick > timedelta(minutes=3):
+            print("Taking too long, will break for now")
+            break
+        print(f"post: {post.title} {post.time_utc} {post.get_comments_url()} {post.post_flair} dm disabled? {dms_disabled}")
+
+        top_level_comments : List[praw.models.Comment ] = list(post.get_api_handle().comments)
+        for c in top_level_comments:
+            author = None
+            author_name = None
+            if hasattr(c, 'author') and c.author and hasattr(c.author, 'name'):
+                author_name = c.author.name
+                if author_name in author_list:
+                    continue
+                author: TrackedAuthor = s.query(TrackedAuthor).get(c.author.name)
+                if not author:
+                    author = TrackedAuthor(c.author.name)
+            if author:
+                author_list[author_name] = author
+
+                nsfw_pct = author.calculate_nsfw()
+                s.add(author)
+                if nsfw_pct > 20 or (op_age < 18 and author.age and author.age > 20)\
+                        or (op_age < 18 and author.age and author.age-op_age>3):
+                    comment_url = f"https://www.reddit.com/r/{post.subreddit_name}/comments/{post.id}//{c.id}"
+                    response = f"Author very nsfw: http://www.reddit.com/u/{author_name} . " \
+                               f"Commented on: {post.get_comments_url()} \n\n. " \
+                               f"Link to comment: {comment_url} \n\n. " \
+                               f"Poster's age {op_age}. Commenter's age {author.age}"
+                    print(response)
+                    try:
+                        c.mod.remove()
+                    except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
+                        pass
+                    send_modmail(tr_sub, response, recent_post=post, prev_post=post)
+
+                    REDDIT_CLIENT.redditor(BOT_OWNER).message("pervy perv", response)
+        post.nsfw_repliers_checked = True
+        s.add(post)
+        s.commit()
 
 
 
