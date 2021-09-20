@@ -146,6 +146,7 @@ class TrackedAuthor(Base):
             pass
         return self.nsfw_pct
 
+        # In the future,  look for: /r/dirtypenpals   DDLGPersonals   cglpersonals  littlespace dirtyr4r ddlg
 
 def get_age(input_text: str):
     matches = re.search(ASL_REGEX, input_text)
@@ -192,7 +193,8 @@ class SubmittedPost(Base):
     response_time = Column(DateTime, nullable=True)  # need to add everywhere
     review_debug = Column(String(191), nullable=True)
     flushed_to_log = Column(Boolean, nullable=False)
-    nsfw_repliers_checked = Column(Boolean, nullable=False)
+    nsfw_repliers_checked = Column(Boolean, nullable=False)  # REMOVE!!
+    nsfw_last_checked = Column(DateTime, nullable=True)
 
     api_handle = None
 
@@ -215,11 +217,11 @@ class SubmittedPost(Base):
         self.post_flair = submission.link_flair_text
         self.author_flair = submission.author_flair_text
         self.response_time = None
-
-
+        self.nsfw_last_checked = self.time_utc
+        self.nsfw_repliers_checked = False
 
         age = get_age(self.title)
-        if 21 > age > 13:
+        if 25 > age > 13 and self.subreddit_name.lower == "needafriend":
             self.post_flair = "strict sfw"
 
     def get_url(self) -> str:
@@ -368,6 +370,7 @@ class TrackedSubreddit(Base):
     min_post_interval_mins = Column(Integer, nullable=False, default=60 * 72)
     bot_mod = Column(String(21), nullable=True, default=None)
     ban_ability = Column(Integer, nullable=False, default=-1)
+    mm_convo_id = Column(String(10), nullable=True, default=None)
     # -2 -> bans enabled but no perms
     # -1 -> unknown
     # 0 -> bans not enabled
@@ -405,7 +408,7 @@ class TrackedSubreddit(Base):
     modmail_notify_replied_internal = True
     modmail_auto_approve_messages_with_links = False
     modmail_all_reply = None
-    modmail_removal_reason_helper = True
+    modmail_removal_reason_helper = False
     approve = False
     blacklist_enabled = True
     lock_thread = True
@@ -617,12 +620,14 @@ class TrackedSubreddit(Base):
                "total_identified: {}" \
                "\n\n{}".format(total_reviewed, total_identified, "\n\n".join(response_lines))
 
-    def send_modmail(self, subject=f"Message from {BOT_NAME}", body="Something here"):
-        try:
-            REDDIT_CLIENT.subreddit(self.subreddit_name).message(subject, body)
-        except (praw.exceptions.APIException, prawcore.exceptions.Forbidden, AttributeError):
-            logger.warning('something went wrong in sending modmail')
-
+    def send_modmail(self, subject=f"Message from {BOT_NAME}", body="Something here", thread_id=None):
+        if thread_id:
+            REDDIT_CLIENT.subreddit(self.subreddit_name).modmail(thread_id).reply(body, internal=true)
+        else:
+            try:
+                REDDIT_CLIENT.subreddit(self.subreddit_name).message(subject, body)
+            except (praw.exceptions.APIException, prawcore.exceptions.Forbidden, AttributeError):
+                logger.warning('something went wrong in sending modmail')
 
 class ActionedComments(Base):
     __tablename__ = 'ActionedComments'
@@ -660,7 +665,7 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
     elif tr_sub.ignore_AutoModerator_removed and status == PostedStatus.AUTOMOD_RM:
         return CountedStatus.AM_RM_EXEMPT, ""
     elif tr_sub.ignore_moderator_removed and status == PostedStatus.FH_RM:
-        return CountedStatus.FLAIR_HELPER
+        return CountedStatus.FLAIR_HELPER, ""
     elif tr_sub.ignore_moderator_removed and status == PostedStatus.MOD_RM:
         return CountedStatus.MOD_RM_EXEMPT, ""
     elif tr_sub.exempt_oc and recent_post.get_api_handle().is_original_content:
@@ -908,6 +913,7 @@ def look_for_rule_violations2(do_cleanup: bool = False):
                         print("\t\t Too many grace exemptions")
                 associated_reposts.append(x)
 
+
             # not enough posts
             if len(associated_reposts) < tr_sub.max_count_per_interval:
                 logger.info(f"\tNot enough previous posts: {len(associated_reposts)}/{max_count}: "
@@ -949,7 +955,7 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
         message = tr_sub.modmail
         if message is True:
             message = "Repost that violates rules: [{title}]({url}) by [{author}](/u/{author})"
-        send_modmail(tr_sub, message, recent_post=recent_post, prev_post=possible_repost, )
+        send_modmail_populate_tags(tr_sub, message, recent_post=recent_post, prev_post=possible_repost, )
     if tr_sub.action == "remove":
         post_status = recent_post.get_posted_status()
         if post_status == PostedStatus.UP:
@@ -1095,7 +1101,7 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
                                       f"[{recent_post.author}](/u/{recent_post.author}) "
                                       f"[{recent_post.title}]({recent_post.get_comments_url()})\n")
 
-                send_modmail(tr_sub, "\n\n".join(response_lines), recent_post=recent_post, prev_post=possible_repost)
+                send_modmail_populate_tags(tr_sub, "\n\n".join(response_lines), recent_post=recent_post, prev_post=possible_repost)
             if tr_sub.ban_duration_days > 998:
                 # Only do a 2 week ban if specified permanent ban
                 time_next_eligible = datetime.now(pytz.utc) + timedelta(days=999)
@@ -1191,17 +1197,23 @@ def make_comment(subreddit: TrackedSubreddit, recent_post: SubmittedPost, most_r
     response = populate_tags(f"{comment_template}{RESPONSE_TAIL}{ids}",
                              recent_post, tr_sub=subreddit, prev_post=prev_submission)
     try:
-        comment = recent_post.reply(response, distinguish=distinguish, approve=approve, lock_thread=lock_thread)
+        comment: praw.models.Comment = \
+            recent_post.reply(response, distinguish=distinguish, approve=approve, lock_thread=lock_thread)
+        # assert comment
         if stickied:
             comment.mod.distinguish(sticky=True)
-        recent_post.bot_comment_id = comment.id
+        try:
+            recent_post.bot_comment_id = comment.id
+        except (AttributeError):
+            pass
     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
         logger.warning('something went wrong in creating comment %s', str(e))
     return comment
 
 
-def send_modmail(subreddit: TrackedSubreddit, comment_template: str,
-                 recent_post: SubmittedPost = None, prev_post: SubmittedPost = None):
+def send_modmail_populate_tags(subreddit: TrackedSubreddit, comment_template: str,
+                               recent_post: SubmittedPost = None, prev_post: SubmittedPost = None,
+                               subject="modhelpfulbot"):
     response = populate_tags(comment_template, recent_post, tr_sub=subreddit, prev_post=prev_post)
     try:
         REDDIT_CLIENT.subreddit(subreddit.subreddit_name).message('modhelpfulbot', response)
@@ -1257,7 +1269,7 @@ def send_broadcast_messages():
     s.commit()
 
 
-def handle_dm_command(subreddit_name: str, requestor_name, command, parameters) -> (str, bool):
+def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, thread_id=None) -> (str, bool):
     subreddit_name: str = subreddit_name[2:] if subreddit_name.startswith('r/') else subreddit_name
     subreddit_name: str = subreddit_name[3:] if subreddit_name.startswith('/r/') else subreddit_name
     command: str = command[1:] if command.startswith("$") else command
@@ -1471,7 +1483,8 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters) 
         bot_owner_message = "subreddit: {0}\n\nrequestor: {1}\n\nreport: {2}" \
             .format(subreddit_name, requestor_name, status)
         # REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
-        send_modmail(TrackedSubreddit.get_subreddit_by_name("ModeratelyHelpfulBot"),  bot_owner_message)
+        mhb_sub = TrackedSubreddit.get_subreddit_by_name("ModeratelyHelpfulBot")
+        mhb_sub.send_modmail(body=bot_owner_message)
         s.add(tr_sub)
         s.commit()
         return reply_text, True
@@ -1522,9 +1535,15 @@ def handle_direct_messages():
         elif message.subject.startswith('invitation to moderate'):
             mod_mail_invitation_to_moderate(message)
         elif command in ("summary", "update", "stats") or command.startswith("$"):
-            subreddit_name = message.subject.lower().replace("re: ", "")
+            subject_parts = message.subject.split(":")
+            thread_id = subject_parts[1] if len(subject_parts)>1 else None
+            subreddit_name = subject_parts[0].lower().replace("re: ", "")
+            tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
             response, _ = handle_dm_command(subreddit_name, requestor_name, command, body_parts[1:])
-            message.reply(response[:9999])
+            if thread_id:
+                tr_sub.send_modmail(body=response[:9999], thread_id=thread_id)
+            else:
+                message.reply(response[:9999])
             bot_owner_message = "subreddit: {0}\n\nrequestor: {1}\n\nreport: {2}\n\nreport: {3}" \
                 .format(subreddit_name, requestor_name, command, response)
             REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
@@ -1595,7 +1614,10 @@ def handle_modmail_message(convo):
 
     # Ignore if already actioned (at this many message #s)
     if check_actioned("mm{}-{}".format(convo.id, convo.num_messages)):
-        convo.read()
+        try:
+            convo.read()
+        except prawcore.exceptions.Forbidden:
+            pass
 
         return
 
@@ -1611,6 +1633,7 @@ def handle_modmail_message(convo):
     response_internal = False
     command = "no_command"
     debug_notify = False
+    last_post = None
 
     # If this conversation only has one message -> canned response or summary table
     # Does not respond if already responded to by a mod
@@ -1624,13 +1647,18 @@ def handle_modmail_message(convo):
             record_actioned("mm{}-{}".format(convo.id, convo.num_messages))
             return
 
+        import re
+        submission = None
+        urls = re.findall(REDDIT_LINK_REGEX, convo.messages[0].body)
+        if len(urls) == 2:  # both link and link description
+            print(f"found url: {urls[0][1]}")
+            submission = REDDIT_CLIENT.submission(urls[0][1])
+
         # Automated approval (used for new account screening - like in /r/dating)
         if tr_sub.modmail_auto_approve_messages_with_links:
-            import re
+
             urls = re.findall(REDDIT_LINK_REGEX, convo.messages[0].body)
-            if len(urls) == 2:  # both link and link description
-                print(f"found url: {urls[0][1]}")
-                submission = REDDIT_CLIENT.submission(urls[0][1])
+            if submission:
                 try:
                     in_submission_urls = re.findall(LINK_REGEX, submission.selftext)
                     bad_words = "Raya", 'raya', 'dating app'
@@ -1661,8 +1689,12 @@ def handle_modmail_message(convo):
             # Collect removal reason if possible from bot comment or mod comment
             # TODO check for report reason built into post
             last_post = None
+            if submission:
+                last_post = s.query(SubmittedPost).get(submission.id)
+                if last_post:
+                    last_post.api_handle = submission
             if recent_posts:
-                last_post = recent_posts[-1]
+                last_post = recent_posts[-1] if not last_post else last_post
                 # if removal reason hasn't been pulled, try pulling again
                 if not last_post.bot_comment_id:
                     posted_status = last_post.get_posted_status(get_removed_info=True)
@@ -1675,7 +1707,14 @@ def handle_modmail_message(convo):
                             removal_reason = removal_reason.replace("\n\n", "\n\n>")
                             removal_reason = f"-------------------------------------------------\n\n{removal_reason}"
                     if not removal_reason:  # still couldn't find removal reason, just use posted status
-                        removal_reason = f"status: {posted_status.value}"
+                        removal_reason = f"status: {posted_status.value}\n\n " \
+                                         f"flair: {last_post.get_api_handle().link_flair_text}"
+                        if posted_status == PostedStatus.SPAM_FLT:
+                            removal_reason += " \n\nThis means the Reddit spam filter thought your post was spam " \
+                                              "and it was NOT removed by the subreddit moderators.  You can try" \
+                                              "verifying your email and building up karma to avoid the spam filter." \
+                                              "There is more information here: " \
+                                              "https://www.reddit.com/r/NewToReddit/wiki/ntr-guidetoreddit"
                         r_last_post = last_post.get_api_handle()
                         if hasattr(r_last_post, 'removal_reason') and r_last_post.removal_reason \
                                 and not posted_status == posted_status.UP:
@@ -1711,15 +1750,24 @@ def handle_modmail_message(convo):
                                                 f"(please ignore unless relevant):\n\n " \
                                                 f"last post: [{last_post.title}]({last_post.get_comments_url()})\n\n" \
                                                 f"{removal_reason}"
-                        convo.reply(non_internal_response, internal=False)
-
+                        if "status:mod-removed" not in non_internal_response\
+                                and "status: AutoMod-removed" not in non_internal_response:
+                            #don't answer if not particularly helpful
+                            convo.reply(non_internal_response, internal=False)
+                    smart_link = f"https://www.reddit.com/message/compose?to=ModeratelyHelpfulBot" \
+                                 f"&subject={subreddit_name}:{convo.id}" \
+                                 f"&message="
                     response += populate_tags(
-                        "\n\n{summary table}\n\n**Please don't forget to change to 'reply as the "
-                        "subreddit' below!!**\n\n"
-                        "Available Commands: $summary `username`, $update, $hallpass `username`, "
-                        "$unban `username`, $approve `postid`, $remove `postid`, $citerule `#`, "
-                        "$blacklist `username` (modmail blacklist)"
-                        "\n\nPlease subscribe to /r/ModeratelyHelpfulBot for updates\n\n", None,
+                        "\n\n{summary table}\n\n"
+                        f"Available Commands: "
+                        f"[$summary {initiating_author_name}]({smart_link}$summary {initiating_author_name}), "
+                        f"[$update]({smart_link}$update), "
+                        f"[$hallpass {initiating_author_name}]({smart_link}$hallpass {initiating_author_name}), "
+                        f"[$unban {initiating_author_name}]({smart_link}$unban {initiating_author_name}), "
+                        f"[$approve {last_post.id}]({smart_link}$approve {last_post.id}), "
+                        f"[$remove {last_post.id}]({smart_link}$remove {last_post.id}), "
+                        f"$blacklist `username` (modmail blacklist)"
+                        f"\n\nPlease subscribe to /r/ModeratelyHelpfulBot for updates\n\n", None,
                         prev_posts=recent_posts)
 
                     response_internal = True
@@ -1732,7 +1780,7 @@ def handle_modmail_message(convo):
                     response = ">" + convo.messages[0].body_markdown.replace("\n\n", "\n\n>") + "\n\n\n\n"
                     response += populate_tags(tr_sub.modmail_no_posts_reply, None, tr_sub=tr_sub)
                     response_internal = tr_sub.modmail_no_posts_reply_internal
-            debug_notify = True
+            # debug_notify = True
     else:
         # look for commands if message count >1 and message by mod
         last_author_name: str = convo.messages[-1].author.name
@@ -1755,14 +1803,15 @@ def handle_modmail_message(convo):
                     record_actioned(f"ic-{convo.id}")
     if response:
         try:
-            convo.reply(response[0:9999], internal=response_internal)
+            convo.reply(populate_tags(response[0:9999], recent_post=last_post), internal=response_internal)
 
             bot_owner_message = f"subreddit: {subreddit_name}\n\nresponse:\n\n{response}\n\n" \
                                 f"https://mod.reddit.com/mail/all/{convo.id}"[0:9999]
 
             if debug_notify:
                 # REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
-                send_modmail(TrackedSubreddit.get_subreddit_by_name("ModeratelyHelpfulBot"), bot_owner_message)
+                mhb_sub = TrackedSubreddit.get_subreddit_by_name("ModeratelyHelpfulBot")
+                mhb_sub.send_modmail(body=bot_owner_message)
         except (prawcore.exceptions.BadRequest, praw.exceptions.RedditAPIException):
             logger.debug("reply failed {0}".format(response))
     record_actioned("mm{}-{}".format(convo.id, convo.num_messages))
@@ -1925,7 +1974,7 @@ def main_loop():
         # only do this if not too busy
         # if last_index < 30:
 
-        look_for_rule_violations2(do_cleanup=(i % 30 == 0))  # uses a lot of resources
+        look_for_rule_violations2(do_cleanup=(i % 15 == 0))  # uses a lot of resources
 
         if i % 75 == 0:
             purge_old_records()
@@ -1945,8 +1994,9 @@ def nsfw_checking():  # Does not expand comments
 
     posts_to_check = s.query(SubmittedPost).filter(
         SubmittedPost.post_flair.ilike("%strict sfw%"),
-        SubmittedPost.nsfw_repliers_checked == False,
         SubmittedPost.counted_status < 3) \
+        .filter(or_(SubmittedPost.nsfw_last_checked < datetime.now(pytz.utc) - timedelta(hours=5),
+            SubmittedPost.nsfw_last_checked == False)) \
         .order_by(desc(SubmittedPost.time_utc)) \
         .all()
 
@@ -1958,21 +2008,35 @@ def nsfw_checking():  # Does not expand comments
 
     for post in posts_to_check:
         op_age = get_age(post.title)
-        if op_age <10:
+        if op_age < 10:
             continue
         dms_disabled = "not checked"
 
         warning_message = "You have specified your age as being younger than 18 or enabled 'strict sfw' mode. " \
                           "The subreddit mods will screen for potential sexual predators and block posts, however " \
                           "for this to work, you will have to temporarily disable chat requests and private messages. "\
-                          "You can do that here: https://www.reddit.com/settings/messaging  "
-        if post.time_utc > datetime.now()-timedelta(hours=10):
+                          "You can do that here: https://www.reddit.com/settings/messaging . " \
+                          "Plwase see https://www.reddit.com/r/NewToReddit/wiki/" \
+                          "ntr-guidetoreddit#wiki_part_7.3A__safety_on_reddit for more safety tips."
+        sticky_post = "This post has been flaired 'strict sfw'. This means that any user who contacts the poster " \
+                      "may be permanently banned from the subreddit if they have a heavily NSFW history (>20%) " \
+                      "or are using new throwaway accounts. This subreddit is strictly for platonic friendships, and " \
+                      "the mods will not tolerate the solicitation of minors or otherwise unwanted harassment. " \
+                      "The moderators will still evaluate all bans on a case by case basis prior to action taken."
+        if post.time_utc > datetime.now()-timedelta(hours=10) and op_age < 18 and post.nsfw_repliers_checked == False:
+            try:
+                comment_reply = post.get_api_handle().reply(sticky_post)
+                comment_reply.mod.distinguish()
+                comment_reply.mod.approve()
+            except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
+                pass
             try:
                 REDDIT_CLIENT.redditor(post.author).message("Strict SFW Mode", warning_message)
                 dms_disabled = "NOT DISABLED"
             except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                 dms_disabled = "disabled"
 
+            post.nsfw_repliers_checked = True
         tr_sub = TrackedSubreddit.get_subreddit_by_name(post.subreddit_name)
         tock = datetime.now()
         if tock-tick > timedelta(minutes=3):
@@ -1988,9 +2052,12 @@ def nsfw_checking():  # Does not expand comments
                 author_name = c.author.name
                 if author_name in author_list:
                     continue
+
                 author: TrackedAuthor = s.query(TrackedAuthor).get(c.author.name)
                 if not author:
                     author = TrackedAuthor(c.author.name)
+                else:
+                    continue
             if author:
                 author_list[author_name] = author
 
@@ -2003,15 +2070,17 @@ def nsfw_checking():  # Does not expand comments
                                f"Commented on: {post.get_comments_url()} \n\n. " \
                                f"Link to comment: {comment_url} \n\n. " \
                                f"Poster's age {op_age}. Commenter's age {author.age}"
+                    subject = f"Found this perv {author_name} score={nsfw_pct}"
                     print(response)
                     try:
                         c.mod.remove()
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
-                    send_modmail(tr_sub, response, recent_post=post, prev_post=post)
+                    tr_sub.send_modmail(subject=subject, body=response)
 
                     REDDIT_CLIENT.redditor(BOT_OWNER).message("pervy perv", response)
         post.nsfw_repliers_checked = True
+        post.nsfw_last_checked = datetime.now(pytz.utc)
         s.add(post)
         s.commit()
 
