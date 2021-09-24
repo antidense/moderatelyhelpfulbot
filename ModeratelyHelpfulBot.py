@@ -187,15 +187,10 @@ def get_age(input_text: str):
             if matches.group('age'):
                 age = int(matches.group('age'))
         else:
-            matches = re.match(r"[iI]'?m (?P<age>[0-9]{2})", input_text)
+            matches = re.match(r"[iI]((')|( a))?m (?P<age>[0-9]{2})", input_text)
             if matches:
                 if matches.group('age'):
                     age = int(matches.group('age'))
-            else:
-                matches = re.match(r"[Ii] am (?P<age>[0-9]{2})", input_text)
-                if matches:
-                    if matches.group('age'):
-                        age = int(matches.group('age'))
     # print(f"age: {age}  text:{input_text} ")
     return age
 
@@ -257,6 +252,9 @@ class SubmittedPost(Base):
     def get_url(self) -> str:
         return f"http://redd.it/{self.id}"
 
+    def get_comments_url(self) -> str:
+        return f"https://www.reddit.com/r/{self.subreddit_name}/comments/{self.id}"
+
     def get_removed_explanation(self):
         if not self.bot_comment_id:
             return None
@@ -270,9 +268,6 @@ class SubmittedPost(Base):
         if not self.bot_comment_id:
             return None
         return f"https://www.reddit.com/r/{self.subreddit_name}/comments/{self.id}//{self.bot_comment_id}"
-
-    def get_comments_url(self) -> str:
-        return f"https://www.reddit.com/r/{self.subreddit_name}/comments/{self.id}"
 
     def get_api_handle(self) -> praw.models.Submission:
         if not self.api_handle:
@@ -304,12 +299,11 @@ class SubmittedPost(Base):
                 comment.mod.approve()
             return comment
         except praw.exceptions.APIException:
-            logger.warning(f'Something went wrongwith replying to this post: http://redd.it/{self.id}')
+            logger.warning(f'Something went wrong with replying to this post: http://redd.it/{self.id}')
             return False
         except (prawcore.exceptions.Forbidden, prawcore.exceptions.ServerError):
             logger.warning(f'Something with replying to this post:: http://redd.it/{self.id}')
             return False
-
 
     def get_posted_status(self, get_removed_info=False) -> PostedStatus:
         _ = self.get_api_handle()
@@ -326,7 +320,6 @@ class SubmittedPost(Base):
                     if hasattr(c, 'author') and c.author and c.author.name == self.banned_by:
                         self.bot_comment_id = c.id
                         break
-
             if self.banned_by == "AutoModerator":
                 return PostedStatus.AUTOMOD_RM
             elif self.banned_by == "Flair_Helper":
@@ -355,10 +348,9 @@ class SubmittedPost(Base):
             if flagged_duplicate is True:
                 self.counted_status = CountedStatus.FLAGGED.value
         self.last_checked = datetime.now(pytz.utc)
-        #self.response_time = datetime.now(pytz.utc)-self.time_utc
+        self.response_time = datetime.now(pytz.utc)-self.time_utc.replace(tzinfo=timezone.utc)
 
-
-class CommonPost():  # did not (Base) yet!!!
+class CommonPost():  # did not (Base) yet!!!  use for tracking bot spam
     __tablename__ = 'CommonPost'
     id = Column(String(10), nullable=True, primary_key=True)
     title = Column(String(191), nullable=True)
@@ -423,12 +415,12 @@ class TrackedSubreddit(Base):
     min_post_interval_mins = Column(Integer, nullable=False, default=60 * 72)
     bot_mod = Column(String(21), nullable=True, default=None)
     ban_ability = Column(Integer, nullable=False, default=-1)
-    mm_convo_id = Column(String(10), nullable=True, default=None)
     # -2 -> bans enabled but no perms
     # -1 -> unknown
     # 0 -> bans not enabled
     # 1 -> bans enabled (perma)
     # 2 -> bans enabled (not perma)
+    mm_convo_id = Column(String(10), nullable=True, default=None)
     is_nsfw = Column(Boolean, nullable=False, default=0)
 
     subreddit_mods = []
@@ -475,7 +467,6 @@ class TrackedSubreddit(Base):
         self.subreddit_name = subreddit_name.lower()
         self.save_text = False
         self.last_updated = datetime(2019, 1, 1, 0, 0)
-        # self.last_error_msg = None
         self.update_from_yaml(force_update=True)
         self.settings_revision_date = None
         self.api_handle = REDDIT_CLIENT.subreddit(self.subreddit_name)
@@ -582,21 +573,17 @@ class TrackedSubreddit(Base):
                     return_text = "Did not understand variable '{}' for {}".format(pr_setting, self.subreddit_name)
                     print(return_text)
 
-            if 'min_post_interval_mins' in pr_settings and isinstance(pr_settings['min_post_interval_mins'], int):
+            if 'min_post_interval_mins' in pr_settings:
                 self.min_post_interval = timedelta(minutes=pr_settings['min_post_interval_mins'])
-                # self.min_post_interval_hrs = None
                 self.min_post_interval_txt = f"{pr_settings['min_post_interval_mins']}m"
-            if 'min_post_interval_hrs' in pr_settings  and isinstance(pr_settings['min_post_interval_hrs'], int):
+            if 'min_post_interval_hrs' in pr_settings:
                 self.min_post_interval = timedelta(hours=pr_settings['min_post_interval_hrs'])
-                # self.min_post_interval_hrs = pr_settings['min_post_interval_hrs']
                 if self.min_post_interval_hrs < 24:
                     self.min_post_interval_txt = f"{self.min_post_interval_hrs}h"
                 else:
                     self.min_post_interval_txt = f"{int(self.min_post_interval_hrs / 24)}d" \
                                                  f"{self.min_post_interval_hrs % 24}h".replace("d0h", "d")
-            # self.min_post_interval_mins = self.min_post_interval.total_seconds() // 60
-            if 'grace_period_mins' in pr_settings and pr_settings['grace_period_mins'] is not None  \
-                    and isinstance(pr_settings['grace_period_mins'], int):
+            if 'grace_period_mins' in pr_settings and pr_settings['grace_period_mins'] is not None:
                 self.grace_period = timedelta(minutes=pr_settings['grace_period_mins'])
                 # self.grace_period_mins = pr_settings['grace_period_mins']
             if not self.ban_threshold_count:
@@ -614,15 +601,9 @@ class TrackedSubreddit(Base):
                         setattr(self, m_setting, m_settings[m_setting])
                     else:
                         return_text = "Did not understand variable '{}'".format(m_setting)
-            if self.subreddit_name.lower() == "puppy101":
-                self.modmail_notify_replied_internal = False
-        if not self.min_post_interval:
-            self.min_post_interval = timedelta(hours=72)
 
-
-        if not self.max_count_per_interval:
-            self.max_count_per_interval = 1
-
+        self.min_post_interval = self.min_post_interval if self.min_post_interval else timedelta(hours=72)
+        self.max_count_per_interval = self.max_count_per_interval if self.max_count_per_interval else 1
         self.last_updated = datetime.now()
 
         if self.ban_duration_days == 0:
