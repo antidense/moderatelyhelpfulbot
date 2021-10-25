@@ -26,15 +26,12 @@ from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET, BOT_OWNER, DB_E
 To do list:
 asyncio 
 incorporate toolbox? https://www.reddit.com/r/nostalgia/wiki/edit/toolbox check usernotes?
-upgrade python and praw version
 clean actioned comments after 3 months
-fix logging
 """
 
 MINOR_KWS = []
-
-#ASL_REGEX =r"((?P<age>[0-9]){2}[/ \\]?(?P<g>[mMFf]{1}))|((?P<g2>[mMFf]{1})[/ \\]?(?P<age2>[0-9]){2})"
-ASL_REGEX = r"((?P<age>[0-9]{2})([/ \\-]?|(\]? \[))(?P<g>[mMFf]{1}))|((?P<g2>[mMFf]{1})([/ \\-]?|(\]? \[))(?P<age2>[0-9]{2}))"
+ASL_REGEX = r"((?P<age>[0-9]{2})([/ \\-]?|(\]? \[))(?P<g>[mMFf]{1}))|" \
+            r"((?P<g2>[mMFf]{1})([/ \\-]?|(\]? \[))(?P<age2>[0-9]{2}))"
 # Non binary?
 
 # Set up database
@@ -53,7 +50,6 @@ RESPONSE_TAIL = ""
 MAIN_SETTINGS = dict()
 WATCHED_SUBS = dict()
 SUBWIKI_CHECK_INTERVAL_HRS = 24
-
 
 
 class PostedStatus(Enum):
@@ -104,8 +100,6 @@ class Broadcast(Base):
         self.id = post.id
 
 
-
-
 class TrackedAuthor(Base):
     __tablename__ = 'TrackedAuthor'
     author_name = Column(String(21), nullable=True, primary_key=True)
@@ -133,7 +127,7 @@ class TrackedAuthor(Base):
             return self.api_handle
 
     def calculate_nsfw(self):
-        intended_total =50
+        intended_total = 50
         total = 0
         count = 0
         age = 0
@@ -169,9 +163,10 @@ class TrackedAuthor(Base):
         self.age = age
         self.last_calculated = datetime.now(pytz.utc)
         self.num_history_items = total
-        return self.nsfw_pct
+        return self.nsfw_pct, total
 
         # In the future,  look for: /r/dirtypenpals   DDLGPersonals   cglpersonals  littlespace dirtyr4r ddlg
+
 
 def get_age(input_text: str):
     matches = re.search(ASL_REGEX, input_text)
@@ -194,6 +189,7 @@ def get_age(input_text: str):
     # print(f"age: {age}  text:{input_text} ")
     return age
 
+
 class SubmittedPost(Base):
     __tablename__ = 'RedditPost'
     id = Column(String(10), nullable=True, primary_key=True)
@@ -206,7 +202,7 @@ class SubmittedPost(Base):
     flagged_duplicate = Column(Boolean, nullable=True)
     pre_duplicate = Column(Boolean, nullable=True)
     # self_deleted = Column(Boolean, nullable=True)  # Can delete this now -------
-    reviewed = Column(Boolean, nullable=True)  # could be combined into an Enum: reviewed, flagged_duplicate, pre_duplicate
+    reviewed = Column(Boolean, nullable=True)   # could be combined into an Enum: reviewed,  pre_duplicate
     last_checked = Column(DateTime, nullable=False)  # redundant with reviewed?  can't use as inited with old date
     bot_comment_id = Column(String(10), nullable=True)  # wasn't using before but using now
     is_self = Column(Boolean, nullable=True)  # Can delete this now----------
@@ -246,8 +242,25 @@ class SubmittedPost(Base):
         self.nsfw_repliers_checked = False
 
         self.age = get_age(self.title)
-        if 25 > self.age > 13 and self.subreddit_name == "needafriend":
-            self.post_flair = "strict sfw"
+        if self.subreddit_name == "needafriend":
+            if 25 > self.age > 12:
+                self.post_flair = "strict sfw"
+
+                author: TrackedAuthor = s.query(TrackedAuthor).get(self.author)
+                if not author:
+                    author = TrackedAuthor(self.author)
+                if author:
+                    if author.nsfw_pct == -1 or not author.last_calculated \
+                            or author.last_calculated.replace(tzinfo=timezone.utc) < \
+                            (datetime.now(pytz.utc) - timedelta(days=7)):
+                        nsfw_pct, items = author.calculate_nsfw()
+                        new_flair_text = f"{int(nsfw_pct)}% NSFW"
+                        s.add(author)
+                        if nsfw_pct > 60:
+                            try:
+                                REDDIT_CLIENT.subreddit(self.subreddit_name).flair.set(self.author, text=new_flair_text)
+                            except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
+                                pass
 
     def get_url(self) -> str:
         return f"http://redd.it/{self.id}"
@@ -302,6 +315,9 @@ class SubmittedPost(Base):
             logger.warning(f'Something went wrong with replying to this post: http://redd.it/{self.id}')
             return False
         except (prawcore.exceptions.Forbidden, prawcore.exceptions.ServerError):
+            logger.warning(f'Something with replying to this post:: http://redd.it/{self.id}')
+            return False
+        except (prawcore.exceptions.BadRequest):
             logger.warning(f'Something with replying to this post:: http://redd.it/{self.id}')
             return False
 
@@ -512,6 +528,7 @@ class TrackedSubreddit(Base):
 
         if 'save_text' in self.settings_yaml:
             self.save_text = self.settings_yaml['save_text']
+            # print(self.save_text)
 
         if 'post_restriction' in self.settings_yaml:
             pr_settings = self.settings_yaml['post_restriction']
@@ -542,7 +559,7 @@ class TrackedSubreddit(Base):
                 'comment_stickied': "bool",
                 'exempt_moderator_posts': "bool",
                 'exempt_oc': "bool",
-                'title_not_exempt_keyword': "str",
+                'title_not_exempt_keyword': "str;list",
                 'blacklist_enabled': "bool",
 
             }
@@ -566,7 +583,8 @@ class TrackedSubreddit(Base):
                     else:
                         return_text = f"{self.subreddit_name} invalid data type in yaml: `{pr_setting}` which " \
                                       f"is written as `{pr_setting_value}` should be of type " \
-                                      f"{possible_settings[pr_setting]} but is type {pr_setting_type}"
+                                      f"{possible_settings[pr_setting]} but is type {pr_setting_type}.  " \
+                                      f"Make sure you use lowercase true and false"
                         print(return_text)
                         return False, return_text
                 else:
@@ -1381,11 +1399,12 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
         s.add(tr_sub)
         s.commit()
 
-    if command == "summary":
+    if command in ['summary', ]:
         author_name_to_check = parameters[0] if parameters else None
         if not author_name_to_check:
             return "No author name given", True
-        return tr_sub.get_author_summary(author_name_to_check), True
+        if command == 'summary':
+            return tr_sub.get_author_summary(author_name_to_check), True
     elif command == "showrules":
         lines = ["Rules for {}:".format(subreddit_name), ]
         rules = REDDIT_CLIENT.subreddit(subreddit_name).rules()['rules']
@@ -1421,7 +1440,10 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
             author_name_to_check = author_name_to_check.replace("u/", "")
         author_name_to_check = author_name_to_check.lower()
         actual_author = REDDIT_CLIENT.redditor(author_name_to_check)
-        _ = actual_author.id  # force load actual username capitalization
+        try:
+            _ = actual_author.id  # force load actual username capitalization
+        except prawcore.exceptions.NotFound:
+            pass
         if not actual_author:
             return "could not find that username `{}`".format(author_name_to_check), True
 
@@ -1434,6 +1456,93 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
                       "This means the next post by the user in this subreddit will not be automatically removed." \
             .format(actual_author.name)
         return return_text, False
+    elif command == "ban-sc":
+        author_name_to_check: str = parameters[0] if parameters else None
+        if not author_name_to_check:
+            return "No author name given", True
+        if author_name_to_check.startswith('u/'):
+            author_name_to_check = author_name_to_check.replace("u/", "")
+        author_name_to_check = author_name_to_check.lower()
+        actual_author = REDDIT_CLIENT.redditor(author_name_to_check)
+        try:
+            _ = actual_author.id  # force load actual username capitalization
+        except prawcore.exceptions.NotFound:
+            pass
+        if not actual_author:
+            return "could not find that username `{}`".format(author_name_to_check), True
+
+        subreddit_author: TrackedAuthor = s.query(TrackedAuthor).get(actual_author.name)
+        if not subreddit_author:
+            return "could not find that username `{}`".format(author_name_to_check), True
+        ban_reason = f"Per recent community feedback, we are temp banning anyone with a history that is more than " \
+                     f"80% NSFW to protect minors and reduce sexual harassment in our subreddit.  " \
+                     f"Please get this down if you wish to continue to participate here. " \
+                     f"Your score is currently {subreddit_author.nsfw_pct} and is recalculated weekly."
+        try:
+
+            REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
+                author_name_to_check, ban_note="Having >80% NSFW", ban_message=ban_reason,
+                ban_length=30)
+            return "Ban for {} was successful".format(author_name_to_check), True
+
+        except prawcore.exceptions.Forbidden:
+            return "Ban failed, I don't have permission to do that", True
+    elif command == "ban-mc":
+        author_name_to_check: str = parameters[0] if parameters else None
+        if not author_name_to_check:
+            return "No author name given", True
+        if author_name_to_check.startswith('u/'):
+            author_name_to_check = author_name_to_check.replace("u/", "")
+        author_name_to_check = author_name_to_check.lower()
+        actual_author = REDDIT_CLIENT.redditor(author_name_to_check)
+        try:
+            _ = actual_author.id  # force load actual username capitalization
+        except prawcore.exceptions.NotFound:
+            pass
+        if not actual_author:
+            return "could not find that username `{}`".format(author_name_to_check), True
+
+        subreddit_author: TrackedAuthor = s.query(TrackedAuthor).get(actual_author.name)
+        if not subreddit_author:
+            return "could not find that username `{}`".format(author_name_to_check), True
+        ban_reason = f"Per our rules, contacting minors while having a history of NSFW comments and/or posts " \
+                     f"is a bannable offense.  Your account was reviewed by a mod team and determined to be " \
+                     f"non-compliant with our rules."
+        try:
+
+            REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
+                author_name_to_check, ban_note="Contacted Minor having a NSFW profile", ban_message=ban_reason)
+            return "Ban for {} was successful".format(author_name_to_check), True
+
+        except prawcore.exceptions.Forbidden:
+            return "Ban failed, I don't have permission to do that", True
+    elif command == "ban-cf":
+        author_name_to_check: str = parameters[0] if parameters else None
+        if not author_name_to_check:
+            return "No author name given", True
+        if author_name_to_check.startswith('u/'):
+            author_name_to_check = author_name_to_check.replace("u/", "")
+        author_name_to_check = author_name_to_check.lower()
+        actual_author = REDDIT_CLIENT.redditor(author_name_to_check)
+        try:
+            _ = actual_author.id  # force load actual username capitalization
+        except prawcore.exceptions.NotFound:
+            pass
+        if not actual_author:
+            return "could not find that username `{}`".format(author_name_to_check), True
+
+        subreddit_author: TrackedAuthor = s.query(TrackedAuthor).get(actual_author.name)
+        if not subreddit_author:
+            return "could not find that username `{}`".format(author_name_to_check), True
+        ban_reason = f"Per our rules, catfishing (identifying as different ages) is a bannable offense."
+        try:
+
+            REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
+                author_name_to_check, ban_note="catfishing", ban_message=ban_reason)
+            return "Ban for {} was successful".format(author_name_to_check), True
+
+        except prawcore.exceptions.Forbidden:
+            return "Ban failed, I don't have permission to do that", True
     elif command == "blacklist":
         author_name_to_check = parameters[0] if parameters else None
         if not author_name_to_check:
@@ -1509,7 +1618,10 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
             s.add(post)
         s.commit()
     elif command == "unban":
+
         author_name_to_check = parameters[0] if parameters else None
+        author_name_to_check = author_name_to_check.replace("/u/", "")
+        author_name_to_check = author_name_to_check.replace("u/", "")
         subreddit_author: SubAuthor = s.query(SubAuthor).get((tr_sub.subreddit_name, author_name_to_check))
         if subreddit_author and subreddit_author.next_eligible.replace(tzinfo=timezone.utc) > datetime.now(pytz.utc):
             subreddit_author.next_eligible = datetime(2019, 1, 1, 0, 0)
@@ -1519,6 +1631,8 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
             return "Unban succeeded", False
         except prawcore.exceptions.Forbidden:
             return "Unban failed, I don't have permission in this subreddit to do that. Sorry.", True
+        except prawcore.exceptions.BadRequest:
+            return "The reddit server did not let me do this. Are they already unbanned?", True
     elif command == "ban":
         author_name_to_check = parameters[0] if parameters else None
         author_name_to_check = author_name_to_check.replace('/u/', '')
@@ -1610,7 +1724,6 @@ def handle_direct_messages():
             subreddit_name = message.subject.replace("re: You've been temporarily banned from participating in r/", "")
             if not check_actioned("ban_note: {0}".format(requestor_name)):
                 # record actioned first out of safety in case of error
-                # TODO: write help message for other types of bans - or detect removal reason
                 record_actioned("ban_note: {0}".format(message.author))
 
                 tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
@@ -1623,7 +1736,7 @@ def handle_direct_messages():
         elif message.subject.startswith('invitation to moderate'):
             mod_mail_invitation_to_moderate(message)
         elif command in ("summary", "update", "stats") or command.startswith("$"):
-            subject_parts = message.subject.split(":")
+            subject_parts = message.subject.replace("re:","").split(":")
             thread_id = subject_parts[1] if len(subject_parts)>1 else None
             subreddit_name = subject_parts[0].lower().replace("re: ", "")
             tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
@@ -1632,8 +1745,11 @@ def handle_direct_messages():
                 tr_sub.send_modmail(body=response[:9999], thread_id=thread_id)
             else:
                 message.reply(response[:9999])
-            bot_owner_message = "subreddit: {0}\n\nrequestor: {1}\n\nreport: {2}\n\nreport: {3}" \
-                .format(subreddit_name, requestor_name, command, response)
+            bot_owner_message = f"subreddit: {subreddit_name}\n\n" \
+                                f"requestor: {requestor_name}\n\n" \
+                                f"command: {command}\n\n"  \
+                                f"response: {response}\n\n" \
+                                f"wiki: https://www.reddit.com/r/{subreddit_name}/wiki/moderatelyhelpfulbot\n\n"
             BOT_SUB.send_modmail(subject="[Notification]  Command processed", body=bot_owner_message)
             #REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
 
@@ -1774,7 +1890,6 @@ def handle_modmail_message(convo):
                     .filter(SubmittedPost.subreddit_name.ilike(subreddit_name)) \
                     .filter(SubmittedPost.author == initiating_author_name).all()
             # Collect removal reason if possible from bot comment or mod comment
-            # TODO check for report reason built into post
             last_post = None
             if submission:
                 last_post = s.query(SubmittedPost).get(submission.id)
@@ -1798,7 +1913,7 @@ def handle_modmail_message(convo):
                                          f"flair: {last_post.get_api_handle().link_flair_text}"
                         if posted_status == PostedStatus.SPAM_FLT:
                             removal_reason += " \n\nThis means the Reddit spam filter thought your post was spam " \
-                                              "and it was NOT removed by the subreddit moderators.  You can try" \
+                                              "and it was NOT removed by the subreddit moderators.  You can try " \
                                               "verifying your email and building up karma to avoid the spam filter." \
                                               "There is more information here: " \
                                               "https://www.reddit.com/r/NewToReddit/wiki/ntr-guidetoreddit"
@@ -1889,11 +2004,15 @@ def handle_modmail_message(convo):
             elif convo.num_messages > 2 and convo.messages[-2].author.name == BOT_NAME and last_message.is_internal:
                 if not check_actioned(f"ic-{convo.id}") and tr_sub.modmail_notify_replied_internal:
                     response = "Hey sorry to bug you, but was this last message not meant to be moderator-only?  " \
-                               "Just checking!  \n\n" \
-                               "Set `modmail_notify_replied_internal` to False to disable this message"
+                               f"https://mod.reddit.com/mail/all/{convo.id}" \
+                               "Set `modmail_notify_replied_internal: false` to disable this message"
 
                     response_internal = True
                     record_actioned(f"ic-{convo.id}")
+                    tr_sub.send_modmail(
+                        subject="[Notification] Possible moderator-only reply not meant to be moderator-only",
+                        body=response)
+                    response = None
     if response:
         try:
             convo.reply(tr_sub.populate_tags2(response[0:9999], recent_post=last_post), internal=response_internal)
@@ -2054,7 +2173,7 @@ def main_loop():
     users_to_check = []
     for u in users_to_check:
         u1 = TrackedAuthor(u)
-        print(u1.calculate_nsfw())
+        # print(u1.calculate_nsfw())
     i = 0
 
     """
@@ -2146,10 +2265,10 @@ def nsfw_checking():  # Does not expand comments
                           "The subreddit mods will screen for potential sexual predators and block posts, however " \
                           "for this to work, you will have to temporarily disable chat requests and private messages. "\
                           "You can do that here: https://www.reddit.com/settings/messaging . " \
-                          "Plwase see https://www.reddit.com/r/NewToReddit/wiki/" \
+                          "Please see https://www.reddit.com/r/NewToReddit/wiki/" \
                           "ntr-guidetoreddit#wiki_part_7.3A__safety_on_reddit for more safety tips."
-        sticky_post = "This post has been flaired 'strict sfw'. This means that any user who contacts the poster " \
-                      "may be permanently banned from the subreddit if they have a heavily NSFW history (>20%) " \
+        sticky_post = "This post has been flaired 'strict sfw'. This means that any user who comments here or contacts the poster " \
+                      "may be permanently banned from the subreddit if they have a history of NSFW comments " \
                       "or are using new throwaway accounts. This subreddit is strictly for platonic friendships, and " \
                       "the mods will not tolerate the solicitation of minors or otherwise unwanted harassment. " \
                       "The moderators will still evaluate all bans on a case by case basis prior to action taken."
@@ -2169,7 +2288,10 @@ def nsfw_checking():  # Does not expand comments
 
             post.nsfw_repliers_checked = True
             s.add(post)
-        tr_sub = TrackedSubreddit.get_subreddit_by_name(post.subreddit_name)
+        if post.subreddit_name not in WATCHED_SUBS:
+            update_list_with_subreddit(subreddit_name=post.subreddit_name)
+        tr_sub = WATCHED_SUBS[post.subreddit_name]
+
         time_since: timedelta = datetime.now(pytz.utc)-post.nsfw_last_checked.replace(tzinfo=timezone.utc)
         time_since_hrs = int(time_since.total_seconds()/3600)
         # longer and longer between checks.
@@ -2179,10 +2301,7 @@ def nsfw_checking():  # Does not expand comments
             continue
         print(
             f"checking post: {post.subreddit_name} {post.title} {post.time_utc} {post.get_comments_url()} {post.post_flair}")
-
-        #print(f"post: {post.subreddit_name} {post.title} {post.time_utc} {post.get_comments_url()} {post.post_flair} dm disabled? {dms_disabled}")
-
-        top_level_comments: List[praw.models.Comment ] = list(post.get_api_handle().comments)
+        top_level_comments: List[praw.models.Comment] = list(post.get_api_handle().comments)
         for c in top_level_comments:
             author = None
             author_name = None
@@ -2198,34 +2317,41 @@ def nsfw_checking():  # Does not expand comments
                 if not author:
                     author = TrackedAuthor(c.author.name)
 
+
             if author:
                 author_list[author_name] = author
 
                 if author.nsfw_pct == -1 or not author.last_calculated\
-                        or author.last_calculated.replace(tzinfo=timezone.utc) < (datetime.now(pytz.utc) - timedelta(days=7)):
-                    nsfw_pct = author.calculate_nsfw()
+                        or author.last_calculated.replace(tzinfo=timezone.utc) < \
+                        (datetime.now(pytz.utc) - timedelta(days=7)):
+                    nsfw_pct, items = author.calculate_nsfw()
+                    if nsfw_pct <10 and items <10:
+                        new_flair_text = f"Warning: Minimal User History"
+                    else:
+                        new_flair_text = f"{int(nsfw_pct)}% NSFW"
                     s.add(author)
                     try:
-                        tr_sub.get_api_handle().flair.set(author_name, text=f"{int(nsfw_pct)}% NSFW")
+                        tr_sub.get_api_handle().flair.set(author_name, text=new_flair_text)
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
 
-                #if author.has_nsfw_post:
-                #    try:
-                #        tr_sub.banned.add(author.author_name, ban_note=f"Has NSFW post history {author.has_nsfw_post}",
-                #                          ban_message="NO HISTORY OF NSFW POSTS ALLOWED IN /r/needafriend")
-                #    except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
-                #        pass
-
                 if not check_actioned(f"comment-{c.id}") and (
                         (author.nsfw_pct > 80 or (op_age < 18 and author.age and author.age > 18)
-                         or (op_age < 18 and author.nsfw_pct > 10) or author.has_nsfw_post)):
+                         or (op_age < 18 and author.nsfw_pct > 10))):
                     comment_url = f"https://www.reddit.com/r/{post.subreddit_name}/comments/{post.id}/-/{c.id}"
+                    smart_link = f"https://www.reddit.com/message/compose?to=ModeratelyHelpfulBot" \
+                                 f"&subject={post.subreddit_name}" \
+                                 f"&message="
                     response = f"Author very nsfw: http://www.reddit.com/u/{author_name} . " \
                                f"Commented on: {post.get_comments_url()} \n\n. " \
                                f"Link to comment: {comment_url} \n\n. " \
                                f"Poster's age {op_age}. Commenter's age {author.age} \n\n" \
-                               f"Has nsfw post? {author.has_nsfw_post}"
+                               f"Has nsfw post? {author.has_nsfw_post} \n\n" \
+                               f"Comment text: {c.body} \n\n" \
+                               f"[$ban-sc (ban for sexual content)]({smart_link}$ban-sc {author_name}) | " \
+                               f"[$ban-mc (ban for minor contact)]({smart_link}$ban-mc {author_name}) | " \
+                               f"[$ban-cf (ban for catfishing)]({smart_link}$ban-cf {author_name}) | "
+
                     subject = f"[Notification] Found this potential predator {author_name} score={int(author.nsfw_pct)}"
                     print(response)
                     try:
@@ -2240,7 +2366,6 @@ def nsfw_checking():  # Does not expand comments
         post.nsfw_last_checked = datetime.now(pytz.utc)
         s.add(post)
         s.commit()
-
 
 
 def get_naughty_list():
