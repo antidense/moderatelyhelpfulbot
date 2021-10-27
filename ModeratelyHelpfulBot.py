@@ -85,6 +85,7 @@ class CountedStatus(Enum):
     MODPOST_EXEMPT = 16
     GRACE_PERIOD_EXEMPT = 17
     FLAIR_HELPER = 18
+    REMOVED = 20
 
 
 # For messaging subreddits that use bot
@@ -98,6 +99,94 @@ class Broadcast(Base):
 
     def __init__(self, post):
         self.id = post.id
+
+
+class Stats(Base):
+    __tablename__ = "Stats"
+
+    subreddit_name = Column(String(191), primary_key=True)
+    date = Column(Date, nullable=False, primary_key=True)
+    num_blacklist = Column(Integer)
+    num_hallpass = Column(Integer)
+    num_flagged = Column(Integer)
+    num_spam = Column(Integer)
+    num_am = Column(Integer)
+    num_mod_rem = Column(Integer)
+    num_oc_exempt = Column(Integer)
+    num_self_exempt = Column(Integer)
+    num_link_exempt = Column(Integer)
+    num_flair_exempt = Column(Integer)
+    num_flair_not_exempt = Column(Integer)
+    num_title_exempt = Column(Integer)
+    num_title_not_exempt = Column(Integer)
+    num_modpost_exempt = Column(Integer)
+    num_grace_exempted = Column(Integer)
+    num_flair_helper = Column(Integer)
+    num_removed = Column(Integer)
+    avg_latency = Column(Float)
+    total_reviewed = Column(Integer)
+
+    def __init__(self, subreddit_name, date):
+        self.subreddit_name = subreddit_name
+        self.date = date
+        self.num_blacklist = 0
+        self.num_hallpass = 0
+        self.num_flagged = 0
+        self.num_spam = 0
+        self.num_am = 0
+        self.num_mod_rem = 0
+        self.num_oc_exempt = 0
+        self.num_self_exempt = 0
+        self.num_link_exempt = 0
+        self.num_flair_exempt = 0
+        self.num_flair_not_exempt = 0
+        self.num_title_exempt = 0
+        self.num_title_not_exempt = 0
+        self.num_modpost_exempt = 0
+        self.num_grace_exempted = 0
+        self.num_flair_helper = 0
+        self.num_removed = 0
+
+        self.avg_latency = -1
+        self.total_reviewed = 0
+
+    def update_field(self, posted_status, count):
+        d = {3: "num_blacklist",
+             4: "num_hallpass",
+             5: "num_flagged",
+             6: "num_spam",
+                7: "num_am",
+                8: "num_mod_rem",
+                9: "num_oc_exempt",
+                10: "num_self_exempt",
+                11: "num_link_exempt",
+                12: "num_flair_exempt",
+                13: "num_flair_not_exempt",
+                14: "num_title_exempt",
+                15: "num_title_not_exempt",
+                16: "num_modpost_exempt",
+                17: "num_grace_exempted",
+                18: "num_flair_helper",
+                20: "num_removed"
+             }
+        if posted_status in d:
+            setattr(self, d[posted_status], count)
+
+
+class Stats2(Base):
+    __tablename__ = "Stats2"
+
+    subreddit_name = Column(String(191), primary_key=True)
+    date = Column(Date, nullable=False, primary_key=True)
+    stat_name = Column(String(20), primary_key=True)
+    value_int = Column(Integer)
+    info = Column(String(191))
+
+    def __init__(self, subreddit_name, date, stat_name):
+        self.subreddit_name = subreddit_name
+        self.date = date
+        self.stat_name = stat_name
+        self.value_int = None
 
 
 class TrackedAuthor(Base):
@@ -118,6 +207,7 @@ class TrackedAuthor(Base):
         self.created_date = datetime.now(pytz.utc)
         self.num_history_items = -1
         self.has_nsfw_post = None
+        self.sub_counts = None
 
     def get_api_handle(self):
         if not self.api_handle:
@@ -127,6 +217,7 @@ class TrackedAuthor(Base):
             return self.api_handle
 
     def calculate_nsfw(self):
+        subs = list()
         intended_total = 50
         total = 0
         count = 0
@@ -139,6 +230,7 @@ class TrackedAuthor(Base):
         try:
             comments: List[praw.models.reddit.comment.Comment] = list(comments_generator)
             for comment in comments:
+                subs.append(comment.subreddit.display_name)
                 total += 1
                 if comment.subreddit.over18:
                     count += 1
@@ -148,6 +240,7 @@ class TrackedAuthor(Base):
                         self.age = age
             posts: List[praw.models.reddit.Submission.submission] = list(post_generator)
             for post in posts:
+                subs.append(post.subreddit.display_name)
                 total += 1
                 if post.over_18:
                     count += 1
@@ -163,9 +256,18 @@ class TrackedAuthor(Base):
         self.age = age
         self.last_calculated = datetime.now(pytz.utc)
         self.num_history_items = total
+        for sub in subs:
+            if sub in ("rapefantasies", "womenarethings", "HypnoHookup", "MisogynyGoneWild", "incest"):
+                ban_note = f"ModhelpfulBot: activity on {sub}"
+                REDDIT_CLIENT.subreddit('needafriend').banned.add(
+                    self.author_name, ban_note=ban_note, ban_message=ban_note)
+            break
+        from collections import Counter
+        self.sub_counts = str(Counter(subs))
         return self.nsfw_pct, total
 
         # In the future,  look for: /r/dirtypenpals   DDLGPersonals   cglpersonals  littlespace dirtyr4r ddlg
+        #instantban: rapefantasies, womenarethings, HypnoHookup, MisogynyGoneWild
 
 
 def get_age(input_text: str):
@@ -292,6 +394,7 @@ class SubmittedPost(Base):
     def mod_remove(self) -> bool:
         try:
             self.get_api_handle().mod.remove()
+
             return True
         except praw.exceptions.APIException:
             logger.warning(f'something went wrong removing post: http://redd.it/{self.id}')
@@ -355,16 +458,17 @@ class SubmittedPost(Base):
     def update_status(self, reviewed=None, flagged_duplicate=None, counted_status=None):
         if reviewed is not None:
             self.reviewed = reviewed
-            if not self.response_time:
-                self.response_time = datetime.now(pytz.utc)
-        if counted_status is not None:
+
+        if counted_status is not None and counted_status != CountedStatus.REMOVED:
             self.counted_status = counted_status.value
         if flagged_duplicate is not None:
             self.flagged_duplicate = flagged_duplicate
             if flagged_duplicate is True:
                 self.counted_status = CountedStatus.FLAGGED.value
         self.last_checked = datetime.now(pytz.utc)
-        self.response_time = datetime.now(pytz.utc)-self.time_utc.replace(tzinfo=timezone.utc)
+        # self.response_time = datetime.now(pytz.utc)-self.time_utc.replace(tzinfo=timezone.utc)
+        if not self.response_time:
+            self.response_time = datetime.now(pytz.utc)
 
 class CommonPost():  # did not (Base) yet!!!  use for tracking bot spam
     __tablename__ = 'CommonPost'
@@ -429,15 +533,15 @@ class TrackedSubreddit(Base):
     save_text = Column(Boolean, nullable=True)
     max_count_per_interval = Column(Integer, nullable=False, default=1)
     min_post_interval_mins = Column(Integer, nullable=False, default=60 * 72)
-    bot_mod = Column(String(21), nullable=True, default=None)
+    bot_mod = Column(String(21), nullable=True, default=None)  #most recent mod managing bot
     ban_ability = Column(Integer, nullable=False, default=-1)
-    # -2 -> bans enabled but no perms
-    # -1 -> unknown
+    # -2 -> bans enabled but no perms -> blacklists instead of bans
+    # -1 -> unknown (not yet checked)
     # 0 -> bans not enabled
-    # 1 -> bans enabled (perma)
-    # 2 -> bans enabled (not perma)
+
     mm_convo_id = Column(String(10), nullable=True, default=None)
     is_nsfw = Column(Boolean, nullable=False, default=0)
+
 
     subreddit_mods = []
     rate_limiting_enabled = False
@@ -1122,9 +1226,14 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
         if post_status == PostedStatus.UP:
             try:
                 was_successful = recent_post.mod_remove()
+                recent_post.counted_status = CountedStatus.REMOVED
                 logger.debug("\tremoved post now")
                 if not was_successful:
                     logger.debug("\tcould not remove post")
+                elif tr_sub.ban_ability == -1:
+                    tr_sub.ban_ability = 1
+                    s.add(tr_sub)
+                    s.commit()
             except praw.exceptions.APIException:
                 logger.debug("\tcould not remove post")
             except prawcore.exceptions.Forbidden:
@@ -1399,12 +1508,95 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
         s.add(tr_sub)
         s.commit()
 
-    if command in ['summary', ]:
-        author_name_to_check = parameters[0] if parameters else None
-        if not author_name_to_check:
+    if command in ['summary', 'unban', 'hallpass', 'blacklist', 'ban', 'ban-sc', 'ban-mc', 'ban-cf']:
+        author_param = parameters[0] if parameters else None
+
+        if not author_param:
             return "No author name given", True
+        author_param = author_param.lower()
+        author_param = author_param.replace('/u/', '')
+        author_param = author_param.replace('u/', '')
+        author_handle = REDDIT_CLIENT.redditor(author_param)
+        if author_handle:
+            try:
+                _ = author_handle.id  # force load actual username capitalization
+                author_param = author_handle.name
+            except prawcore.exceptions.NotFound:
+                pass
+
         if command == 'summary':
-            return tr_sub.get_author_summary(author_name_to_check), True
+            return tr_sub.get_author_summary(author_param), True
+
+        # Need to be an actual reddit author after this point
+        if not author_handle:
+            return "could not find that username `{}`".format(author_param), True
+
+        if command in ['unban', 'hallpass', 'blacklist']:
+            subreddit_author: SubAuthor = s.query(SubAuthor).get((subreddit_name, author_handle.name))
+            if not subreddit_author:
+                subreddit_author = SubAuthor(tr_sub.subreddit_name, author_handle.name)
+
+            if command == "unban":
+                if subreddit_author.next_eligible.replace(tzinfo=timezone.utc) > datetime.now(pytz.utc):
+                    subreddit_author.next_eligible = datetime(2019, 1, 1, 0, 0)
+                    return_text = "User was removed from blacklist"
+                else:
+                    try:
+                        REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.remove(author_param)
+                        return "Unban succeeded", False
+                    except prawcore.exceptions.Forbidden:
+                        return "Unban failed, I don't have permission in this subreddit to do that. Sorry.", True
+                    except prawcore.exceptions.BadRequest:
+                        return "The reddit server did not let me do this. Are they already unbanned?", True
+            elif command == "hallpass":
+                return_text = f"User {author_param} has been granted a hall pass. " \
+                              "This means the next post by the user in this " \
+                              "subreddit will not be automatically removed."
+            elif command == "blacklist":
+                subreddit_author.currently_blacklisted = True
+                return_text = "User {} has been blacklisted from modmail. " \
+                    .format(author_handle.name)
+            else:
+                return_text =  "shouldn't get here?"
+            s.add(subreddit_author)
+            return return_text, True
+
+        ban_reason = " ".join(parameters[3:]) if parameters and len(parameters) >= 3 else None
+        ban_note = "ModhelpfulBot: per modmail command"
+        ban_length = int(parameters[1]) if parameters and len(parameters) >= 2 else None
+
+        if command == "ban-sc":
+            tracked_author: TrackedAuthor = s.query(TrackedAuthor).get(author_handle.name)
+            if command.startswith("ban-") and not tracked_author:
+                return "could not find that username `{}`".format(author_param), True
+            ban_reason = f"Per recent community feedback, we are temp banning anyone with a history that is more than " \
+                         f"80% NSFW to protect minors and reduce sexual harassment in our subreddit.  " \
+                         f"Please get this down if you wish to continue to participate here. " \
+                         f"Your score is currently {tracked_author.nsfw_pct} and is recalculated weekly."
+            ban_note = f"Having {tracked_author.nsfw_pct}>80% NSFW"
+            ban_length = 30
+        elif command == "ban-mc":
+            ban_reason = f"Per our rules, contacting minors while having a history of NSFW comments and/or posts " \
+                         f"is a bannable offense.  Your account was reviewed by a mod team and determined to be " \
+                         f"non-compliant with our rules."
+            ban_note = "Contacted Minor having a NSFW profile"
+            ban_length = 999
+        elif command == "ban-cf":
+            ban_reason = f"Per our rules, catfishing (identifying as different ages) is a bannable offense."
+            ban_note = "catfishing"
+            ban_length = 999
+        try:
+            if ban_length == 999 or ban_length is None:
+                REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
+                    author_param, ban_note=ban_note, ban_message=ban_reason)
+            else:
+                REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
+                    author_param, ban_note=ban_note, ban_message=ban_reason,
+                    ban_length=ban_length)
+            return "Ban for {} was successful".format(author_param), True
+        except prawcore.exceptions.Forbidden:
+            return "Ban failed, I don't have permission to do that", True
+
     elif command == "showrules":
         lines = ["Rules for {}:".format(subreddit_name), ]
         rules = REDDIT_CLIENT.subreddit(subreddit_name).rules()['rules']
@@ -1422,7 +1614,6 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
             return "Cannot find that submission", True
         submission.mod.approve()
         return "Submission was approved.", False
-
     elif command == "remove":
         submission_id = parameters[0] if parameters else None
         if not submission_id:
@@ -1432,137 +1623,7 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
             return "Cannot find that submission", True
         submission.mod.remove()
         return "Submission was removed.", True
-    elif command == "hallpass":
-        author_name_to_check: str = parameters[0] if parameters else None
-        if not author_name_to_check:
-            return "No author name given", True
-        if author_name_to_check.startswith('u/'):
-            author_name_to_check = author_name_to_check.replace("u/", "")
-        author_name_to_check = author_name_to_check.lower()
-        actual_author = REDDIT_CLIENT.redditor(author_name_to_check)
-        try:
-            _ = actual_author.id  # force load actual username capitalization
-        except prawcore.exceptions.NotFound:
-            pass
-        if not actual_author:
-            return "could not find that username `{}`".format(author_name_to_check), True
 
-        subreddit_author: SubAuthor = s.query(SubAuthor).get((subreddit_name, actual_author.name))
-        if not subreddit_author:
-            subreddit_author = SubAuthor(tr_sub.subreddit_name, actual_author.name)
-        subreddit_author.hall_pass = 1
-        s.add(subreddit_author)
-        return_text = "User {} has been granted a hall pass. " \
-                      "This means the next post by the user in this subreddit will not be automatically removed." \
-            .format(actual_author.name)
-        return return_text, False
-    elif command == "ban-sc":
-        author_name_to_check: str = parameters[0] if parameters else None
-        if not author_name_to_check:
-            return "No author name given", True
-        if author_name_to_check.startswith('u/'):
-            author_name_to_check = author_name_to_check.replace("u/", "")
-        author_name_to_check = author_name_to_check.lower()
-        actual_author = REDDIT_CLIENT.redditor(author_name_to_check)
-        try:
-            _ = actual_author.id  # force load actual username capitalization
-        except prawcore.exceptions.NotFound:
-            pass
-        if not actual_author:
-            return "could not find that username `{}`".format(author_name_to_check), True
-
-        subreddit_author: TrackedAuthor = s.query(TrackedAuthor).get(actual_author.name)
-        if not subreddit_author:
-            return "could not find that username `{}`".format(author_name_to_check), True
-        ban_reason = f"Per recent community feedback, we are temp banning anyone with a history that is more than " \
-                     f"80% NSFW to protect minors and reduce sexual harassment in our subreddit.  " \
-                     f"Please get this down if you wish to continue to participate here. " \
-                     f"Your score is currently {subreddit_author.nsfw_pct} and is recalculated weekly."
-        try:
-
-            REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                author_name_to_check, ban_note="Having >80% NSFW", ban_message=ban_reason,
-                ban_length=30)
-            return "Ban for {} was successful".format(author_name_to_check), True
-
-        except prawcore.exceptions.Forbidden:
-            return "Ban failed, I don't have permission to do that", True
-    elif command == "ban-mc":
-        author_name_to_check: str = parameters[0] if parameters else None
-        if not author_name_to_check:
-            return "No author name given", True
-        if author_name_to_check.startswith('u/'):
-            author_name_to_check = author_name_to_check.replace("u/", "")
-        author_name_to_check = author_name_to_check.lower()
-        actual_author = REDDIT_CLIENT.redditor(author_name_to_check)
-        try:
-            _ = actual_author.id  # force load actual username capitalization
-        except prawcore.exceptions.NotFound:
-            pass
-        if not actual_author:
-            return "could not find that username `{}`".format(author_name_to_check), True
-
-        subreddit_author: TrackedAuthor = s.query(TrackedAuthor).get(actual_author.name)
-        if not subreddit_author:
-            return "could not find that username `{}`".format(author_name_to_check), True
-        ban_reason = f"Per our rules, contacting minors while having a history of NSFW comments and/or posts " \
-                     f"is a bannable offense.  Your account was reviewed by a mod team and determined to be " \
-                     f"non-compliant with our rules."
-        try:
-
-            REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                author_name_to_check, ban_note="Contacted Minor having a NSFW profile", ban_message=ban_reason)
-            return "Ban for {} was successful".format(author_name_to_check), True
-
-        except prawcore.exceptions.Forbidden:
-            return "Ban failed, I don't have permission to do that", True
-    elif command == "ban-cf":
-        author_name_to_check: str = parameters[0] if parameters else None
-        if not author_name_to_check:
-            return "No author name given", True
-        if author_name_to_check.startswith('u/'):
-            author_name_to_check = author_name_to_check.replace("u/", "")
-        author_name_to_check = author_name_to_check.lower()
-        actual_author = REDDIT_CLIENT.redditor(author_name_to_check)
-        try:
-            _ = actual_author.id  # force load actual username capitalization
-        except prawcore.exceptions.NotFound:
-            pass
-        if not actual_author:
-            return "could not find that username `{}`".format(author_name_to_check), True
-
-        subreddit_author: TrackedAuthor = s.query(TrackedAuthor).get(actual_author.name)
-        if not subreddit_author:
-            return "could not find that username `{}`".format(author_name_to_check), True
-        ban_reason = f"Per our rules, catfishing (identifying as different ages) is a bannable offense."
-        try:
-
-            REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                author_name_to_check, ban_note="catfishing", ban_message=ban_reason)
-            return "Ban for {} was successful".format(author_name_to_check), True
-
-        except prawcore.exceptions.Forbidden:
-            return "Ban failed, I don't have permission to do that", True
-    elif command == "blacklist":
-        author_name_to_check = parameters[0] if parameters else None
-        if not author_name_to_check:
-            return "No author name given", True
-        if author_name_to_check.startswith('u/'):
-            author_name_to_check = author_name_to_check.replace("u/", "")
-        author_name_to_check = author_name_to_check.lower()
-        actual_author = REDDIT_CLIENT.redditor(author_name_to_check)
-        _ = actual_author.id  # force load actual username capitalization
-        if not actual_author:
-            return "could not find that username `{}`".format(author_name_to_check), True
-
-        subreddit_author: SubAuthor = s.query(SubAuthor).get((subreddit_name, actual_author.name))
-        if not subreddit_author:
-            subreddit_author = SubAuthor(tr_sub.subreddit_name, actual_author.name)
-        subreddit_author.currently_blacklisted = True
-        s.add(subreddit_author)
-        return_text = "User {} has been blacklisted from modmail. " \
-            .format(actual_author.name)
-        return return_text, True
     elif command == "citerule" or command == "testciterule":
         if not parameters:
             return "No rule # given", True
@@ -1603,12 +1664,12 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
         internal = False if command == "citerule" else True
         return reply, internal
     elif command == "reset":
-        author_name_to_check = parameters[0] if parameters else None
-        subreddit_author: SubAuthor = s.query(SubAuthor).get((tr_sub.subreddit_name, author_name_to_check))
+        author_param = parameters[0] if parameters else None
+        subreddit_author: SubAuthor = s.query(SubAuthor).get((tr_sub.subreddit_name, author_param))
         if subreddit_author and subreddit_author.next_eligible.replace(tzinfo=timezone.utc) > datetime.now(pytz.utc):
             subreddit_author.next_eligible = datetime(2019, 1, 1, 0, 0)
             return "User was removed from blacklist", False
-        posts = s.query(SubmittedPost).filter(SubmittedPost.author == author_name_to_check,
+        posts = s.query(SubmittedPost).filter(SubmittedPost.author == author_param,
                                               # SubmittedPost.flagged_duplicate.is_(True),
                                               SubmittedPost.counted_status == CountedStatus.FLAGGED.value,
                                               SubmittedPost.subreddit_name == tr_sub.subreddit_name).all()
@@ -1617,49 +1678,7 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
             post.counted_status = CountedStatus.EXEMPTED.value
             s.add(post)
         s.commit()
-    elif command == "unban":
 
-        author_name_to_check = parameters[0] if parameters else None
-        author_name_to_check = author_name_to_check.replace("/u/", "")
-        author_name_to_check = author_name_to_check.replace("u/", "")
-        subreddit_author: SubAuthor = s.query(SubAuthor).get((tr_sub.subreddit_name, author_name_to_check))
-        if subreddit_author and subreddit_author.next_eligible.replace(tzinfo=timezone.utc) > datetime.now(pytz.utc):
-            subreddit_author.next_eligible = datetime(2019, 1, 1, 0, 0)
-            return "User was removed from blacklist", False
-        try:
-            REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.remove(author_name_to_check)
-            return "Unban succeeded", False
-        except prawcore.exceptions.Forbidden:
-            return "Unban failed, I don't have permission in this subreddit to do that. Sorry.", True
-        except prawcore.exceptions.BadRequest:
-            return "The reddit server did not let me do this. Are they already unbanned?", True
-    elif command == "ban":
-        author_name_to_check = parameters[0] if parameters else None
-        author_name_to_check = author_name_to_check.replace('/u/', '')
-        author_name_to_check = author_name_to_check.replace('u/', '')
-
-        ban_length = int(parameters[1]) if parameters and len(parameters) >= 2 else None
-
-        ban_reason = "per modmail command"
-        if not author_name_to_check:
-            return "No author name given", True
-        actual_author = REDDIT_CLIENT.redditor(author_name_to_check)
-        if not actual_author:
-            return "Invalid author name or deleted account", True
-        print('trying to ban: {}'.format(author_name_to_check))
-
-        try:
-            if ban_length:
-                REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                    author_name_to_check, ban_note="ModhelpfulBot: per modmail command", ban_message=ban_reason,
-                    ban_length=ban_length)
-                return "Ban for {} was successful".format(author_name_to_check), True
-            else:
-                REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                    author_name_to_check, ban_note="ModhelpfulBot: per modmail command", ban_message=ban_reason)
-                return "Ban for {} was successful".format(author_name_to_check), True
-        except prawcore.exceptions.Forbidden:
-            return "Ban failed, I don't have permission to do that", True
 
     elif command == "update":
         worked, status = tr_sub.update_from_yaml(force_update=True)
@@ -1736,7 +1755,7 @@ def handle_direct_messages():
         elif message.subject.startswith('invitation to moderate'):
             mod_mail_invitation_to_moderate(message)
         elif command in ("summary", "update", "stats") or command.startswith("$"):
-            subject_parts = message.subject.replace("re:","").split(":")
+            subject_parts = message.subject.replace("re: ","").split(":")
             thread_id = subject_parts[1] if len(subject_parts)>1 else None
             subreddit_name = subject_parts[0].lower().replace("re: ", "")
             tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
@@ -2110,12 +2129,13 @@ def purge_old_records_by_subreddit(tr_sub: TrackedSubreddit):
     s.commit()
 
 
-def check_new_submissions(query_limit=800):
+def check_new_submissions(query_limit=800, sub_list='mod'):
     global REDDIT_CLIENT
     subreddit_names = []
     subreddit_names_complete = []
     logger.info("pulling new posts!")
-    possible_new_posts = [a for a in REDDIT_CLIENT.subreddit('mod').new(limit=query_limit)]
+
+    possible_new_posts = [a for a in REDDIT_CLIENT.subreddit(sub_list).new(limit=query_limit)]
 
     count = 0
     for post_to_review in possible_new_posts:
@@ -2140,11 +2160,11 @@ def check_new_submissions(query_limit=800):
     return subreddit_names
 
 
-def check_spam_submissions(subreddit_name='mod'):
+def check_spam_submissions(sub_list='mod'):
     global REDDIT_CLIENT
     possible_spam_posts = []
     try:
-        possible_spam_posts = [a for a in REDDIT_CLIENT.subreddit(subreddit_name).mod.spam(only='submissions')]
+        possible_spam_posts = [a for a in REDDIT_CLIENT.subreddit(sub_list).mod.spam(only='submissions')]
     except prawcore.exceptions.Forbidden:
         pass
     for post_to_review in possible_spam_posts:
@@ -2153,13 +2173,13 @@ def check_spam_submissions(subreddit_name='mod'):
             break
         if not previous_post:
             post = SubmittedPost(post_to_review)
-            subreddit_name = post.subreddit_name.lower()
+            sub_list = post.subreddit_name.lower()
             # logger.info("found spam post: '{0}...' http://redd.it/{1} ({2})".format(post.title[0:20], post.id,
             #                                                                         subreddit_name))
 
             # post.reviewed = True
             s.add(post)
-            subreddit_author: SubAuthor = s.query(SubAuthor).get((subreddit_name, post.author))
+            subreddit_author: SubAuthor = s.query(SubAuthor).get((sub_list, post.author))
             if subreddit_author and subreddit_author.hall_pass >= 1:
                 subreddit_author.hall_pass -= 1
                 post.api_handle.mod.approve()
@@ -2169,6 +2189,8 @@ def check_spam_submissions(subreddit_name='mod'):
 
 def main_loop():
     load_settings()
+
+
 
     users_to_check = []
     for u in users_to_check:
@@ -2191,13 +2213,26 @@ def main_loop():
 
     # .filter(or_(SubmittedPost.nsfw_last_checked < datetime.now(pytz.utc) - timedelta(hours=5),
     #    SubmittedPost.nsfw_last_checked == False)) \
+    #current_index = 0
+    sub_list = 'mod'
     while True:
         print('start_loop')
         try:
             i += 1
-            check_new_submissions()
-            check_spam_submissions()
-
+            print(sub_list)
+            try:
+                check_new_submissions(sub_list=sub_list)
+                check_spam_submissions(sub_list=sub_list)
+                sub_list = 'mod'
+            except praw.exceptions.RedditAPIException:
+                subs =[]
+                statement = "select distinct subreddit_name, time_utc from RedditPost order by time_utc desc limit 600"
+                rs = s.execute(statement)
+                for row in rs:
+                    subs.append(row[0])
+                import random
+                sub_list = '+'.join(random.sample(subs, 499))
+                print("too many subs error")
             start = datetime.now(pytz.utc)
 
             # only do this if not too busy
@@ -2217,6 +2252,10 @@ def main_loop():
             handle_modmail_messages()
 
             nsfw_checking()
+            if (i-1) % 15 == 0:
+                calculate_stats()
+
+
         except prawcore.exceptions.ServerError:
             import time
             time.sleep(60*5) # sleep for a bit server errors
@@ -2228,6 +2267,59 @@ def main_loop():
                              body=trace)
 
 
+def calculate_stats():
+    #Todo: repeat offenders?
+
+    statement = 'select count(*),counted_status, subreddit_name, date(time_utc) as date from RedditPost  where   time_utc < date(utc_timestamp) group by date(time_utc),  subreddit_name,  counted_status order by date desc'
+    rs = s.execute(statement)
+
+    for row in rs:
+        count = row[0]
+        counted_status = row[1]
+        subreddit_name = row[2]
+        date = row[3]
+        stat_name = str(CountedStatus(counted_status)).replace("CountedStatus.", "").lower()
+        sub_stat = s.query(Stats2).get((subreddit_name, date,stat_name))
+        if not sub_stat:
+            sub_stat = Stats2(subreddit_name, date, stat_name)
+            sub_stat.value_int = count
+            s.add(sub_stat)
+        else:
+            break
+    s.commit()
+
+    statement = 'select count(*), subreddit_name, date(time_utc) as date from RedditPost  where  time_utc > utc_timestamp() - INTERVAL  60*24*14 MINUTE and time_utc < date(utc_timestamp)  group by  subreddit_name, date  order by date'
+    rs = s.execute(statement)
+    for row in rs:
+        count = row[0]
+        subreddit_name = row[1]
+        date = row[2]
+        sub_stat = s.query(Stats2).get((subreddit_name, date, 'collected'))
+        if not sub_stat:
+            sub_stat = Stats2(subreddit_name, date, 'collected')
+            sub_stat.value_int = count
+            s.add(sub_stat)
+
+    # Removed added as of 10/27/21 - previously not tracked separately from FLAGGED
+
+    statement = 'select count(*), avg(time_to_sec(timediff(response_time, time_utc))) as latency, subreddit_name, date(time_utc) as date from RedditPost  where  time_utc > utc_timestamp() - INTERVAL  60*24*14 MINUTE and time_utc < date(utc_timestamp)  and response_time is not null group by  subreddit_name, date  order by date'
+    rs = s.execute(statement)
+    for row in rs:
+        count = row[0]
+        latency = row[1]
+        subreddit_name = row[2]
+        date = row[3]
+        sub_stat2 = s.query(Stats2).get((subreddit_name, date, 'latency'))
+        if not sub_stat2:
+            sub_stat2 = Stats2(subreddit_name, date, 'latency')
+            sub_stat2.value_int = int(latency)
+            s.add(sub_stat2)
+            sub_stat3 = Stats2(subreddit_name, date, 'latency_ct')
+            sub_stat3.value_int = row[0]
+            s.add(sub_stat3)
+
+    s.commit()
+    rs = s.execute(statement)
 
 def nsfw_checking():  # Does not expand comments
 
@@ -2335,9 +2427,11 @@ def nsfw_checking():  # Does not expand comments
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
 
+
                 if not check_actioned(f"comment-{c.id}") and (
                         (author.nsfw_pct > 80 or (op_age < 18 and author.age and author.age > 18)
                          or (op_age < 18 and author.nsfw_pct > 10))):
+                    sub_counts = author.sub_counts if hasattr(author, 'sub_counts') else None
                     comment_url = f"https://www.reddit.com/r/{post.subreddit_name}/comments/{post.id}/-/{c.id}"
                     smart_link = f"https://www.reddit.com/message/compose?to=ModeratelyHelpfulBot" \
                                  f"&subject={post.subreddit_name}" \
@@ -2348,6 +2442,7 @@ def nsfw_checking():  # Does not expand comments
                                f"Poster's age {op_age}. Commenter's age {author.age} \n\n" \
                                f"Has nsfw post? {author.has_nsfw_post} \n\n" \
                                f"Comment text: {c.body} \n\n" \
+                               f"Sub activity: {sub_counts} \n\n" \
                                f"[$ban-sc (ban for sexual content)]({smart_link}$ban-sc {author_name}) | " \
                                f"[$ban-mc (ban for minor contact)]({smart_link}$ban-mc {author_name}) | " \
                                f"[$ban-cf (ban for catfishing)]({smart_link}$ban-cf {author_name}) | "
