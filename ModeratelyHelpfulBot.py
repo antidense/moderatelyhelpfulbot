@@ -32,7 +32,7 @@ clean actioned comments after 3 months
 MINOR_KWS = []
 ASL_REGEX = r"((?P<age>[0-9]{2})([/ \\-]?|(\]? \[))(?P<g>[mMFf]{1}))|" \
             r"((?P<g2>[mMFf]{1})([/ \\-]?|(\]? \[))(?P<age2>[0-9]{2}))"
-# Non binary?
+# Add Non binary?
 
 # Set up database
 engine = create_engine(DB_ENGINE)
@@ -43,14 +43,48 @@ REDDIT_CLIENT = praw.Reddit(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, pa
                             user_agent="ModeratelyHelpfulBot v0.4", username=BOT_NAME)
 
 # Set up some global variables
-ACCEPTING_NEW_SUBS = False
+ACCEPTING_NEW_SUBS = True
 LINK_REGEX = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
 REDDIT_LINK_REGEX = r'r/([a-zA-Z0-9_]*)/comments/([a-z0-9_]*)/([a-zA-Z0-9_]{0,50})'
 RESPONSE_TAIL = ""
 MAIN_SETTINGS = dict()
 WATCHED_SUBS = dict()
 SUBWIKI_CHECK_INTERVAL_HRS = 24
+UPDATE_LIST = True
 
+
+DEFAULT_CONFIG = """---
+###### If you edit this page, you must [click this link, then click "send"](https://old.reddit.com/message/compose?to=moderatelyhelpfulbot&subject=subredditname&message=update) to have the bot update
+######https://www.reddit.com/r/moderatelyhelpfulbot/wiki/index
+post_restriction: 
+    max_count_per_interval: 1
+    min_post_interval_hrs: 72
+    action: remove
+    ban_threshold_count: 5
+    ban_duration_days: ~
+    comment: "Hello and thank you for posting to {subreddit}! It seems you have previously posted {maxcount} submission within {interval}, so your post has been removed as per the post frequency rule.  If you believe your post has been removed by mistake please [message the moderators](https://old.reddit.com/message/compose?to=%2Fr%2F{subreddit}).\n"
+    distinguish: true
+    grace_period_mins: 60
+    ignore_AutoModerator_removed: true
+    ignore_moderator_removed: true
+    title_exempt_keyword: Modpost
+modmail: 
+    modmail_all_reply: ~
+    modmail_no_posts_reply: "Hello, and thank you for your message. I could not find any prior posts from you. If you have a particular question about a post, please reply with a link to the post!\n"
+    modmail_no_posts_reply_internal: false
+    modmail_posts_reply: ~
+"""
+
+
+NAFMC = "Per our rules, contacting minors while having a history of NSFW comments and/or posts is a bannable offense.  " \
+        "Your account was reviewed by a mod team and determined to be non-compliant with our rules."
+
+NAFSC = "Per recent community feedback, we are temp banning anyone with a history that is more than " \
+        "80% NSFW to protect minors and reduce sexual harassment in our subreddit.  " \
+        "Please get this down if you wish to continue to participate here. " \
+        "Your score is currently {NSFWPCT}% and is recalculated weekly."
+
+NAFCF = f"Per our rules, catfishing -- identifying as different ages in different posts -- is a bannable offense."
 
 class PostedStatus(Enum):
     SELF_DEL = "self-deleted"
@@ -101,78 +135,6 @@ class Broadcast(Base):
         self.id = post.id
 
 
-class Stats(Base):
-    __tablename__ = "Stats"
-
-    subreddit_name = Column(String(191), primary_key=True)
-    date = Column(Date, nullable=False, primary_key=True)
-    num_blacklist = Column(Integer)
-    num_hallpass = Column(Integer)
-    num_flagged = Column(Integer)
-    num_spam = Column(Integer)
-    num_am = Column(Integer)
-    num_mod_rem = Column(Integer)
-    num_oc_exempt = Column(Integer)
-    num_self_exempt = Column(Integer)
-    num_link_exempt = Column(Integer)
-    num_flair_exempt = Column(Integer)
-    num_flair_not_exempt = Column(Integer)
-    num_title_exempt = Column(Integer)
-    num_title_not_exempt = Column(Integer)
-    num_modpost_exempt = Column(Integer)
-    num_grace_exempted = Column(Integer)
-    num_flair_helper = Column(Integer)
-    num_removed = Column(Integer)
-    avg_latency = Column(Float)
-    total_reviewed = Column(Integer)
-
-    def __init__(self, subreddit_name, date):
-        self.subreddit_name = subreddit_name
-        self.date = date
-        self.num_blacklist = 0
-        self.num_hallpass = 0
-        self.num_flagged = 0
-        self.num_spam = 0
-        self.num_am = 0
-        self.num_mod_rem = 0
-        self.num_oc_exempt = 0
-        self.num_self_exempt = 0
-        self.num_link_exempt = 0
-        self.num_flair_exempt = 0
-        self.num_flair_not_exempt = 0
-        self.num_title_exempt = 0
-        self.num_title_not_exempt = 0
-        self.num_modpost_exempt = 0
-        self.num_grace_exempted = 0
-        self.num_flair_helper = 0
-        self.num_removed = 0
-
-        self.avg_latency = -1
-        self.total_reviewed = 0
-
-    def update_field(self, posted_status, count):
-        d = {3: "num_blacklist",
-             4: "num_hallpass",
-             5: "num_flagged",
-             6: "num_spam",
-                7: "num_am",
-                8: "num_mod_rem",
-                9: "num_oc_exempt",
-                10: "num_self_exempt",
-                11: "num_link_exempt",
-                12: "num_flair_exempt",
-                13: "num_flair_not_exempt",
-                14: "num_title_exempt",
-                15: "num_title_not_exempt",
-                16: "num_modpost_exempt",
-                17: "num_grace_exempted",
-                18: "num_flair_helper",
-                20: "num_removed"
-             }
-        if posted_status in d:
-            setattr(self, d[posted_status], count)
-
-
 class Stats2(Base):
     __tablename__ = "Stats2"
 
@@ -188,6 +150,22 @@ class Stats2(Base):
         self.stat_name = stat_name
         self.value_int = None
 
+class Stats3(Base):
+    __tablename__ = "Stats3"
+
+    subreddit_name = Column(String(191), primary_key=True)
+    author_name = Column(String(21), nullable=True, primary_key=True)
+    date = Column(Date, nullable=False, primary_key=True)
+    stat_name = Column(String(20), primary_key=True)
+    value_int = Column(Integer)
+    info = Column(String(191))
+
+    def __init__(self, subreddit_name, author_name, date, stat_name):
+        self.subreddit_name = subreddit_name
+        self.author_name=author_name
+        self.date = date
+        self.stat_name = stat_name
+        self.value_int = None
 
 class TrackedAuthor(Base):
     __tablename__ = 'TrackedAuthor'
@@ -198,8 +176,10 @@ class TrackedAuthor(Base):
     gender = Column(String(5), nullable=True)
     num_history_items = Column(Integer)
     has_nsfw_post = Column(String(10), nullable=True)
+    sub_counts = Column(String(191), nullable=True)
     age = Column(Integer)
     api_handle = None
+    has_banned_subs_activity = False
 
     def __init__(self, author_name):
         self.author_name = author_name
@@ -208,6 +188,7 @@ class TrackedAuthor(Base):
         self.num_history_items = -1
         self.has_nsfw_post = None
         self.sub_counts = None
+        self.has_banned_subs_activity = False
 
     def get_api_handle(self):
         if not self.api_handle:
@@ -216,20 +197,21 @@ class TrackedAuthor(Base):
         else:
             return self.api_handle
 
-    def calculate_nsfw(self):
+    def calculate_nsfw(self, instaban_subs= None):
         subs = list()
         intended_total = 50
         total = 0
         count = 0
         age = 0
         api_handle: praw.models.Redditor = self.get_api_handle()
-        sublisting: SubListing = api_handle.comments
-        comments_generator: ListingGenerator = sublisting.new(limit=intended_total)
-        postlisting: SubListing = api_handle.submissions
-        post_generator: ListingGenerator = postlisting.new(limit=10)
+        sub_listing: SubListing = api_handle.comments
+        comments_generator: ListingGenerator = sub_listing.new(limit=intended_total)
+        post_listing: SubListing = api_handle.submissions
+        post_generator: ListingGenerator = post_listing.new(limit=10)
         try:
             comments: List[praw.models.reddit.comment.Comment] = list(comments_generator)
             for comment in comments:
+                assert isinstance(comment, praw.models.reddit.comment.Comment)
                 subs.append(comment.subreddit.display_name)
                 total += 1
                 if comment.subreddit.over18:
@@ -250,24 +232,25 @@ class TrackedAuthor(Base):
                     age = get_age(post.title)
                     if age > 10:
                         self.age = age
-            self.nsfw_pct = (count*100)/total
+            self.nsfw_pct = None if total == 0 else (count*100)/total
         except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden):
             pass
         self.age = age
         self.last_calculated = datetime.now(pytz.utc)
         self.num_history_items = total
-        for sub in subs:
-            if sub in ("rapefantasies", "womenarethings", "HypnoHookup", "MisogynyGoneWild", "incest"):
-                ban_note = f"ModhelpfulBot: activity on {sub}"
-                REDDIT_CLIENT.subreddit('needafriend').banned.add(
-                    self.author_name, ban_note=ban_note, ban_message=ban_note)
-            break
+
+        if instaban_subs:
+            for sub in subs:
+                print("instaban_subs", instaban_subs)
+                if sub in instaban_subs:
+                    self.has_banned_subs_activity = True
+                    break
         from collections import Counter
         self.sub_counts = str(Counter(subs))
         return self.nsfw_pct, total
 
         # In the future,  look for: /r/dirtypenpals   DDLGPersonals   cglpersonals  littlespace dirtyr4r ddlg
-        #instantban: rapefantasies, womenarethings, HypnoHookup, MisogynyGoneWild
+        # instantban: rapefantasies, womenarethings, HypnoHookup, MisogynyGoneWild
 
 
 def get_age(input_text: str):
@@ -358,6 +341,7 @@ class SubmittedPost(Base):
                         nsfw_pct, items = author.calculate_nsfw()
                         new_flair_text = f"{int(nsfw_pct)}% NSFW"
                         s.add(author)
+
                         if nsfw_pct > 60:
                             try:
                                 REDDIT_CLIENT.subreddit(self.subreddit_name).flair.set(self.author, text=new_flair_text)
@@ -426,7 +410,10 @@ class SubmittedPost(Base):
 
     def get_posted_status(self, get_removed_info=False) -> PostedStatus:
         _ = self.get_api_handle()
-        self.self_deleted = False if self.api_handle.author else True
+        try:
+            self.self_deleted = False if self.api_handle.author else True
+        except prawcore.exceptions.Forbidden:
+            return PostedStatus.UNKNOWN
         self.banned_by = self.api_handle.banned_by
         if not self.banned_by and not self.self_deleted:
             return PostedStatus.UP
@@ -538,7 +525,19 @@ class TrackedSubreddit(Base):
     # -2 -> bans enabled but no perms -> blacklists instead of bans
     # -1 -> unknown (not yet checked)
     # 0 -> bans not enabled
-
+    active_status = Column(SMALLINT, nullable=True)
+    """20 -> unknown, still okay to try  
+    10 -> okay to use
+    4 -> config okay, but no ban access
+    3 -> config exists, but config problem
+    2 -> no config
+    1 -> config access problem
+    0 -> not a mod of sub
+    -1 -> sub is gone
+    -2 -> sub is forbidden"""
+    # 0 -> not active
+    # 1 -> active
+    # -1 -> unknown
     mm_convo_id = Column(String(10), nullable=True, default=None)
     is_nsfw = Column(Boolean, nullable=False, default=0)
 
@@ -582,6 +581,7 @@ class TrackedSubreddit(Base):
     title_not_exempt_keyword = None
     canned_responses = {}
     api_handle = None
+    instaban_subs = None
 
     def __init__(self, subreddit_name: str):
         self.subreddit_name = subreddit_name.lower()
@@ -590,6 +590,7 @@ class TrackedSubreddit(Base):
         self.update_from_yaml(force_update=True)
         self.settings_revision_date = None
         self.api_handle = REDDIT_CLIENT.subreddit(self.subreddit_name)
+        self.active_status = 20
 
     def get_mods_list(self, subreddit_handle=None) -> List[str]:
         self.api_handle = REDDIT_CLIENT.subreddit(self.subreddit_name) if not self.api_handle else self.api_handle
@@ -601,22 +602,32 @@ class TrackedSubreddit(Base):
     def update_from_yaml(self, force_update: bool = False) -> (Boolean, String):
         return_text = "Updated Successfully!"
         self.api_handle = REDDIT_CLIENT.subreddit(self.subreddit_name) if not self.api_handle else self.api_handle
-        self.is_nsfw = self.api_handle.over18
+        try:
+            self.is_nsfw = self.api_handle.over18
+        except prawcore.exceptions.NotFound:
+            print(f"do not know if {self.subreddit_name} is over 18...")
+
+            self.is_nsfw = None
         self.ban_ability = -1
+        #self.active_status = 20
         self.subreddit_mods = self.get_mods_list(subreddit_handle=self.api_handle)
 
         if force_update or self.settings_yaml_txt is None:
             try:
-                logger.warning('accessing wiki config %s' % self.subreddit_name)
+                logger.warning(f'accessing wiki config {self.subreddit_name}')
                 wiki_page = REDDIT_CLIENT.subreddit(self.subreddit_name).wiki[BOT_NAME]
                 if wiki_page:
                     self.settings_yaml_txt = wiki_page.content_md
                     self.settings_revision_date = wiki_page.revision_date
                     if wiki_page.revision_by:
                         self.bot_mod = wiki_page.revision_by.name
+                    else:
+                        self.active_status = 2
             except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden) as e:
-                logger.warning('no config accessible for %s' % self.subreddit_name)
+                logger.warning(f'no config accessible for {self.subreddit_name}')
                 self.rate_limiting_enabled = False
+                self.active_status = 1
+
 
                 return False, str(e)
 
@@ -723,11 +734,23 @@ class TrackedSubreddit(Base):
                         setattr(self, m_setting, m_settings[m_setting])
                     else:
                         return_text = "Did not understand variable '{}'".format(m_setting)
+        if 'history_checking' in self.settings_yaml:
+            h_settings = self.settings_yaml['history_checking']
+            possible_settings = ('instaban_subs',)
+            if h_settings:
+                for h_setting in h_settings:
+                    if h_setting in possible_settings:
+                        setattr(self, h_setting, h_settings[h_setting])
+                    else:
+                        return_text = "Did not understand variable '{}'".format(h_setting)
 
         self.min_post_interval = self.min_post_interval if self.min_post_interval else timedelta(hours=72)
         self.max_count_per_interval = self.max_count_per_interval if self.max_count_per_interval else 1
+        mods_list = self.get_mods_list()
+        if BOT_NAME not in mods_list:
+            return False, "I do not currently have mod privileges yet. If you just added me, please wait for approval"
+        self.active_status = 10
         self.last_updated = datetime.now()
-
         if self.ban_duration_days == 0:
             return False, "ban_duration_days can no longer be zero. Use `ban_duration_days: ~` to disable or use " \
                           "`ban_duration_days: 999` for permanent bans. Make sure there is a space after the colon."
@@ -904,11 +927,24 @@ class ActionedComments(Base):
     __tablename__ = 'ActionedComments'
     comment_id = Column(String(30), nullable=True, primary_key=True)
     date_actioned = Column(DateTime, nullable=True)
+    # TODO
+    # add subreddit name
+    # add success or fail
+
 
     def __init__(self, comment_id, ):
         self.comment_id = comment_id
         self.date_actioned = datetime.now()
 
+class LoggedActions(Base):
+    __tablename__ = 'Actions'
+    subreddit_name = Column(String(21), nullable=True)
+    action_id = Column(String(30), nullable=True, primary_key=True)
+    date_actioned = Column(DateTime, nullable=True)
+
+    def __init__(self, comment_id, ):
+        self.comment_id = comment_id
+        self.date_actioned = datetime.now()
 
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
@@ -986,14 +1022,18 @@ class PostingGroup:
         self.subreddit_name = subreddit_name
         self.posts = posts
 
-def look_for_rule_violations2(do_cleanup: bool = False):
+def look_for_rule_violations2(do_cleanup: bool = False, subs_to_update = None):
     global REDDIT_CLIENT
     global WATCHED_SUBS
     logger.debug("querying recent post(s)")
 
-    faster_statement = "select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 from RedditPost t inner join TrackedSubs s on t.subreddit_name = s.subreddit_name where counted_status <2 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 72 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
+    faster_statement = "select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status from RedditPost t inner join TrackedSubs s on t.subreddit_name = s.subreddit_name where s.active_status >3 and counted_status <2 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 72 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
+    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status >3 and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
 
-    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60 FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
+    if subs_to_update and not do_cleanup:
+        sub_list = str(subs_to_update).replace("[", "(").replace("]", ")")
+        faster_statement = f"select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status from RedditPost t inner join TrackedSubs s on t.subreddit_name = s.subreddit_name where s.subreddit_name IN {sub_list} and s.active_status >3 and counted_status <2 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 72 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
+        #faster_statement = f"SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.subreddit_name in {sub_list} and s.active_status >3 and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
 
     tick = datetime.now()
     if do_cleanup:
@@ -1036,6 +1076,9 @@ def look_for_rule_violations2(do_cleanup: bool = False):
         # Load subreddit settings
         tr_sub = update_list_with_subreddit(pg.subreddit_name, request_update_if_needed=True)
         max_count = tr_sub.max_count_per_interval
+        if tr_sub.active_status < 3:
+            continue
+
 
         # Check if they're on the soft blacklist
         subreddit_author: SubAuthor = s.query(SubAuthor).get((pg.subreddit_name, pg.author_name))
@@ -1055,8 +1098,7 @@ def look_for_rule_violations2(do_cleanup: bool = False):
                 continue
             # Check for soft blacklist
             if subreddit_author and post.time_utc < subreddit_author.next_eligible:
-                post.update_status(reviewed=True, flagged_duplicate=True, counted_status=CountedStatus.BLKLIST)
-                s.add(post)
+
                 logger.info(
                     f"{i}-{j}\t\tpost removed - prior to eligibility")
                 try:
@@ -1068,10 +1110,13 @@ def look_for_rule_violations2(do_cleanup: bool = False):
                                      tr_sub.comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve,
                                      lock_thread=tr_sub.lock_thread, stickied=tr_sub.comment_stickied,
                                      next_eligibility=subreddit_author.next_eligible, blacklist=True)
+                        post.update_status(reviewed=True, flagged_duplicate=True, counted_status=CountedStatus.BLKLIST)
+                        s.add(post)
                 except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
-                    logger.warning('something went wrong in removing post %s', str(e))
+                    logger.warning(f'something went wrong in removing post {str(e)}')
             # Check for post exemptions
             if not post.reviewed:
+
                 counted_status, result = check_for_post_exemptions(tr_sub, post)
                 post.update_status(counted_status=counted_status)
                 s.add(post)
@@ -1232,7 +1277,10 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
                     logger.debug("\tcould not remove post")
                 elif tr_sub.ban_ability == -1:
                     tr_sub.ban_ability = 1
+                    #if tr_sub.active_status > 3:
+                    #    tr_sub.active_status = 4
                     s.add(tr_sub)
+                    s.add(recent_post)
                     s.commit()
             except praw.exceptions.APIException:
                 logger.debug("\tcould not remove post")
@@ -1244,9 +1292,9 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
     if tr_sub.action == "report":
         if tr_sub.report_reason:
             rp_reason = tr_sub.populate_tags(tr_sub.report_reason, recent_post=recent_post, prev_post=possible_repost)
-            recent_post.get_api_handle().report(("ModeratelyHelpfulBot:" + rp_reason)[0:99])
+            recent_post.get_api_handle().report((f"{BOT_NAME}: {rp_reason}")[0:99])
         else:
-            recent_post.get_api_handle().report("ModeratelyHelpfulBot: repeatedly exceeding posting threshold")
+            recent_post.get_api_handle().report(f"{BOT_NAME}: repeatedly exceeding posting threshold")
     if tr_sub.message and recent_post.author:
         recent_post.get_api_handle().author.message("Regarding your post",
                                                     tr_sub.populate_tags(tr_sub.message, recent_post=recent_post,
@@ -1433,14 +1481,14 @@ def make_comment(subreddit: TrackedSubreddit, recent_post: SubmittedPost, most_r
         except (AttributeError):
             pass
     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
-        logger.warning('something went wrong in creating comment %s', str(e))
+        logger.warning(f'something went wrong in creating comment {str(e)}')
     return comment
 
 
 def load_settings():
     global RESPONSE_TAIL
     global MAIN_SETTINGS
-    wiki_settings = REDDIT_CLIENT.subreddit('moderatelyhelpfulbot').wiki['moderatelyhelpfulbot']
+    wiki_settings = REDDIT_CLIENT.subreddit(BOT_NAME).wiki['moderatelyhelpfulbot']
     MAIN_SETTINGS = yaml.safe_load(wiki_settings.content_md)
 
     if 'response_tail' in MAIN_SETTINGS:
@@ -1561,9 +1609,11 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
             s.add(subreddit_author)
             return return_text, True
 
-        ban_reason = " ".join(parameters[3:]) if parameters and len(parameters) >= 3 else None
+        ban_reason = " ".join(parameters[2:]) if parameters and len(parameters) >= 2 else None
         ban_note = "ModhelpfulBot: per modmail command"
+
         ban_length = int(parameters[1]) if parameters and len(parameters) >= 2 else None
+        print(parameters, ban_length)
 
         if command == "ban-sc":
             tracked_author: TrackedAuthor = s.query(TrackedAuthor).get(author_handle.name)
@@ -1574,7 +1624,8 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
                          f"Please get this down if you wish to continue to participate here. " \
                          f"Your score is currently {tracked_author.nsfw_pct} and is recalculated weekly."
             ban_note = f"Having {tracked_author.nsfw_pct}>80% NSFW"
-            ban_length = 30
+            #ban_length = 30
+            ban_length = 14 if tracked_author.nsfw_pct < 90 else 30
         elif command == "ban-mc":
             ban_reason = f"Per our rules, contacting minors while having a history of NSFW comments and/or posts " \
                          f"is a bannable offense.  Your account was reviewed by a mod team and determined to be " \
@@ -1587,12 +1638,14 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
             ban_length = 999
         try:
             if ban_length == 999 or ban_length is None:
+                print("permanent ban", ban_length)
                 REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
                     author_param, ban_note=ban_note, ban_message=ban_reason)
             else:
+                print("non permanent ban", ban_length)
                 REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
                     author_param, ban_note=ban_note, ban_message=ban_reason,
-                    ban_length=ban_length)
+                    duration=ban_length)
             return "Ban for {} was successful".format(author_param), True
         except prawcore.exceptions.Forbidden:
             return "Ban failed, I don't have permission to do that", True
@@ -1680,34 +1733,40 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
         s.commit()
 
 
-    elif command == "update":
+    elif command == "update":   # $update
         worked, status = tr_sub.update_from_yaml(force_update=True)
         help_text = ""
         if "404" in status:
             help_text = f"This error means the wiki config page needs to be created. " \
-                        f" See https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/moderatelyhelpfulbot. "
+                        f" See https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{BOT_NAME}. "
         elif "403" in status:
             help_text = f"This error means the bot doesn't have enough permissions to view the wiki page. " \
-                        f"Please make sure that the bot has accepted the moderator invitation and give the bot wiki " \
+                        f"Please make sure that you invited the bot to moderate and that the bot has accepted the moderator invitation and give the bot wiki " \
                         f"privileges here: https://www.reddit.com/r/{tr_sub.subreddit_name}/about/moderators/ . " \
-                        f"It is possible that the bot has not accepted the invitation due to current load.  "
+                        f"It is possible that the bot has not accepted the invitation due to current load.  " \
+                        f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{BOT_NAME}. "
         elif "yaml" in status:
             help_text = "Looks like there is an error in your yaml code. " \
-                        "Please make sure to validate your syntax at https://yamlvalidator.com/.  "
+                        "Please make sure to validate your syntax at https://yamlvalidator.com/.  " \
+                        f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{BOT_NAME}. "
         elif "single document in the stream" in status:
             help_text = "Looks like there is an extra double hyphen in your code at the end, e.g. '--'. " \
-                        "Please remove it.  "
+                        "Please remove it.  " \
+                        f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{BOT_NAME}. "
 
         reply_text = "Received message to update config for {0}.  See the output below. {2}" \
                      "Please message [/r/moderatelyhelpfulbot](https://www.reddit.com/" \
-                     "message/compose?to=%2Fr%2Fmoderatelyhelpfulbot) if you have any questions \n\n" \
+                     "message/old?to=%2Fr%2Fmoderatelyhelpfulbot) if you have any questions \n\n" \
                      "Update report: \n\n >{1}".format(subreddit_name, status, help_text)
         bot_owner_message = "subreddit: {0}\n\nrequestor: {1}\n\nreport: {2}" \
             .format(subreddit_name, requestor_name, status)
         # REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
-        BOT_SUB.send_modmail(body=bot_owner_message)
+        assert isinstance(requestor_name, str)
+        if requestor_name and requestor_name.lower() != BOT_OWNER.lower():
+            BOT_SUB.send_modmail(body=bot_owner_message)
         s.add(tr_sub)
         s.commit()
+        UPDATE_LIST = True
         return reply_text, True
     else:
         return "I did not understand that command", True
@@ -1768,8 +1827,9 @@ def handle_direct_messages():
                                 f"requestor: {requestor_name}\n\n" \
                                 f"command: {command}\n\n"  \
                                 f"response: {response}\n\n" \
-                                f"wiki: https://www.reddit.com/r/{subreddit_name}/wiki/moderatelyhelpfulbot\n\n"
-            BOT_SUB.send_modmail(subject="[Notification]  Command processed", body=bot_owner_message)
+                                f"wiki: https://www.reddit.com/r/{subreddit_name}/wiki/{BOT_NAME}\n\n"
+            if requestor_name.lower() != BOT_OWNER.lower():
+                BOT_SUB.send_modmail(subject="[Notification]  Command processed", body=bot_owner_message)
             #REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
 
         elif requestor_name and not check_actioned(requestor_name):
@@ -1805,7 +1865,7 @@ def mod_mail_invitation_to_moderate(message):
     tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=False)
 
     # accept invite if accepting invites or had been accepted previously
-    if ACCEPTING_NEW_SUBS or tr_sub:
+    if ACCEPTING_NEW_SUBS or tr_sub and 'karma' not in subreddit_name.lower():
         sub = REDDIT_CLIENT.subreddit(subreddit_name)
         try:
             sub.mod.accept_invite()
@@ -1813,9 +1873,26 @@ def mod_mail_invitation_to_moderate(message):
             message.reply("Error: Invite message has been rescinded?")
 
         message.reply(f"Hi, thank you for inviting me!  I will start working now. Please make sure I have a config. "
-                      f"It should be at https://www.reddit.com/r/{subreddit_name}/wiki/{BOT_NAME} . "
+                      f"I will try yto create one at https://www.reddit.com/r/{subreddit_name}/wiki/{BOT_NAME} . "
                       f"You may need to create it. You can find examples at "
                       f"https://www.reddit.com/r/{BOT_NAME}/wiki/index . ")
+        try:
+            logger.warning(f'no wiki page {tr_sub.subreddit_name}..will create')
+            REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).wiki.create(
+                BOT_NAME, DEFAULT_CONFIG.replace("subredditname", tr_sub.subreddit_name),
+                reason="default_config"
+            )
+
+            tr_sub.send_modmail(subject=f"[Notification] Config created",
+                            body="There was no configuration created for ModeratelyHelpfulBot so "
+                                 "one was automatically generated. Please check it to make sure it is "
+                                 f"what you want. https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/moderatelyhelpfulbot")
+            tr_sub.active_status = 20
+            s.add(tr_sub)
+        except prawcore.exceptions.NotFound:
+            logger.warning(f'no config accessible for {tr_sub.subreddit_name}')
+            tr_sub.active_status = 1
+            s.add(tr_sub)
     else:
         message.reply(f"Invitation received. Please wait for approval by bot owner. In the mean time, "
                       f"you may create a config at https://www.reddit.com/r/{subreddit_name}/wiki/{BOT_NAME} .")
@@ -1977,7 +2054,7 @@ def handle_modmail_message(convo):
                                 and "status: AutoMod-removed" not in non_internal_response:
                             #don't answer if not particularly helpful
                             convo.reply(non_internal_response, internal=False)
-                    smart_link = f"https://www.reddit.com/message/compose?to=ModeratelyHelpfulBot" \
+                    smart_link = f"https://old.reddit.com/message/compose?to={BOT_NAME}" \
                                  f"&subject={subreddit_name}:{convo.id}" \
                                  f"&message="
                     response += tr_sub.populate_tags2(
@@ -2023,7 +2100,7 @@ def handle_modmail_message(convo):
             elif convo.num_messages > 2 and convo.messages[-2].author.name == BOT_NAME and last_message.is_internal:
                 if not check_actioned(f"ic-{convo.id}") and tr_sub.modmail_notify_replied_internal:
                     response = "Hey sorry to bug you, but was this last message not meant to be moderator-only?  " \
-                               f"https://mod.reddit.com/mail/all/{convo.id}" \
+                               f"https://mod.reddit.com/mail/-/{convo.id} \n\n" \
                                "Set `modmail_notify_replied_internal: false` to disable this message"
 
                     response_internal = True
@@ -2041,7 +2118,7 @@ def handle_modmail_message(convo):
 
             if debug_notify:
                 # REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
-                mhb_sub = TrackedSubreddit.get_subreddit_by_name("ModeratelyHelpfulBot")
+                mhb_sub = TrackedSubreddit.get_subreddit_by_name(BOT_NAME)
                 mhb_sub.send_modmail(subject="[Notification] MHB Command used", body=bot_owner_message)
         except (prawcore.exceptions.BadRequest, praw.exceptions.RedditAPIException):
             logger.debug("reply failed {0}".format(response))
@@ -2097,11 +2174,11 @@ def update_list_with_subreddit(subreddit_name: str, request_update_if_needed=Fal
         #  Notify (only once) if updating did not work.
         if not worked and hasattr(tr_sub, "settings_revision_date"):
             if not check_actioned(f"wu-{subreddit_name}-{tr_sub.settings_revision_date}"):
-                tr_sub.send_modmail(subject = "[Notification] wiki settings loading error"
-                             f"There was an error loading your {BOT_NAME} configuration: {{status}} "
-                             f"\n\n https://www.reddit.com/r/{{subreddit_name}}"
+                tr_sub.send_modmail(subject="[Notification] wiki settings loading error"
+                             f"There was an error loading your {BOT_NAME} configuration: {status} "
+                             f"\n\n https://www.reddit.com/r/{subreddit_name}"
                              f"/wiki/edit/{BOT_NAME}. \n\n"
-                             f"Please see https://www.reddit.com/r/ModeratelyHelpfulBot/wiki/index for examples")
+                             f"Please see https://www.reddit.com/r/{BOT_NAME}/wiki/index for examples")
                 record_actioned(f"wu-{subreddit_name}-{tr_sub.settings_revision_date}")
         else:
             to_update_db = True
@@ -2120,7 +2197,9 @@ def purge_old_records_by_subreddit(tr_sub: TrackedSubreddit):
     print("looking for old records to purge from ", tr_sub.subreddit_name, tr_sub.min_post_interval)
     _ = s.query(SubmittedPost).filter(
         SubmittedPost.time_utc < datetime.now(pytz.utc).replace(tzinfo=None) - tr_sub.min_post_interval,
-        SubmittedPost.counted_status != CountedStatus.FLAGGED.value, SubmittedPost.pre_duplicate.is_(False),
+        SubmittedPost.counted_status.not_in([CountedStatus.FLAGGED.value,
+                                          CountedStatus.REMOVED.value, CountedStatus.BLKLIST]),
+        SubmittedPost.pre_duplicate.is_(False),
         SubmittedPost.subreddit_name == tr_sub.subreddit_name).delete()
 
     # SubmittedPost.flagged_duplicate.is_(False),
@@ -2187,85 +2266,6 @@ def check_spam_submissions(sub_list='mod'):
     s.commit()
 
 
-def main_loop():
-    load_settings()
-
-
-
-    users_to_check = []
-    for u in users_to_check:
-        u1 = TrackedAuthor(u)
-        # print(u1.calculate_nsfw())
-    i = 0
-
-    """
-    posts_to_check = s.query(SubmittedPost).filter(
-        SubmittedPost.time_utc > datetime.now(pytz.utc) - timedelta(hours=20),
-        SubmittedPost.subreddit_name == "needafriend",
-        SubmittedPost.counted_status < 3) \
-        .order_by(desc(SubmittedPost.time_utc)) \
-        .all()
-    for post in posts_to_check:
-        age = get_age(post.title)
-        if 25 > age > 13:
-            post.post_flair = "strict sfw"
-    """
-
-    # .filter(or_(SubmittedPost.nsfw_last_checked < datetime.now(pytz.utc) - timedelta(hours=5),
-    #    SubmittedPost.nsfw_last_checked == False)) \
-    #current_index = 0
-    sub_list = 'mod'
-    while True:
-        print('start_loop')
-        try:
-            i += 1
-            print(sub_list)
-            try:
-                check_new_submissions(sub_list=sub_list)
-                check_spam_submissions(sub_list=sub_list)
-                sub_list = 'mod'
-            except praw.exceptions.RedditAPIException:
-                subs =[]
-                statement = "select distinct subreddit_name, time_utc from RedditPost order by time_utc desc limit 600"
-                rs = s.execute(statement)
-                for row in rs:
-                    subs.append(row[0])
-                import random
-                sub_list = '+'.join(random.sample(subs, 499))
-                print("too many subs error")
-            start = datetime.now(pytz.utc)
-
-            # only do this if not too busy
-            # if last_index < 30:
-
-            look_for_rule_violations2(do_cleanup=(i % 15 == 0))  # uses a lot of resources
-
-            if i % 75 == 0:
-                purge_old_records()
-
-            print("$$$checking rule violations took this long", datetime.now(pytz.utc) - start)
-
-            # update_TMBR_submissions(look_back=timedelta(days=7))
-            send_broadcast_messages()
-            #  do_automated_replies()  This is currently disabled!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            handle_direct_messages()
-            handle_modmail_messages()
-
-            nsfw_checking()
-            if (i-1) % 15 == 0:
-                calculate_stats()
-
-
-        except prawcore.exceptions.ServerError:
-            import time
-            time.sleep(60*5) # sleep for a bit server errors
-        except Exception as e:
-            import traceback
-            trace = traceback.format_exc()
-            print(trace)
-            TrackedSubreddit.get_subreddit_by_name(BOT_NAME).send_modmail(subject="[Notification] MHB Exception",
-                             body=trace)
-
 
 def calculate_stats():
     #Todo: repeat offenders?
@@ -2288,19 +2288,38 @@ def calculate_stats():
             break
     s.commit()
 
-    statement = 'select count(*), subreddit_name, date(time_utc) as date from RedditPost  where  time_utc > utc_timestamp() - INTERVAL  60*24*14 MINUTE and time_utc < date(utc_timestamp)  group by  subreddit_name, date  order by date'
+    statement = 'select count(*), sum(if(counted_status=5, 1, 0)) as flagged, sum(if(counted_status=3, 1, 0)) as blacklisted, sum(if(counted_status=20, 1, 0)) as removed,  subreddit_name, date(time_utc) as date from RedditPost  where  time_utc > utc_timestamp() - INTERVAL  60*24*14 MINUTE and time_utc < date(utc_timestamp)  group by  subreddit_name, date  order by date'
     rs = s.execute(statement)
     for row in rs:
         count = row[0]
-        subreddit_name = row[1]
-        date = row[2]
+        flagged_count = row[1]
+        blacklisted_count = row[2]
+        removed_count = row[3]
+        subreddit_name = row[4]
+        date = row[5]
         sub_stat = s.query(Stats2).get((subreddit_name, date, 'collected'))
         if not sub_stat:
             sub_stat = Stats2(subreddit_name, date, 'collected')
             sub_stat.value_int = count
             s.add(sub_stat)
+        sub_stat = s.query(Stats2).get((subreddit_name, date, 'flagged'))
+        if not sub_stat:
+            sub_stat = Stats2(subreddit_name, date, 'flagged')
+            sub_stat.value_int = flagged_count
+            s.add(sub_stat)
+            sub_stat = Stats2(subreddit_name, date, 'blacklisted')
+            sub_stat.value_int = blacklisted_count
+            s.add(sub_stat)
+            sub_stat = Stats2(subreddit_name, date, 'removed')
+            sub_stat.value_int = removed_count
+            s.add(sub_stat)
+        sub_stat = s.query(Stats2).get((subreddit_name, date, 'flagged_total'))
+        if not sub_stat:
+            sub_stat = Stats2(subreddit_name, date, 'flagged_total')
+            sub_stat.value_int = flagged_count+blacklisted_count+removed_count
+            s.add(sub_stat)
 
-    # Removed added as of 10/27/21 - previously not tracked separately from FLAGGED
+    # REMOVED(20) added as of 10/27/21 - previously not tracked separately from FLAGGED
 
     statement = 'select count(*), avg(time_to_sec(timediff(response_time, time_utc))) as latency, subreddit_name, date(time_utc) as date from RedditPost  where  time_utc > utc_timestamp() - INTERVAL  60*24*14 MINUTE and time_utc < date(utc_timestamp)  and response_time is not null group by  subreddit_name, date  order by date'
     rs = s.execute(statement)
@@ -2340,7 +2359,7 @@ def nsfw_checking():  # Does not expand comments
     tick = datetime.now()
 
     for post in posts_to_check:
-
+        assert isinstance(post, SubmittedPost)
         op_age = get_age(post.title)
 
         tock = datetime.now()
@@ -2365,7 +2384,7 @@ def nsfw_checking():  # Does not expand comments
                       "the mods will not tolerate the solicitation of minors or otherwise unwanted harassment. " \
                       "The moderators will still evaluate all bans on a case by case basis prior to action taken."
         if post.time_utc.replace(tzinfo=timezone.utc) > datetime.now(pytz.utc)-timedelta(hours=3) \
-                and op_age < 18 and post.nsfw_repliers_checked == False:
+                and op_age < 18 and post.nsfw_repliers_checked is False:
             try:
                 comment_reply = post.get_api_handle().reply(sticky_post)
                 comment_reply.mod.distinguish()
@@ -2378,11 +2397,16 @@ def nsfw_checking():  # Does not expand comments
             except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                 dms_disabled = "disabled"
 
+
             post.nsfw_repliers_checked = True
             s.add(post)
         if post.subreddit_name not in WATCHED_SUBS:
             update_list_with_subreddit(subreddit_name=post.subreddit_name)
         tr_sub = WATCHED_SUBS[post.subreddit_name]
+        assert isinstance(tr_sub, TrackedSubreddit)
+
+        if 'NOT' in dms_disabled and op_age<15:
+            tr_sub.send_modmail(body=f"Poster is <15 does NOT have PMs disabled. Remove post?  {post.get_url()}")
 
         time_since: timedelta = datetime.now(pytz.utc)-post.nsfw_last_checked.replace(tzinfo=timezone.utc)
         time_since_hrs = int(time_since.total_seconds()/3600)
@@ -2392,7 +2416,7 @@ def nsfw_checking():  # Does not expand comments
             # print("checked recently...")
             continue
         print(
-            f"checking post: {post.subreddit_name} {post.title} {post.time_utc} {post.get_comments_url()} {post.post_flair}")
+            f"checking post: {post.subreddit_name} {post.title} {post.time_utc} {post.get_comments_url()} {post.post_flair} {dms_disabled}")
         top_level_comments: List[praw.models.Comment] = list(post.get_api_handle().comments)
         for c in top_level_comments:
             author = None
@@ -2416,7 +2440,7 @@ def nsfw_checking():  # Does not expand comments
                 if author.nsfw_pct == -1 or not author.last_calculated\
                         or author.last_calculated.replace(tzinfo=timezone.utc) < \
                         (datetime.now(pytz.utc) - timedelta(days=7)):
-                    nsfw_pct, items = author.calculate_nsfw()
+                    nsfw_pct, items = author.calculate_nsfw(instaban_subs=tr_sub.instaban_subs)
                     if nsfw_pct <10 and items <10:
                         new_flair_text = f"Warning: Minimal User History"
                     else:
@@ -2427,15 +2451,29 @@ def nsfw_checking():  # Does not expand comments
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
 
+                #tr_sub = TrackedSubreddit.get_subreddit_by_name('needafriend')
+                #assert isinstance(tr_sub, TrackedSubreddit)
+                if hasattr(author, 'has_banned_subs_activity') and author.has_banned_subs_activity and op_age <18:
+                    ban_note = f"ModhelpfulBot: activity on {sub}"
+
+                    tr_sub.get_api_handle().banned.add(
+                        self.author_name, ban_note=ban_note, ban_message=ban_note)
+                    tr_sub.send_modmail(body=f"Banned author {self.author_name} for activity on {sub}")
 
                 if not check_actioned(f"comment-{c.id}") and (
                         (author.nsfw_pct > 80 or (op_age < 18 and author.age and author.age > 18)
                          or (op_age < 18 and author.nsfw_pct > 10))):
                     sub_counts = author.sub_counts if hasattr(author, 'sub_counts') else None
                     comment_url = f"https://www.reddit.com/r/{post.subreddit_name}/comments/{post.id}/-/{c.id}"
-                    smart_link = f"https://www.reddit.com/message/compose?to=ModeratelyHelpfulBot" \
+                    smart_link = f"https://old.reddit.com/message/compose?to={BOT_NAME}" \
                                  f"&subject={post.subreddit_name}" \
                                  f"&message="
+
+                    ban_mc_link = f"{smart_link}$ban {author_name} 999 {NAFMC}".replace(" ", "%20")
+                    ban_sc_link = f"{smart_link}$ban {author_name} 30 {NAFSC}".replace("{NSFWPCT}", str(author.nsfw_pct))\
+                        .replace(" ", "%20")
+                    ban_cf_link = f"{smart_link}$ban {author_name} 999 {NAFCF}".replace(" ", "%20")
+
                     response = f"Author very nsfw: http://www.reddit.com/u/{author_name} . " \
                                f"Commented on: {post.get_comments_url()} \n\n. " \
                                f"Link to comment: {comment_url} \n\n. " \
@@ -2443,9 +2481,9 @@ def nsfw_checking():  # Does not expand comments
                                f"Has nsfw post? {author.has_nsfw_post} \n\n" \
                                f"Comment text: {c.body} \n\n" \
                                f"Sub activity: {sub_counts} \n\n" \
-                               f"[$ban-sc (ban for sexual content)]({smart_link}$ban-sc {author_name}) | " \
-                               f"[$ban-mc (ban for minor contact)]({smart_link}$ban-mc {author_name}) | " \
-                               f"[$ban-cf (ban for catfishing)]({smart_link}$ban-cf {author_name}) | "
+                               f"[$ban-sc (ban for sexual content)]({ban_sc_link}) | " \
+                               f"[$ban-mc (ban for minor contact)]({ban_mc_link}) | " \
+                               f"[$ban-cf (ban for catfishing)]({ban_cf_link}) | "
 
                     subject = f"[Notification] Found this potential predator {author_name} score={int(author.nsfw_pct)}"
                     print(response)
@@ -2501,6 +2539,218 @@ def init_logger(logger_name, filename=None):
         # logger.addHandler(file_logger)
         logger.addHandler(sh)
     return logger
+
+
+def main_loop():
+    load_settings()
+
+    # .filter(or_(SubmittedPost.nsfw_last_checked < datetime.now(pytz.utc) - timedelta(hours=5),
+    #    SubmittedPost.nsfw_last_checked == False)) \
+    #current_index = 0
+    sub_list = 'mod'
+
+    sfw_subs = []
+    nsfw_subs = []
+    sfw_sub_list = "mod"
+    nsfw_sub_list = "mod"
+
+    #import random
+    #sub_list = '+'.join(random.sample(subs, 499))
+    #print("too many subs error")
+
+    global UPDATE_LIST
+
+    i=0
+    while True:
+        print('start_loop')
+        try:
+            i += 1
+
+            if UPDATE_LIST:
+                print("updating list")
+                #trs = s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status != 0).all()
+                trs = s.query(TrackedSubreddit).all()
+                for tr in trs:
+                    # print(tr.subreddit_name, tr.active_status)
+                    assert isinstance(tr, TrackedSubreddit)
+
+                    if tr.active_status == 10000:
+                        print(tr.subreddit_name, tr.active_status)
+                        try:
+                            sub_handle = tr.get_api_handle()
+                            if not sub_handle:
+                                print(f'invalid subreddit {tr.subreddit_name}')
+                                tr.active_status = -1
+                                s.add(tr)
+                                s.commit()
+                                continue
+                            if BOT_NAME not in tr.get_mods_list():
+                                print(f'not in mod list for {tr.subreddit_name}')
+                                tr.active_status = 0
+                                s.add(tr)
+                                s.commit()
+                                continue
+                        except (prawcore.exceptions.Forbidden, prawcore.exceptions.Redirect):
+                            print(f'Forbidden for {tr.subreddit_name}')
+                            tr.active_status = -2
+                            s.add(tr)
+
+                        wiki_page = REDDIT_CLIENT.subreddit(tr.subreddit_name).wiki[BOT_NAME]
+                        try:
+                            logger.warning(f'accessing wiki config {tr.subreddit_name}')
+                            wiki_page = REDDIT_CLIENT.subreddit(tr.subreddit_name).wiki[BOT_NAME]
+                            if wiki_page:
+                                print(wiki_page.revision_date)
+                                tr.active_status = 20
+                                s.add(tr)
+                                s.commit()
+
+
+                        except prawcore.exceptions.NotFound:
+                            try:
+                                logger.warning(f'no wiki page {tr.subreddit_name}..will create')
+                                REDDIT_CLIENT.subreddit(tr.subreddit_name).wiki.create(
+                                    BOT_NAME, DEFAULT_CONFIG.replace("subredditname", tr.subreddit_name),
+                                    reason="default_config"
+                                )
+
+                                tr.send_modmail(subject=f"[Notification] Config created",
+                                                body="There was no configuration created for ModeratelyHelpfulBot so "
+                                                     "one was automatically generated. Please check it to make sure it is "
+                                                     f"what you want. https://www.reddit.com/r/{tr.subreddit_name}/wiki/moderatelyhelpfulbot")
+                                tr.active_status = 20
+                                s.add(tr)
+                            except prawcore.exceptions.NotFound:
+                                logger.warning(f'no config accessible for {tr.subreddit_name}')
+                                tr.active_status = 1
+                                s.add(tr)
+                        except prawcore.exceptions.Forbidden as e:
+                            logger.warning(f'no config accessible for {tr.subreddit_name}')
+                            tr.active_status = 1
+                            s.add(tr)
+                        except prawcore.exceptions.Redirect:
+                            print(f'Redirect for {tr.subreddit_name}')
+                            tr.active_status = -1
+                            s.add(tr)
+                    if tr.active_status == 3:
+                        try:
+                            """20 -> unknown, still okay to try  
+                            10 -> okay to use
+                            4 -> config okay, but no ban access
+                            3 -> config exists, but config problem
+                            2 -> no config
+                            1 -> config access problem
+                            0 -> not a mod of sub
+                            -1 -> sub is gone
+                            -2 -> sub is forbidden"""
+                            logger.warning(f'accessing wiki config {tr.subreddit_name}')
+                            wiki_page = REDDIT_CLIENT.subreddit(tr.subreddit_name).wiki[BOT_NAME]
+                            if not wiki_page:
+                                logger.warning(f'no wiki page {tr.subreddit_name}')
+                                tr.active_status = 2
+                                s.add(tr)
+                            else:
+                                try:
+
+                                    settings_yaml = yaml.safe_load(wiki_page.content_md)
+                                except (yaml.scanner.ScannerError, yaml.composer.ComposerError, yaml.parser.ParserError) as e:
+                                    tr.active_status = 3
+                                    s.add(tr)
+                                    logger.warning(f'config problem')
+                        except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden) as e:
+                            logger.warning(f'no config accessible for {tr.subreddit_name}')
+                            tr.active_status = 1
+                            s.add(tr)
+
+                    """
+                    if tr.active_status == 1:  # okay to use
+                        tr.active_status = 10
+                    elif tr.active_status == -1:  # unknown status
+                        tr.active_status = 20
+                    elif tr.active_status == 0:  # don't use status
+                        try:
+                            sub_handle = tr.get_api_handle()
+                            if not sub_handle:
+                                print(f'invalid subreddit {tr.subreddit_name}')
+                                tr.active_status = -1
+                                s.add(tr)
+                                s.commit()
+                                continue
+                            if BOT_NAME not in tr.get_mods_list():
+                                print(f'not in mod list for {tr.subreddit_name}')
+                                tr.active_status = 0
+                                s.add(tr)
+                                s.commit()
+                                continue
+                        except (prawcore.exceptions.Forbidden, prawcore.exceptions.Redirect):
+                            print(f'Forbidden for {tr.subreddit_name}')
+                            tr.active_status = -2
+                            s.add(tr)
+                            continue
+                    s.add(tr)
+                    s.commit()
+
+                    if tr.active_status > 0:
+                        try:
+                            logger.warning(f'accessing wiki config {tr.subreddit_name}')
+                            wiki_page = REDDIT_CLIENT.subreddit(tr.subreddit_name).wiki[BOT_NAME]
+                            if not wiki_page:
+                                logger.warning(f'no wiki page {tr.subreddit_name}')
+                                tr.active_status = 2
+                        except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden) as e:
+                            logger.warning(f'no config accessible for {tr.subreddit_name}')
+                            tr.active_status = 1
+                    """
+                    if tr.active_status > 0:
+                        if tr.is_nsfw == 1:
+                            nsfw_subs.append(tr.subreddit_name)
+                        else:
+                            sfw_subs.append(tr.subreddit_name)
+                sfw_sub_list = "+".join(sfw_subs)
+                nsfw_sub_list = "+".join(nsfw_subs)
+                UPDATE_LIST = False
+                s.commit()
+            print(sfw_sub_list)
+            print(nsfw_sub_list)
+            updated_subs = check_new_submissions(sub_list=nsfw_sub_list)
+            #
+            check_spam_submissions(sub_list=nsfw_sub_list)
+
+            updated_subs += check_new_submissions(sub_list=sfw_sub_list)
+            check_spam_submissions(sub_list=sfw_sub_list)
+
+            start = datetime.now(pytz.utc)
+
+            if i == 1:  # Don't skip any subs if first time runnign!
+                updated_subs = None
+
+            look_for_rule_violations2(do_cleanup=(i % 15 == 0), subs_to_update=updated_subs)  # uses a lot of resources
+
+            if i % 75 == 0:
+                purge_old_records()
+
+            print("$$$checking rule violations took this long", datetime.now(pytz.utc) - start)
+
+            # update_TMBR_submissions(look_back=timedelta(days=7))
+            send_broadcast_messages()
+            #  do_automated_replies()  This is currently disabled!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            handle_direct_messages()
+            handle_modmail_messages()
+
+            nsfw_checking()
+            if (i-1) % 15 == 0:
+                calculate_stats()
+
+
+        except prawcore.exceptions.ServerError:
+            import time
+            time.sleep(60*5) # sleep for a bit server errors
+        except Exception as e:
+            import traceback
+            trace = traceback.format_exc()
+            print(trace)
+            TrackedSubreddit.get_subreddit_by_name(BOT_NAME).send_modmail(subject="[Notification] MHB Exception",
+                             body=trace)
 
 
 # set up the logger
