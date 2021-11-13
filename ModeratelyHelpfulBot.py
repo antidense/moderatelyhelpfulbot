@@ -26,13 +26,13 @@ from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET, BOT_OWNER, DB_E
 To do list:
 asyncio 
 incorporate toolbox? https://www.reddit.com/r/nostalgia/wiki/edit/toolbox check usernotes?
-clean actioned comments after 3 months
+active status to an ENUM
+add nonbinary gender
 """
 
 MINOR_KWS = []
 ASL_REGEX = r"((?P<age>[0-9]{2})([/ \\-]?|(\]? \[))(?P<g>[mMFf]{1}))|" \
             r"((?P<g2>[mMFf]{1})([/ \\-]?|(\]? \[))(?P<age2>[0-9]{2}))"
-# Add Non binary?
 
 # Set up database
 engine = create_engine(DB_ENGINE)
@@ -56,6 +56,10 @@ UPDATE_LIST = True
 DEFAULT_CONFIG = """---
 ###### If you edit this page, you must [click this link, then click "send"](https://old.reddit.com/message/compose?to=moderatelyhelpfulbot&subject=subredditname&message=update) to have the bot update
 ######https://www.reddit.com/r/moderatelyhelpfulbot/wiki/index
+
+###### [User Summary, click this link](https://www.reddit.com/message/compose?to=moderatelyhelpfulbot&subject=subredditname&message=$summary u/username) - Will show you the users posts
+
+###### [User Extra Post, click this link](https://www.reddit.com/message/compose?to=moderatelyhelpfulbot&subject=subredditname&message=$hallpass u/username)  - Will allow the user one extra post
 post_restriction: 
     max_count_per_interval: 1
     min_post_interval_hrs: 72
@@ -86,6 +90,7 @@ NAFSC = "Per recent community feedback, we are temp banning anyone with a histor
 
 NAFCF = f"Per our rules, catfishing -- identifying as different ages in different posts -- is a bannable offense."
 
+
 class PostedStatus(Enum):
     SELF_DEL = "self-deleted"
     UP = "up"
@@ -97,6 +102,19 @@ class PostedStatus(Enum):
     UNKNOWN = "Unknown status"
     FH_RM = "Flair_Helper removed"
 
+
+
+class SubStatus(Enum):
+    UNKNOWN = 20
+    ACTIVE = 10
+    YAML_SYNTAX_OKAY = 8
+    NO_BAN_ACCESS = 4
+    CONFIG_ERROR =3
+    NO_CONFIG = 2
+    CONFIG_ACCESS_ERROR = 1
+    NOT_MOD = 0
+    SUB_GONE = -1
+    SUB_FORBIDDEN = -2
 
 class CountedStatus(Enum):
     NOT_CHKD = -1   # include in search
@@ -457,8 +475,8 @@ class SubmittedPost(Base):
         if not self.response_time:
             self.response_time = datetime.now(pytz.utc)
 
-class CommonPost():  # did not (Base) yet!!!  use for tracking bot spam
-    __tablename__ = 'CommonPost'
+class CommonPost(Base):
+    __tablename__ = 'CommonPosts'
     id = Column(String(10), nullable=True, primary_key=True)
     title = Column(String(191), nullable=True)
     author = Column(String(21), nullable=True)
@@ -526,18 +544,6 @@ class TrackedSubreddit(Base):
     # -1 -> unknown (not yet checked)
     # 0 -> bans not enabled
     active_status = Column(SMALLINT, nullable=True)
-    """20 -> unknown, still okay to try  
-    10 -> okay to use
-    4 -> config okay, but no ban access
-    3 -> config exists, but config problem
-    2 -> no config
-    1 -> config access problem
-    0 -> not a mod of sub
-    -1 -> sub is gone
-    -2 -> sub is forbidden"""
-    # 0 -> not active
-    # 1 -> active
-    # -1 -> unknown
     mm_convo_id = Column(String(10), nullable=True, default=None)
     is_nsfw = Column(Boolean, nullable=False, default=0)
 
@@ -590,7 +596,7 @@ class TrackedSubreddit(Base):
         self.update_from_yaml(force_update=True)
         self.settings_revision_date = None
         self.api_handle = REDDIT_CLIENT.subreddit(self.subreddit_name)
-        self.active_status = 20
+        self.active_status = SubStatus.UNKNOWN.value
 
     def get_mods_list(self, subreddit_handle=None) -> List[str]:
         self.api_handle = REDDIT_CLIENT.subreddit(self.subreddit_name) if not self.api_handle else self.api_handle
@@ -598,6 +604,40 @@ class TrackedSubreddit(Base):
             return list(moderator.name for moderator in self.api_handle.moderator())
         except prawcore.exceptions.NotFound:
             return []
+
+    def check_access(self) -> SubStatus:
+        api_handle= REDDIT_CLIENT.subreddit(self.subreddit_name) if not self.api_handle else self.api_handle
+        if not api_handle:  # Subreddit doesn't exist
+            return SubStatus.SUB_GONE
+        self.api_handle = api_handle # Else keep the reference to the subreddit
+        if BOT_NAME not in self.get_mods_list():
+            self.active_status = SubStatus.NOT_MOD.value
+            return SubStatus.NOT_MOD
+        try:
+            logger.warning(f'accessing wiki config {self.subreddit_name}')
+            wiki_page = self.api_handle.wiki[BOT_NAME]
+            _ = wiki_page.revision_date
+            settings_yaml = yaml.safe_load(wiki_page.content_md)
+        except prawcore.exceptions.NotFound:
+            return SubStatus.NO_CONFIG
+        except prawcore.exceptions.Forbidden:
+            return SubStatus.CONFIG_ACCESS_ERROR
+        except prawcore.exceptions.Redirect:
+            print(f'Redirect for {self.subreddit_name}')
+            return SubStatus.SUB_GONE
+        except (yaml.scanner.ScannerError, yaml.composer.ComposerError, yaml.parser.ParserError):
+            return SubStatus.CONFIG_ERROR
+        return SubStatus.YAML_SYNTAX_OKAY
+
+    def update_access(self):
+        active_status = self.check_access()
+
+        #if active_status == SubStatus.YAML_SYNTAX_OKAY and self.active_status == 10:
+        #    return
+        self.active_status = active_status.value
+        s.add(self)
+        s.commit()
+        return active_status
 
     def update_from_yaml(self, force_update: bool = False) -> (Boolean, String):
         return_text = "Updated Successfully!"
@@ -622,11 +662,11 @@ class TrackedSubreddit(Base):
                     if wiki_page.revision_by:
                         self.bot_mod = wiki_page.revision_by.name
                     else:
-                        self.active_status = 2
+                        self.active_status = SubStatus.NO_CONFIG.value
             except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden) as e:
                 logger.warning(f'no config accessible for {self.subreddit_name}')
                 self.rate_limiting_enabled = False
-                self.active_status = 1
+                self.active_status = SubStatus.CONFIG_ACCESS_ERROR.value
 
 
                 return False, str(e)
@@ -749,7 +789,7 @@ class TrackedSubreddit(Base):
         mods_list = self.get_mods_list()
         if BOT_NAME not in mods_list:
             return False, "I do not currently have mod privileges yet. If you just added me, please wait for approval"
-        self.active_status = 10
+        self.active_status = SubStatus.ACTIVE.value
         self.last_updated = datetime.now()
         if self.ban_duration_days == 0:
             return False, "ban_duration_days can no longer be zero. Use `ban_duration_days: ~` to disable or use " \
@@ -1866,32 +1906,36 @@ def mod_mail_invitation_to_moderate(message):
 
     # accept invite if accepting invites or had been accepted previously
     if ACCEPTING_NEW_SUBS or tr_sub and 'karma' not in subreddit_name.lower():
-        sub = REDDIT_CLIENT.subreddit(subreddit_name)
+        if not tr_sub:
+            tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=True)
+        sub = tr_sub.get_api_handle()
         try:
             sub.mod.accept_invite()
         except praw.exceptions.APIException:
-            message.reply("Error: Invite message has been rescinded?")
+            message.reply("Error: Invite message has been rescinded? or already accepted?")
+            message.mark_read()
 
         message.reply(f"Hi, thank you for inviting me!  I will start working now. Please make sure I have a config. "
-                      f"I will try yto create one at https://www.reddit.com/r/{subreddit_name}/wiki/{BOT_NAME} . "
+                      f"I will try to create one at https://www.reddit.com/r/{subreddit_name}/wiki/{BOT_NAME} . "
                       f"You may need to create it. You can find examples at "
                       f"https://www.reddit.com/r/{BOT_NAME}/wiki/index . ")
         try:
-            logger.warning(f'no wiki page {tr_sub.subreddit_name}..will create')
-            REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).wiki.create(
-                BOT_NAME, DEFAULT_CONFIG.replace("subredditname", tr_sub.subreddit_name),
-                reason="default_config"
-            )
+            if tr_sub.update_access() is SubStatus.NO_CONFIG:
+                logger.warning(f'no wiki page {tr_sub.subreddit_name}..will create')
+                REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).wiki.create(
+                    BOT_NAME, DEFAULT_CONFIG.replace("subredditname", tr_sub.subreddit_name),
+                    reason="default_config"
+                )
 
-            tr_sub.send_modmail(subject=f"[Notification] Config created",
-                            body="There was no configuration created for ModeratelyHelpfulBot so "
-                                 "one was automatically generated. Please check it to make sure it is "
-                                 f"what you want. https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/moderatelyhelpfulbot")
-            tr_sub.active_status = 20
-            s.add(tr_sub)
+                tr_sub.send_modmail(subject=f"[Notification] Config created",
+                                body="There was no configuration created for ModeratelyHelpfulBot so "
+                                     "one was automatically generated. Please check it to make sure it is "
+                                     f"what you want. https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/moderatelyhelpfulbot")
+                tr_sub.active_status = SubStatus.ACTIVE.value
+                s.add(tr_sub)
         except prawcore.exceptions.NotFound:
             logger.warning(f'no config accessible for {tr_sub.subreddit_name}')
-            tr_sub.active_status = 1
+            tr_sub.active_status = SubStatus.CONFIG_ACCESS_ERROR.value
             s.add(tr_sub)
     else:
         message.reply(f"Invitation received. Please wait for approval by bot owner. In the mean time, "
@@ -2386,9 +2430,10 @@ def nsfw_checking():  # Does not expand comments
         if post.time_utc.replace(tzinfo=timezone.utc) > datetime.now(pytz.utc)-timedelta(hours=3) \
                 and op_age < 18 and post.nsfw_repliers_checked is False:
             try:
-                comment_reply = post.get_api_handle().reply(sticky_post)
-                comment_reply.mod.distinguish()
-                comment_reply.mod.approve()
+                #comment_reply = post.get_api_handle().reply(sticky_post)
+                #comment_reply.mod.distinguish()
+                #comment_reply.mod.approve()
+                pass
             except (praw.exceptions.APIException, prawcore.exceptions.Forbidden, ):
                 pass
             try:
@@ -2454,11 +2499,11 @@ def nsfw_checking():  # Does not expand comments
                 #tr_sub = TrackedSubreddit.get_subreddit_by_name('needafriend')
                 #assert isinstance(tr_sub, TrackedSubreddit)
                 if hasattr(author, 'has_banned_subs_activity') and author.has_banned_subs_activity and op_age <18:
-                    ban_note = f"ModhelpfulBot: activity on {sub}"
+                    ban_note = f"ModhelpfulBot: activity on watched sub \n\n {author.sub_counts}"
 
-                    tr_sub.get_api_handle().banned.add(
-                        self.author_name, ban_note=ban_note, ban_message=ban_note)
-                    tr_sub.send_modmail(body=f"Banned author {self.author_name} for activity on {sub}")
+                    # tr_sub.get_api_handle().banned.add(
+                    #     self.author_name, ban_note=ban_note, ban_message=ban_note)
+                    tr_sub.send_modmail(body=f"Banned author {author_name} for activity on {sub}")
 
                 if not check_actioned(f"comment-{c.id}") and (
                         (author.nsfw_pct > 80 or (op_age < 18 and author.age and author.age > 18)
@@ -2470,9 +2515,9 @@ def nsfw_checking():  # Does not expand comments
                                  f"&message="
 
                     ban_mc_link = f"{smart_link}$ban {author_name} 999 {NAFMC}".replace(" ", "%20")
-                    ban_sc_link = f"{smart_link}$ban {author_name} 30 {NAFSC}".replace("{NSFWPCT}", str(author.nsfw_pct))\
-                        .replace(" ", "%20")
-                    ban_cf_link = f"{smart_link}$ban {author_name} 999 {NAFCF}".replace(" ", "%20")
+                    ban_sc_link = f"{smart_link}$ban {author_name} 30 {NAFSC}".replace("{NSFWPCT}",
+                                                                                       str(int(author.nsfw_pct)))
+                    ban_cf_link = f"{smart_link}$ban {author_name} 999 {NAFCF}"
 
                     response = f"Author very nsfw: http://www.reddit.com/u/{author_name} . " \
                                f"Commented on: {post.get_comments_url()} \n\n. " \
@@ -2493,7 +2538,7 @@ def nsfw_checking():  # Does not expand comments
                         pass
                     tr_sub.send_modmail(subject=subject, body=response)
 
-                    REDDIT_CLIENT.redditor(BOT_OWNER).message("pervy perv", response)
+                    REDDIT_CLIENT.redditor(BOT_OWNER).message(subject, response)
                     record_actioned(f"comment-{c.id}")
         post.nsfw_repliers_checked = True
         post.nsfw_last_checked = datetime.now(pytz.utc)
@@ -2541,25 +2586,17 @@ def init_logger(logger_name, filename=None):
     return logger
 
 
+
 def main_loop():
     load_settings()
-
-    # .filter(or_(SubmittedPost.nsfw_last_checked < datetime.now(pytz.utc) - timedelta(hours=5),
-    #    SubmittedPost.nsfw_last_checked == False)) \
-    #current_index = 0
-    sub_list = 'mod'
 
     sfw_subs = []
     nsfw_subs = []
     sfw_sub_list = "mod"
     nsfw_sub_list = "mod"
 
-    #import random
-    #sub_list = '+'.join(random.sample(subs, 499))
-    #print("too many subs error")
 
     global UPDATE_LIST
-
     i=0
     while True:
         print('start_loop')
@@ -2574,133 +2611,6 @@ def main_loop():
                     # print(tr.subreddit_name, tr.active_status)
                     assert isinstance(tr, TrackedSubreddit)
 
-                    if tr.active_status == 10000:
-                        print(tr.subreddit_name, tr.active_status)
-                        try:
-                            sub_handle = tr.get_api_handle()
-                            if not sub_handle:
-                                print(f'invalid subreddit {tr.subreddit_name}')
-                                tr.active_status = -1
-                                s.add(tr)
-                                s.commit()
-                                continue
-                            if BOT_NAME not in tr.get_mods_list():
-                                print(f'not in mod list for {tr.subreddit_name}')
-                                tr.active_status = 0
-                                s.add(tr)
-                                s.commit()
-                                continue
-                        except (prawcore.exceptions.Forbidden, prawcore.exceptions.Redirect):
-                            print(f'Forbidden for {tr.subreddit_name}')
-                            tr.active_status = -2
-                            s.add(tr)
-
-                        wiki_page = REDDIT_CLIENT.subreddit(tr.subreddit_name).wiki[BOT_NAME]
-                        try:
-                            logger.warning(f'accessing wiki config {tr.subreddit_name}')
-                            wiki_page = REDDIT_CLIENT.subreddit(tr.subreddit_name).wiki[BOT_NAME]
-                            if wiki_page:
-                                print(wiki_page.revision_date)
-                                tr.active_status = 20
-                                s.add(tr)
-                                s.commit()
-
-
-                        except prawcore.exceptions.NotFound:
-                            try:
-                                logger.warning(f'no wiki page {tr.subreddit_name}..will create')
-                                REDDIT_CLIENT.subreddit(tr.subreddit_name).wiki.create(
-                                    BOT_NAME, DEFAULT_CONFIG.replace("subredditname", tr.subreddit_name),
-                                    reason="default_config"
-                                )
-
-                                tr.send_modmail(subject=f"[Notification] Config created",
-                                                body="There was no configuration created for ModeratelyHelpfulBot so "
-                                                     "one was automatically generated. Please check it to make sure it is "
-                                                     f"what you want. https://www.reddit.com/r/{tr.subreddit_name}/wiki/moderatelyhelpfulbot")
-                                tr.active_status = 20
-                                s.add(tr)
-                            except prawcore.exceptions.NotFound:
-                                logger.warning(f'no config accessible for {tr.subreddit_name}')
-                                tr.active_status = 1
-                                s.add(tr)
-                        except prawcore.exceptions.Forbidden as e:
-                            logger.warning(f'no config accessible for {tr.subreddit_name}')
-                            tr.active_status = 1
-                            s.add(tr)
-                        except prawcore.exceptions.Redirect:
-                            print(f'Redirect for {tr.subreddit_name}')
-                            tr.active_status = -1
-                            s.add(tr)
-                    if tr.active_status == 3:
-                        try:
-                            """20 -> unknown, still okay to try  
-                            10 -> okay to use
-                            4 -> config okay, but no ban access
-                            3 -> config exists, but config problem
-                            2 -> no config
-                            1 -> config access problem
-                            0 -> not a mod of sub
-                            -1 -> sub is gone
-                            -2 -> sub is forbidden"""
-                            logger.warning(f'accessing wiki config {tr.subreddit_name}')
-                            wiki_page = REDDIT_CLIENT.subreddit(tr.subreddit_name).wiki[BOT_NAME]
-                            if not wiki_page:
-                                logger.warning(f'no wiki page {tr.subreddit_name}')
-                                tr.active_status = 2
-                                s.add(tr)
-                            else:
-                                try:
-
-                                    settings_yaml = yaml.safe_load(wiki_page.content_md)
-                                except (yaml.scanner.ScannerError, yaml.composer.ComposerError, yaml.parser.ParserError) as e:
-                                    tr.active_status = 3
-                                    s.add(tr)
-                                    logger.warning(f'config problem')
-                        except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden) as e:
-                            logger.warning(f'no config accessible for {tr.subreddit_name}')
-                            tr.active_status = 1
-                            s.add(tr)
-
-                    """
-                    if tr.active_status == 1:  # okay to use
-                        tr.active_status = 10
-                    elif tr.active_status == -1:  # unknown status
-                        tr.active_status = 20
-                    elif tr.active_status == 0:  # don't use status
-                        try:
-                            sub_handle = tr.get_api_handle()
-                            if not sub_handle:
-                                print(f'invalid subreddit {tr.subreddit_name}')
-                                tr.active_status = -1
-                                s.add(tr)
-                                s.commit()
-                                continue
-                            if BOT_NAME not in tr.get_mods_list():
-                                print(f'not in mod list for {tr.subreddit_name}')
-                                tr.active_status = 0
-                                s.add(tr)
-                                s.commit()
-                                continue
-                        except (prawcore.exceptions.Forbidden, prawcore.exceptions.Redirect):
-                            print(f'Forbidden for {tr.subreddit_name}')
-                            tr.active_status = -2
-                            s.add(tr)
-                            continue
-                    s.add(tr)
-                    s.commit()
-
-                    if tr.active_status > 0:
-                        try:
-                            logger.warning(f'accessing wiki config {tr.subreddit_name}')
-                            wiki_page = REDDIT_CLIENT.subreddit(tr.subreddit_name).wiki[BOT_NAME]
-                            if not wiki_page:
-                                logger.warning(f'no wiki page {tr.subreddit_name}')
-                                tr.active_status = 2
-                        except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden) as e:
-                            logger.warning(f'no config accessible for {tr.subreddit_name}')
-                            tr.active_status = 1
-                    """
                     if tr.active_status > 0:
                         if tr.is_nsfw == 1:
                             nsfw_subs.append(tr.subreddit_name)
@@ -2713,7 +2623,6 @@ def main_loop():
             print(sfw_sub_list)
             print(nsfw_sub_list)
             updated_subs = check_new_submissions(sub_list=nsfw_sub_list)
-            #
             check_spam_submissions(sub_list=nsfw_sub_list)
 
             updated_subs += check_new_submissions(sub_list=sfw_sub_list)
