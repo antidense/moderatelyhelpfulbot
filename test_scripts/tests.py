@@ -1,14 +1,15 @@
-from pydantic import ValidationError
+# flake8: noqa E402
+# pylint: disable=wrong-import-position
+import sys
+sys.path.insert(0, '../moderatelyhelpfulbot/moderatelyhelpfulbot')
 
+from models.settings.base_settings import BaseSettings
+from pydantic import ValidationError
 import yaml
 
-import sys
-sys.path.insert(0, './moderatelyhelpfulbot')
-
-from models.settings import MainSettings
-
-with open("./test_scripts/test_settings.yaml", "r", encoding="utf-8") as stream:
+print("Real example")
+with open("./test_scripts/real_settings.yaml", "r", encoding="utf-8") as stream:
     try:
-        lmao = MainSettings(**yaml.safe_load(stream))  # type: ignore
-    except ValidationError:
-        print("this is an error lmao")
+        BaseSettings(**yaml.safe_load(stream))
+    except ValidationError as e:
+        print(e)

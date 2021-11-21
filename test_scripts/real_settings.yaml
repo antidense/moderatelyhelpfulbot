@@ -1,0 +1,21 @@
+---
+
+# Only allow one post within 8 hours
+
+post_restriction:
+  action: remove
+  grace_period_mins: 15
+  lock_thread: true
+  max_count_per_interval: 1
+  min_post_interval_hrs: 8
+  distinguish: true
+  ban_duration_days: ~
+  ban_threshold_count: 1
+  comment: |
+    Hello u/{author} and thank you for posting to r/{subreddit}!
+
+    It seems you have previously posted a submission within the past {interval}, so your post has been removed as per the post frequency rule. You last posted at {time} with the title "{prev.title}".
+    
+    If you believe your post has been removed by mistake please [message the moderators](https://www.reddit.com/message/compose?to=%2Fr%2F{subreddit}).
+modmail:
+  modmail_posts_reply: false

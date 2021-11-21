@@ -7,5 +7,7 @@
     "python.linting.pylintEnabled": true,
     "python.analysis.extraPaths": [
         "./moderatelyhelpfulbot"
-    ]
+    ],
+    "python.linting.pylintPath": "./env/bin/pylint",
+    "python.defaultInterpreterPath": "./env/bin/python"
 }
