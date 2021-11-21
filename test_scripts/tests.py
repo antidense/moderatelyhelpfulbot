@@ -3,7 +3,7 @@ from pydantic import ValidationError
 import yaml
 
 import sys
-sys.path.insert(0, '../moderatelyhelpfulbot/moderatelyhelpfulbot')
+sys.path.insert(0, './moderatelyhelpfulbot')
 
 from models.settings import MainSettings
 
