@@ -1,0 +1,6 @@
+max_count_per_interval: 1
+ignore_AutoModerator_removed: true
+ignore_moderator_removed: false
+ban_threshold_count: 1
+notify_about_spammers: 0
+ban_duration_days: 10

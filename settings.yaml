@@ -1,0 +1,34 @@
+default:
+  client_id: ""
+  client_secret: ""
+  bot_password: ""
+  bot_name: ""
+  bot_owner: ""
+
+  user_agent: "ModeratelyHelpfulBot v1.1 by /u/antidense"
+  scopes:
+    - edit
+    - flair
+    - save
+    - read
+    - vote
+    - history
+    - submit
+    - modconfig
+    - identity
+    - modcontributors
+    - modflair
+    - modlog
+    - modothers
+    - modposts
+    - modself
+    - modwiki
+    - mysubreddits
+    - privatemessages
+    - report
+    - subscribe
+    - wikiedit
+    - wikiread
+  
+  database:
+    engine: "mysql+pymysql://username:password@host:3306/yourdatabase?charset=utf8mb4"
