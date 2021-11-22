@@ -138,6 +138,7 @@ class CountedStatus(Enum):
     GRACE_PERIOD_EXEMPT = 17
     FLAIR_HELPER = 18
     REMOVED = 20
+    BOT_SPAM = 30
 
 
 # For messaging subreddits that use bot
@@ -259,7 +260,7 @@ class TrackedAuthor(Base):
 
         if instaban_subs:
             for sub in subs:
-                print("instaban_subs", instaban_subs)
+                # print("instaban_subs", instaban_subs)
                 if sub in instaban_subs:
                     self.has_banned_subs_activity = True
                     break
@@ -645,9 +646,9 @@ class TrackedSubreddit(Base):
         try:
             self.is_nsfw = self.api_handle.over18
         except prawcore.exceptions.NotFound:
-            print(f"do not know if {self.subreddit_name} is over 18...")
+            return False, f"Please make sure '{self.subreddit_name}' is a valid subreddit name"
 
-            self.is_nsfw = None
+
         self.ban_ability = -1
         #self.active_status = 20
         self.subreddit_mods = self.get_mods_list(subreddit_handle=self.api_handle)
@@ -659,7 +660,7 @@ class TrackedSubreddit(Base):
                 if wiki_page:
                     self.settings_yaml_txt = wiki_page.content_md
                     self.settings_revision_date = wiki_page.revision_date
-                    if wiki_page.revision_by:
+                    if wiki_page.revision_by and wiki_page.revision_by.name !=BOT_NAME:
                         self.bot_mod = wiki_page.revision_by.name
                     else:
                         self.active_status = SubStatus.NO_CONFIG.value
@@ -986,6 +987,27 @@ class LoggedActions(Base):
         self.comment_id = comment_id
         self.date_actioned = datetime.now()
 
+class Task(Base):
+    __tablename__ = 'aa_tasks'
+
+    task_name = Column(String(191), nullable=False, primary_key=True)
+    run_interval = Column(Integer, nullable=False)
+    last_ran = Column(DateTime, nullable=False)
+    last_error = Column(Text, nullable=True)
+    last_report = Column(Text, nullable=True)
+    force_run = Column(Boolean, nullable=False)
+
+    def __init__(self, idno, name, start_time, end_time):
+        self.idno = idno
+        self.name = name
+        self.start_time_str = start_time
+        self.end_time_str = end_time
+        self.presenters = None
+        self.to_record = True
+        self.force_run = False
+
+
+
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 s = Session()
@@ -1108,8 +1130,8 @@ def look_for_rule_violations2(do_cleanup: bool = False, subs_to_update = None):
 
         # Break if taking too long
         tock = datetime.now(pytz.utc) - tick
-        if tock > timedelta(minutes=3) and do_cleanup is False:
-            logger.debug("Aborting, taking more than 3 min")
+        if tock > timedelta(minutes=5) and do_cleanup is False:
+            logger.debug("Aborting, taking more than 5 min")
             s.commit()
             break
 
@@ -1426,7 +1448,8 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
             if num_days == 999:
                 # Permanent ban
                 REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                    recent_post.author, ban_note="ModhelpfulBot: repeated spam", ban_message=ban_message[:999])
+                    recent_post.author, ban_note="ModhelpfulBot: repeated spam", ban_reason="MHB: posting too much",
+                    ban_message=ban_message[:999])
                 logger.info(f"PERMANENT ban for {recent_post.author} succeeded ")
             else:
                 # Not permanent ban
@@ -1435,6 +1458,7 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
 
                 REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
                             recent_post.author, ban_note="ModhelpfulBot: repeated spam", ban_message=ban_message[:999],
+                            ban_reason="MHB: posting too much",
                             duration=num_days)
                 logger.info(f"Ban for {recent_post.author} succeeded for {num_days} days")
         except praw.exceptions.APIException:
@@ -1856,7 +1880,7 @@ def handle_direct_messages():
         elif command in ("summary", "update", "stats") or command.startswith("$"):
             subject_parts = message.subject.replace("re: ","").split(":")
             thread_id = subject_parts[1] if len(subject_parts)>1 else None
-            subreddit_name = subject_parts[0].lower().replace("re: ", "")
+            subreddit_name = subject_parts[0].lower().replace("re: ", "").replace("/r/", "").replace("r/", "")
             tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
             response, _ = handle_dm_command(subreddit_name, requestor_name, command, body_parts[1:])
             if tr_sub and thread_id:
@@ -2503,7 +2527,7 @@ def nsfw_checking():  # Does not expand comments
 
                     # tr_sub.get_api_handle().banned.add(
                     #     self.author_name, ban_note=ban_note, ban_message=ban_note)
-                    tr_sub.send_modmail(body=f"Banned author {author_name} for activity on {sub}")
+                    tr_sub.send_modmail(body=ban_note)
 
                 if not check_actioned(f"comment-{c.id}") and (
                         (author.nsfw_pct > 80 or (op_age < 18 and author.age and author.age > 18)
@@ -2563,6 +2587,62 @@ def get_naughty_list():
     for x, y in authors_tuple:
         print("{1}\t\t{0}".format(x, y))
         """
+    
+    
+def update_common_posts(subreddit_name, limit=1000):
+    top_posts = [a for a in REDDIT_CLIENT.subreddit(subreddit_name).top(limit=limit)]
+    count = 0
+    for post_to_review in top_posts:
+        previous_post: CommonPost = s.query(CommonPost).get(post_to_review.id)
+        if not previous_post:
+            post = CommonPost(post_to_review)
+            s.add(post)
+            count += 1
+    logger.info(f'found {count} top posts')
+    logger.debug("updating database...")
+    s.commit()
+
+def check_common_posts(subreddit_names):
+    #bot spam
+    sub_list = str(subreddit_names).replace("[", "(").replace("]",")")
+    statement = f"select c.title, c.id, r.id, r.subreddit_name from CommonPosts c left join RedditPost r on c.title = r.title where r.subreddit_name in {sub_list} and r.id !=c.id and r.time_utc> utc_timestamp() - Interval 2 day and r.counted_status != 30;"
+    blurbs = {}
+    print(statement)
+    rs = s.execute(statement)
+
+    for row in rs:
+        cp: CommonPost = s.query(CommonPost).get(row[1])
+        rp: SubmittedPost = s.query(SubmittedPost).get(row[2])
+
+        blurb = f"|{rp.title}" \
+                f"|[{cp.id}]({cp.get_comments_url()})" \
+                f"|[{cp.author}](/u/{cp.author})" \
+                f"|[{rp.id}]({rp.get_comments_url()})" \
+                f"|[{rp.author}](/u/{rp.author})" \
+                f"|\n"
+        post_subreddit_name = row[3]
+
+        if post_subreddit_name not in blurbs:
+            blurbs[post_subreddit_name] = [
+                "I found the following potential botspam"
+                "\n\n|Original Title|Orig Post ID|Original Author|RepeatPostID|Repost Author|\n"
+                 "|:---|:-------|:------|:-----------|:------|\n"]
+
+        blurbs[post_subreddit_name] += blurb
+        print(blurb)
+
+        # rp.mod_remove()
+        rp.counted_status = CountedStatus.BOT_SPAM.value
+        s.add(rp)
+
+    for subreddit_name in blurbs:
+        tr = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
+        tr.send_modmail(subject=f"[Notification] Post by possible karma hackers:",
+                        body="".join(blurbs[subreddit_name]))
+        TrackedSubreddit.get_subreddit_by_name(BOT_NAME).send_modmail(subject=f"[Notification] botspam notification {subreddit_name}",
+                                                                      body="".join(blurbs[subreddit_name]))
+    s.commit()
+
 
 
 def init_logger(logger_name, filename=None):
@@ -2596,6 +2676,24 @@ def main_loop():
     nsfw_sub_list = "mod"
 
 
+
+    """
+    for _ in range(1, 1000):
+        tasks =  s.query(Task).all()
+        for task in tasks:
+            if not task.last_ran or (task.last_ran + datetime.timedelta(
+                    seconds=task.run_interval)) < datetime.datetime.now() or task.force_run:
+                func_name = 's_'+task.name
+                if func_name in globals():
+                    globals()[func_name](task)
+                    task.last_ran = datetime.datetime.now()
+                    if task.force_run:
+                        task.force_run = False
+                    s.add(task)
+                    s.commit()
+
+        time.sleep(15)
+    """
     global UPDATE_LIST
     i=0
     while True:
@@ -2620,8 +2718,8 @@ def main_loop():
                 nsfw_sub_list = "+".join(nsfw_subs)
                 UPDATE_LIST = False
                 s.commit()
-            print(sfw_sub_list)
-            print(nsfw_sub_list)
+            # print(sfw_sub_list)
+            # print(nsfw_sub_list)
             updated_subs = check_new_submissions(sub_list=nsfw_sub_list)
             check_spam_submissions(sub_list=nsfw_sub_list)
 
@@ -2634,11 +2732,25 @@ def main_loop():
                 updated_subs = None
 
             look_for_rule_violations2(do_cleanup=(i % 15 == 0), subs_to_update=updated_subs)  # uses a lot of resources
+            print("$$$checking rule violations took this long", datetime.now(pytz.utc) - start)
 
             if i % 75 == 0:
                 purge_old_records()
 
-            print("$$$checking rule violations took this long", datetime.now(pytz.utc) - start)
+            if (i-1) % 300 == 0:
+                print("$updating top posts", datetime.now(pytz.utc) - start)
+                update_common_posts('nostalgia')
+                update_common_posts('homeimprovement')
+
+            if i % 300 == 0:
+                print("$updating top posts", datetime.now(pytz.utc) - start)
+                update_common_posts('nostalgia')
+
+            if i % 70 == 0:
+                print("$Looking for botspam posts", datetime.now(pytz.utc) - start)
+                check_common_posts(['nostalgia'])
+
+
 
             # update_TMBR_submissions(look_back=timedelta(days=7))
             send_broadcast_messages()
