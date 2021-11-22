@@ -4,9 +4,11 @@ scopes = {'edit', 'flair', 'save', 'read', 'vote', 'history', 'submit', 'modconf
 user_agent = "ModeratelyHelpfulBot v1.1 by /u/antidense"
 
 
-CLIENT_ID = ""
-CLIENT_SECRET = ""
-BOT_PW = ""
-BOT_NAME = ''
-BOT_OWNER = ""
-DB_ENGINE = 'mysql+pymysql://username:password@host:3306/yourdatabase?charset=utf8mb4'
+settings = {
+    "client_id": "",
+    "client_secret": "",
+    "bot_password": "",
+    "bot_name": "ModeratelyHelpfulBot",
+    "database": {'engine'
+                 : 'mysql+pymysql://modhelpfulbot:PASSWORD@IP_ADDR/modhelpfulbot?charset=utf8mb4'}
+}
