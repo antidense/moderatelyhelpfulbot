@@ -1,5 +1,5 @@
 from typing import Literal, Optional
-from pydantic.class_validators import validator
+from pydantic import validator
 from pydantic.dataclasses import dataclass
 
 
@@ -32,9 +32,10 @@ class PostRestriction:
     report_reason: Optional[str] = None
     title_exempt_keyword: Optional[str] = None
 
-
     @validator('ban_duration_days')
+    # pylint: disable=no-self-argument
     def ban_duration_days_valid(cls, value):
+        # pylint: enable=no-self-argument
         if value and (value < 0 or value > 999):
             raise ValueError("Ban duration must be 0, above 0 and below 999")
         return value

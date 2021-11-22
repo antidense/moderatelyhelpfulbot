@@ -7,14 +7,14 @@ import praw
 import prawcore
 import pytz
 import yaml
-from core import BOT_NAME
 from database import Base, get_session
 from enums import CountedStatus, SubStatus
 from logger import logger
-from models import SubmittedPost
+from models.reddit import SubmittedPost
 from reddit import REDDIT_CLIENT
 from sqlalchemy import (SMALLINT, Boolean, Column, DateTime, Integer, String,
                         UnicodeText, desc, func, true)
+from settings import BOT_NAME
 
 s = get_session()
 

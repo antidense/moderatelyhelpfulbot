@@ -7,7 +7,7 @@ from settings import settings
 from database import Base, get_session
 from enums import CountedStatus, PostedStatus
 from logger import logger
-from models import TrackedAuthor
+from models.reddit import TrackedAuthor
 from praw.models import Submission
 from reddit import REDDIT_CLIENT
 from sqlalchemy import Boolean, Column, DateTime, Integer, String
