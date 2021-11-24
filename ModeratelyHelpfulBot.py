@@ -1825,7 +1825,10 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
         bot_owner_message = "subreddit: {0}\n\nrequestor: {1}\n\nreport: {2}" \
             .format(subreddit_name, requestor_name, status)
         # REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
-        assert isinstance(requestor_name, str)
+        try:
+            assert isinstance(requestor_name, str)
+        except AssertionError:
+            BOT_SUB.send_modmail(body="Invalid user: bot_owner_message")
         if requestor_name and requestor_name.lower() != BOT_OWNER.lower():
             BOT_SUB.send_modmail(body=bot_owner_message)
         s.add(tr_sub)
@@ -2276,11 +2279,11 @@ def purge_old_records_by_subreddit(tr_sub: TrackedSubreddit):
     s.commit()
 
 
-def check_new_submissions(query_limit=800, sub_list='mod'):
+def check_new_submissions(query_limit=800, sub_list='mod', quick_mode=True):
     global REDDIT_CLIENT
     subreddit_names = []
     subreddit_names_complete = []
-    logger.info("pulling new posts!")
+    logger.info(f"pulling new posts!  quickmode: {quick_mode}")
 
     possible_new_posts = [a for a in REDDIT_CLIENT.subreddit(sub_list).new(limit=query_limit)]
 
@@ -2288,7 +2291,7 @@ def check_new_submissions(query_limit=800, sub_list='mod'):
     for post_to_review in possible_new_posts:
 
         subreddit_name = str(post_to_review.subreddit).lower()
-        if subreddit_name in subreddit_names_complete:
+        if quick_mode and subreddit_name in subreddit_names_complete:
             # print(f'done w/ {subreddit_name}')
             continue
         previous_post: SubmittedPost = s.query(SubmittedPost).get(post_to_review.id)
@@ -2718,12 +2721,16 @@ def main_loop():
                 nsfw_sub_list = "+".join(nsfw_subs)
                 UPDATE_LIST = False
                 s.commit()
-            # print(sfw_sub_list)
-            # print(nsfw_sub_list)
-            updated_subs = check_new_submissions(sub_list=nsfw_sub_list)
+            print(sfw_sub_list)
+            print(nsfw_sub_list)
+            if (i-1) % 15 == 0:
+                quick_mode = False
+            else:
+                quick_mode = True
+            updated_subs = check_new_submissions(sub_list=nsfw_sub_list, quick_mode=quick_mode)
             check_spam_submissions(sub_list=nsfw_sub_list)
 
-            updated_subs += check_new_submissions(sub_list=sfw_sub_list)
+            updated_subs += check_new_submissions(sub_list=sfw_sub_list,  quick_mode=quick_mode)
             check_spam_submissions(sub_list=sfw_sub_list)
 
             start = datetime.now(pytz.utc)
