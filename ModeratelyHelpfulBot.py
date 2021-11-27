@@ -1829,6 +1829,7 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
             assert isinstance(requestor_name, str)
         except AssertionError:
             BOT_SUB.send_modmail(body="Invalid user: bot_owner_message")
+            return "bad requestor", True
         if requestor_name and requestor_name.lower() != BOT_OWNER.lower():
             BOT_SUB.send_modmail(body=bot_owner_message)
         s.add(tr_sub)
@@ -1847,6 +1848,7 @@ def handle_direct_messages():
 
         # Get author name, message_id if available
         requestor_name = message.author.name if message.author else None
+
         message_id = REDDIT_CLIENT.comment(message.id).link_id if message.was_comment else message.name
         body_parts = message.body.split(' ')
         command = body_parts[0].lower() if len(body_parts) > 0 else None
@@ -1881,6 +1883,9 @@ def handle_direct_messages():
         elif message.subject.startswith('invitation to moderate'):
             mod_mail_invitation_to_moderate(message)
         elif command in ("summary", "update", "stats") or command.startswith("$"):
+            if requestor_name is None:
+                print("requestor name is none?")
+                continue
             subject_parts = message.subject.replace("re: ","").split(":")
             thread_id = subject_parts[1] if len(subject_parts)>1 else None
             subreddit_name = subject_parts[0].lower().replace("re: ", "").replace("/r/", "").replace("r/", "")
