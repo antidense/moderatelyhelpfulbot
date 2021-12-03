@@ -791,24 +791,24 @@ class TrackedSubreddit(Base):
                 return False, "Bad config"
                 
             possible_settings = {
-                'instant_ban': 'bool',
-                'ban_duration_days': 'int'
+                'nsfw_pct_instant_ban': 'bool',
+                'nsfw_pct_ban_duration_days': 'int'
             }
 
-            for pr_setting in pr_settings:
-                if pr_setting in possible_settings:
-                    pr_setting_value = pr_settings[pr_setting]
-                    pr_setting_value = True if pr_setting_value == 'True' else pr_setting_value
-                    pr_setting_value = False if pr_setting_value == 'False' else pr_setting_value
+            for n_setting in n_settings:
+                if n_setting in possible_settings:
+                    n_setting_value = n_settings[n_setting]
+                    n_setting_value = True if n_setting_value == 'True' else n_setting_value
+                    n_setting_value = False if n_setting_value == 'False' else n_setting_value
 
-                    pr_setting_type = type(pr_setting_value).__name__
-                    if pr_setting_type == "NoneType" or pr_setting_type in possible_settings[pr_setting].split(";"):
-                        setattr(self, pr_setting, pr_setting_value)
+                    n_setting_type = type(n_setting_value).__name__
+                    if n_setting_type == "NoneType" or n_setting_type in possible_settings[n_setting].split(";"):
+                        setattr(self, n_setting, n_setting_value)
 
                     else:
-                        return_text = f"{self.subreddit_name} invalid data type in yaml: `{pr_setting}` which " \
-                                      f"is written as `{pr_setting_value}` should be of type " \
-                                      f"{possible_settings[pr_setting]} but is type {pr_setting_type}.  " \
+                        return_text = f"{self.subreddit_name} invalid data type in yaml: `{n_setting}` which " \
+                                      f"is written as `{n_setting_value}` should be of type " \
+                                      f"{possible_settings[n_setting]} but is type {n_setting_type}.  " \
                                       f"Make sure you use lowercase true and false"
                         print(return_text)
                         return False, return_text
