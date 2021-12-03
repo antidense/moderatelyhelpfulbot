@@ -785,6 +785,37 @@ class TrackedSubreddit(Base):
                     else:
                         return_text = "Did not understand variable '{}'".format(h_setting)
 
+        if 'nsfw_pct_moderation' in self.settings_yaml:
+            n_settings = self.settings_yaml['nsfw_pct_moderation']
+            if not n_settings:
+                return False, "Bad config"
+                
+            possible_settings = {
+                'instant_ban': 'bool',
+                'ban_duration_days': 'int'
+            }
+
+            for pr_setting in pr_settings:
+                if pr_setting in possible_settings:
+                    pr_setting_value = pr_settings[pr_setting]
+                    pr_setting_value = True if pr_setting_value == 'True' else pr_setting_value
+                    pr_setting_value = False if pr_setting_value == 'False' else pr_setting_value
+
+                    pr_setting_type = type(pr_setting_value).__name__
+                    if pr_setting_type == "NoneType" or pr_setting_type in possible_settings[pr_setting].split(";"):
+                        setattr(self, pr_setting, pr_setting_value)
+
+                    else:
+                        return_text = f"{self.subreddit_name} invalid data type in yaml: `{pr_setting}` which " \
+                                      f"is written as `{pr_setting_value}` should be of type " \
+                                      f"{possible_settings[pr_setting]} but is type {pr_setting_type}.  " \
+                                      f"Make sure you use lowercase true and false"
+                        print(return_text)
+                        return False, return_text
+                else:
+                    return_text = "Did not understand variable '{}' for {}".format(pr_setting, self.subreddit_name)
+                    print(return_text)
+
         self.min_post_interval = self.min_post_interval if self.min_post_interval else timedelta(hours=72)
         self.max_count_per_interval = self.max_count_per_interval if self.max_count_per_interval else 1
         mods_list = self.get_mods_list()
