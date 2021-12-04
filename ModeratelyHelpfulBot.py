@@ -2567,7 +2567,7 @@ def nsfw_checking():  # Does not expand comments
 
                     if tr_sub.nsfw_pct and tr_sub.nsfw_pct_moderation and (
                         tr_sub.nsfw_pct_instant_ban and tr_sub.nsfw_pct_ban_duration_days
-                    ):
+                    ) and author.nsfw_pct > tr_sub.nsfw_pct_instant_ban:
                         ban_message = NAFSC.replace("{NSFWPCT}", author.nsfw_pct)
                         ban_note = f"Having >80% NSFW ({author.nsfw_pct}%)"
                         REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
