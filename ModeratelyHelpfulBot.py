@@ -51,7 +51,7 @@ MAIN_SETTINGS = dict()
 WATCHED_SUBS = dict()
 SUBWIKI_CHECK_INTERVAL_HRS = 24
 UPDATE_LIST = True
-NSFW_CHECKING = ('needafriend', 'makenewfriendshere')
+NSFW_CHECKING = ('needafriend')
 
 DEFAULT_CONFIG = """---
 ###### If you edit this page, you must [click this link, then click "send"](https://old.reddit.com/message/compose?to=moderatelyhelpfulbot&subject=subredditname&message=update) to have the bot update
@@ -750,7 +750,7 @@ class TrackedSubreddit(Base):
                         print(return_text)
                         return False, return_text
                 else:
-                    return_text = "Did not understand variable '{}' for {}".format(pr_setting, self.subreddit_name)
+                    return_text = "Did not recognize variable '{}' for {}".format(pr_setting, self.subreddit_name)
                     print(return_text)
 
             if 'min_post_interval_mins' in pr_settings:
