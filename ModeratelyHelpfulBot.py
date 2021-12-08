@@ -785,6 +785,37 @@ class TrackedSubreddit(Base):
                     else:
                         return_text = "Did not understand variable '{}'".format(h_setting)
 
+        if 'nsfw_pct_moderation' in self.settings_yaml:
+            n_settings = self.settings_yaml['nsfw_pct_moderation']
+            if not n_settings:
+                return False, "Bad config"
+                
+            possible_settings = {
+                'nsfw_pct_instant_ban': 'bool',
+                'nsfw_pct_ban_duration_days': 'int'
+            }
+
+            for n_setting in n_settings:
+                if n_setting in possible_settings:
+                    n_setting_value = n_settings[n_setting]
+                    n_setting_value = True if n_setting_value == 'True' else n_setting_value
+                    n_setting_value = False if n_setting_value == 'False' else n_setting_value
+
+                    n_setting_type = type(n_setting_value).__name__
+                    if n_setting_type == "NoneType" or n_setting_type in possible_settings[n_setting].split(";"):
+                        setattr(self, n_setting, n_setting_value)
+
+                    else:
+                        return_text = f"{self.subreddit_name} invalid data type in yaml: `{n_setting}` which " \
+                                      f"is written as `{n_setting_value}` should be of type " \
+                                      f"{possible_settings[n_setting]} but is type {n_setting_type}.  " \
+                                      f"Make sure you use lowercase true and false"
+                        print(return_text)
+                        return False, return_text
+                else:
+                    return_text = "Did not understand variable '{}' for {}".format(pr_setting, self.subreddit_name)
+                    print(return_text)
+
         self.min_post_interval = self.min_post_interval if self.min_post_interval else timedelta(hours=72)
         self.max_count_per_interval = self.max_count_per_interval if self.max_count_per_interval else 1
         mods_list = self.get_mods_list()
@@ -2536,36 +2567,47 @@ def nsfw_checking():  # Does not expand comments
                         (author.nsfw_pct > 80 or (op_age < 18 and author.age and author.age > 18)
                          or (op_age < 18 and author.nsfw_pct > 10))):
                     sub_counts = author.sub_counts if hasattr(author, 'sub_counts') else None
-                    comment_url = f"https://www.reddit.com/r/{post.subreddit_name}/comments/{post.id}/-/{c.id}"
-                    smart_link = f"https://old.reddit.com/message/compose?to={BOT_NAME}" \
-                                 f"&subject={post.subreddit_name}" \
-                                 f"&message="
 
-                    ban_mc_link = f"{smart_link}$ban {author_name} 999 {NAFMC}".replace(" ", "%20")
-                    ban_sc_link = f"{smart_link}$ban {author_name} 30 {NAFSC}".replace("{NSFWPCT}",
-                                                                                       str(int(author.nsfw_pct)))
-                    ban_cf_link = f"{smart_link}$ban {author_name} 999 {NAFCF}"
+                    if tr_sub.nsfw_pct and tr_sub.nsfw_pct_moderation and (
+                        tr_sub.nsfw_pct_instant_ban and tr_sub.nsfw_pct_ban_duration_days
+                    ) and author.nsfw_pct > 80:
+                        NSFWPCT = author.nsfw_pct
+                        ban_message = NAFSC.replace("{NSFWPCT}", author.nsfw_pct)
+                        ban_note = f"Having >80% NSFW ({author.nsfw_pct}%)"
+                        REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
+                            author_name, ban_note=ban_note, ban_message=ban_message, duration=tr_sub.nsfw_pct_ban_duration_days
+                        )
+                    else:
+                        comment_url = f"https://www.reddit.com/r/{post.subreddit_name}/comments/{post.id}/-/{c.id}"
+                        smart_link = f"https://old.reddit.com/message/compose?to={BOT_NAME}" \
+                                    f"&subject={post.subreddit_name}" \
+                                    f"&message="
 
-                    response = f"Author very nsfw: http://www.reddit.com/u/{author_name} . " \
-                               f"Commented on: {post.get_comments_url()} \n\n. " \
-                               f"Link to comment: {comment_url} \n\n. " \
-                               f"Poster's age {op_age}. Commenter's age {author.age} \n\n" \
-                               f"Has nsfw post? {author.has_nsfw_post} \n\n" \
-                               f"Comment text: {c.body} \n\n" \
-                               f"Sub activity: {sub_counts} \n\n" \
-                               f"[$ban-sc (ban for sexual content)]({ban_sc_link}) | " \
-                               f"[$ban-mc (ban for minor contact)]({ban_mc_link}) | " \
-                               f"[$ban-cf (ban for catfishing)]({ban_cf_link}) | "
+                        ban_mc_link = f"{smart_link}$ban {author_name} 999 {NAFMC}".replace(" ", "%20")
+                        ban_sc_link = f"{smart_link}$ban {author_name} 30 {NAFSC}".replace("{NSFWPCT}",
+                                                                                        str(int(author.nsfw_pct)))
+                        ban_cf_link = f"{smart_link}$ban {author_name} 999 {NAFCF}"
 
-                    subject = f"[Notification] Found this potential predator {author_name} score={int(author.nsfw_pct)}"
-                    print(response)
-                    try:
-                        c.mod.remove()
-                    except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
-                        pass
-                    tr_sub.send_modmail(subject=subject, body=response)
+                        response = f"Author very nsfw: http://www.reddit.com/u/{author_name} . " \
+                                f"Commented on: {post.get_comments_url()} \n\n. " \
+                                f"Link to comment: {comment_url} \n\n. " \
+                                f"Poster's age {op_age}. Commenter's age {author.age} \n\n" \
+                                f"Has nsfw post? {author.has_nsfw_post} \n\n" \
+                                f"Comment text: {c.body} \n\n" \
+                                f"Sub activity: {sub_counts} \n\n" \
+                                f"[$ban-sc (ban for sexual content)]({ban_sc_link}) | " \
+                                f"[$ban-mc (ban for minor contact)]({ban_mc_link}) | " \
+                                f"[$ban-cf (ban for catfishing)]({ban_cf_link}) | "
 
-                    REDDIT_CLIENT.redditor(BOT_OWNER).message(subject, response)
+                        subject = f"[Notification] Found this potential predator {author_name} score={int(author.nsfw_pct)}"
+                        print(response)
+                        try:
+                            c.mod.remove()
+                        except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
+                            pass
+                        tr_sub.send_modmail(subject=subject, body=response)
+
+                        REDDIT_CLIENT.redditor(BOT_OWNER).message(subject, response)
                     record_actioned(f"comment-{c.id}")
         post.nsfw_repliers_checked = True
         post.nsfw_last_checked = datetime.now(pytz.utc)
