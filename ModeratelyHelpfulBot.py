@@ -2580,7 +2580,8 @@ def nsfw_checking():  # Does not expand comments
                         REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
                             author_name, ban_note=ban_note, ban_message=ban_message, duration=tr_sub.nsfw_pct_ban_duration_days
                         )
-                    elif tr_sub.modmail_receive_potential_predator_modmail and tr_sub.modmail_receive_potential_predator_modmail == True:
+                    
+                    if tr_sub.modmail_receive_potential_predator_modmail and tr_sub.modmail_receive_potential_predator_modmail == True:
                         comment_url = f"https://www.reddit.com/r/{post.subreddit_name}/comments/{post.id}/-/{c.id}"
                         smart_link = f"https://old.reddit.com/message/compose?to={BOT_NAME}" \
                                     f"&subject={post.subreddit_name}" \
