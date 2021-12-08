@@ -345,6 +345,7 @@ class SubmittedPost(Base):
         self.nsfw_last_checked = self.time_utc
         self.nsfw_repliers_checked = False
 
+
         self.age = get_age(self.title)
         if self.subreddit_name.lower() in NSFW_CHECKING:
             if 25 > self.age > 12:
@@ -588,7 +589,12 @@ class TrackedSubreddit(Base):
     title_not_exempt_keyword = None
     canned_responses = {}
     api_handle = None
-    instaban_subs = None
+    nsfw_instaban_subs = None
+
+    nsfw_pct_instant_ban = False
+    nsfw_ban_duration_days = 0
+    nsfw_pct_moderation = False
+    nsfw_pct_threshold = 80
 
     def __init__(self, subreddit_name: str):
         self.subreddit_name = subreddit_name.lower()
@@ -775,24 +781,16 @@ class TrackedSubreddit(Base):
                         setattr(self, m_setting, m_settings[m_setting])
                     else:
                         return_text = "Did not understand variable '{}'".format(m_setting)
-        if 'history_checking' in self.settings_yaml:
-            h_settings = self.settings_yaml['history_checking']
-            possible_settings = ('instaban_subs',)
-            if h_settings:
-                for h_setting in h_settings:
-                    if h_setting in possible_settings:
-                        setattr(self, h_setting, h_settings[h_setting])
-                    else:
-                        return_text = "Did not understand variable '{}'".format(h_setting)
 
         if 'nsfw_pct_moderation' in self.settings_yaml:
             n_settings = self.settings_yaml['nsfw_pct_moderation']
-            if not n_settings:
-                return False, "Bad config"
-                
+            self.nsfw_pct_moderation = True
+
             possible_settings = {
                 'nsfw_pct_instant_ban': 'bool',
-                'nsfw_pct_ban_duration_days': 'int'
+                'nsfw_pct_ban_duration_days': 'int',
+                'nsfw_pct_threshold': 'int',
+                'nsfw_instaban_subs': 'list',
             }
 
             for n_setting in n_settings:
@@ -2548,7 +2546,7 @@ def nsfw_checking():  # Does not expand comments
                 if author.nsfw_pct == -1 or not author.last_calculated\
                         or author.last_calculated.replace(tzinfo=timezone.utc) < \
                         (datetime.now(pytz.utc) - timedelta(days=7)):
-                    nsfw_pct, items = author.calculate_nsfw(instaban_subs=tr_sub.instaban_subs)
+                    nsfw_pct, items = author.calculate_nsfw(instaban_subs=tr_sub.nsfw_instaban_subs)
                     if nsfw_pct <10 and items <10:
                         new_flair_text = f"Warning: Minimal User History"
                     else:
@@ -2573,9 +2571,9 @@ def nsfw_checking():  # Does not expand comments
                          or (op_age < 18 and author.nsfw_pct > 10))):
                     sub_counts = author.sub_counts if hasattr(author, 'sub_counts') else None
 
-                    if tr_sub.nsfw_pct and tr_sub.nsfw_pct_moderation and (
+                    if tr_sub.nsfw_pct_moderation and (
                         tr_sub.nsfw_pct_instant_ban and tr_sub.nsfw_pct_ban_duration_days
-                    ) and author.nsfw_pct > 80:
+                    ) and author.nsfw_pct > tr_sub.nsfw_pct_threshold:
                         NSFWPCT = author.nsfw_pct
                         ban_message = NAFSC.replace("{NSFWPCT}", author.nsfw_pct)
                         ban_note = f"Having >80% NSFW ({author.nsfw_pct}%)"
