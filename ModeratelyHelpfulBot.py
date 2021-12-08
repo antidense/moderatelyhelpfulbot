@@ -603,7 +603,7 @@ class TrackedSubreddit(Base):
         self.api_handle = REDDIT_CLIENT.subreddit(self.subreddit_name) if not self.api_handle else self.api_handle
         try:
             return list(moderator.name for moderator in self.api_handle.moderator())
-        except prawcore.exceptions.NotFound:
+        except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden):
             return []
 
     def check_access(self) -> SubStatus:
