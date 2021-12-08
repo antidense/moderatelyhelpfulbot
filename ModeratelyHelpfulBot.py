@@ -90,6 +90,7 @@ NAFSC = "Per recent community feedback, we are temp banning anyone with a histor
 
 NAFCF = f"Per our rules, catfishing -- identifying as different ages in different posts -- is a bannable offense."
 
+NSFW_SKIP_USERS = ["automoderator"]
 
 class PostedStatus(Enum):
     SELF_DEL = "self-deleted"
@@ -2466,6 +2467,11 @@ def nsfw_checking():  # Does not expand comments
     for post in posts_to_check:
         assert isinstance(post, SubmittedPost)
         op_age = get_age(post.title)
+        
+        if post.author.lower() in NSFW_SKIP_USERS:
+            s.add(post)
+            s.commit()
+            continue
 
         tock = datetime.now()
         if tock-tick > timedelta(minutes=3):
