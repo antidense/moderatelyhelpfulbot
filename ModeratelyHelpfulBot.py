@@ -2565,7 +2565,7 @@ def nsfw_checking():  # Does not expand comments
                         or author.last_calculated.replace(tzinfo=timezone.utc) < \
                         (datetime.now(pytz.utc) - timedelta(days=7)):
                     nsfw_pct, items = author.calculate_nsfw(instaban_subs=tr_sub.nsfw_instaban_subs)
-                    if 'nsfw_pct_set_user_flair' in tr_sub and tr_sub.nsfw_pct_set_user_flair == True:
+                    if hasattr(tr_sub, 'nsfw_pct_set_user_flair') and tr_sub.nsfw_pct_set_user_flair is True:
                         if nsfw_pct <10 and items <10:
                             new_flair_text = f"Warning: Minimal User History"
                         else:
