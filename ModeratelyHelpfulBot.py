@@ -51,7 +51,7 @@ MAIN_SETTINGS = dict()
 WATCHED_SUBS = dict()
 SUBWIKI_CHECK_INTERVAL_HRS = 24
 UPDATE_LIST = True
-NSFW_CHECKING = ('needafriend')
+NSFW_CHECKING = ('needafriend', 'makenewfriendshere')
 
 DEFAULT_CONFIG = """---
 ###### If you edit this page, you must [click this link, then click "send"](https://old.reddit.com/message/compose?to=moderatelyhelpfulbot&subject=subredditname&message=update) to have the bot update
@@ -1629,6 +1629,8 @@ def send_broadcast_messages():
 def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, thread_id=None) -> (str, bool):
     subreddit_name: str = subreddit_name[2:] if subreddit_name.startswith('r/') else subreddit_name
     subreddit_name: str = subreddit_name[3:] if subreddit_name.startswith('/r/') else subreddit_name
+    subreddit_names = subreddit_name.split('+') if '+' in subreddit_name else [subreddit_name]  # allow
+
     command: str = command[1:] if command.startswith("$") else command
 
     tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=True)
@@ -1827,6 +1829,7 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
 
 
     elif command == "update":   # $update
+
         worked, status = tr_sub.update_from_yaml(force_update=True)
         help_text = ""
         if "404" in status:
@@ -2511,8 +2514,8 @@ def nsfw_checking():  # Does not expand comments
         tr_sub = WATCHED_SUBS[post.subreddit_name]
         assert isinstance(tr_sub, TrackedSubreddit)
 
-        if 'NOT' in dms_disabled and op_age<15:
-            tr_sub.send_modmail(body=f"Poster is <15 does NOT have PMs disabled. Remove post?  {post.get_url()}")
+        # if 'NOT' in dms_disabled and op_age<15:
+        #     tr_sub.send_modmail(body=f"Poster is <15 does NOT have PMs disabled. Remove post?  {post.get_url()}")
 
         time_since: timedelta = datetime.now(pytz.utc)-post.nsfw_last_checked.replace(tzinfo=timezone.utc)
         time_since_hrs = int(time_since.total_seconds()/3600)
@@ -2540,7 +2543,6 @@ def nsfw_checking():  # Does not expand comments
                 author: TrackedAuthor = s.query(TrackedAuthor).get(c.author.name)
                 if not author:
                     author = TrackedAuthor(c.author.name)
-
 
             if author:
                 author_list[author_name] = author
