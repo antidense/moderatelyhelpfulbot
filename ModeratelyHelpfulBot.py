@@ -365,7 +365,7 @@ class SubmittedPost(Base):
 
                         if nsfw_pct > 60:
                             tr_sub = TrackedSubreddit(self.subreddit_name)
-                            if 'nsfw_pct_set_user_flair' in tr_sub and tr_sub.nsfw_pct_set_user_flair == True:
+                            if hasattr(tr_sub, 'nsfw_pct_set_user_flair') and tr_sub.nsfw_pct_set_user_flair == True:
                                 try:
                                     REDDIT_CLIENT.subreddit(self.subreddit_name).flair.set(self.author, text=new_flair_text)
                                 except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
