@@ -52,7 +52,6 @@ WATCHED_SUBS = dict()
 SUBWIKI_CHECK_INTERVAL_HRS = 24
 UPDATE_LIST = True
 
-
 DEFAULT_CONFIG = """---
 ###### If you edit this page, you must [click this link, then click "send"](https://old.reddit.com/message/compose?to=moderatelyhelpfulbot&subject=subredditname&message=update) to have the bot update
 ######https://www.reddit.com/r/moderatelyhelpfulbot/wiki/index
@@ -364,10 +363,12 @@ class SubmittedPost(Base):
                         s.add(author)
 
                         if nsfw_pct > 60:
-                            try:
-                                REDDIT_CLIENT.subreddit(self.subreddit_name).flair.set(self.author, text=new_flair_text)
-                            except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
-                                pass
+                            tr_sub = TrackedSubreddit(self.subreddit_name)
+                            if 'nsfw_pct_set_user_flair' in tr_sub and tr_sub.nsfw_pct_set_user_flair == True:
+                                try:
+                                    REDDIT_CLIENT.subreddit(self.subreddit_name).flair.set(self.author, text=new_flair_text)
+                                except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
+                                    pass
 
     def get_url(self) -> str:
         return f"http://redd.it/{self.id}"
@@ -792,7 +793,8 @@ class TrackedSubreddit(Base):
                 'nsfw_pct_instant_ban': 'bool',
                 'nsfw_pct_ban_duration_days': 'int',
                 'nsfw_pct_threshold': 'int',
-                'nsfw_instaban_subs': 'list'
+                'nsfw_instaban_subs': 'list',
+                'nsfw_pct_set_user_flair': 'bool'
             }
 
             for n_setting in n_settings:
@@ -1479,7 +1481,7 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
             if num_days == 999:
                 # Permanent ban
                 REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                    recent_post.author, ban_note="ModhelpfulBot: repeated spam", ban_reason="MHB: posting too much",
+                    recent_post.author, note="ModhelpfulBot: repeated spam", ban_reason="MHB: posting too much",
                     ban_message=ban_message[:999])
                 logger.info(f"PERMANENT ban for {recent_post.author} succeeded ")
             else:
@@ -1488,7 +1490,7 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
                                f"**Repeat infractions result in a permanent ban!**"
 
                 REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                            recent_post.author, ban_note="ModhelpfulBot: repeated spam", ban_message=ban_message[:999],
+                            recent_post.author, note="ModhelpfulBot: repeated spam", ban_message=ban_message[:999],
                             ban_reason="MHB: posting too much",
                             duration=num_days)
                 logger.info(f"Ban for {recent_post.author} succeeded for {num_days} days")
@@ -1631,6 +1633,8 @@ def send_broadcast_messages():
 def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, thread_id=None) -> (str, bool):
     subreddit_name: str = subreddit_name[2:] if subreddit_name.startswith('r/') else subreddit_name
     subreddit_name: str = subreddit_name[3:] if subreddit_name.startswith('/r/') else subreddit_name
+    subreddit_names = subreddit_name.split('+') if '+' in subreddit_name else [subreddit_name]  # allow
+
     command: str = command[1:] if command.startswith("$") else command
 
     tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=True)
@@ -1735,11 +1739,11 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
             if ban_length == 999 or ban_length is None:
                 print("permanent ban", ban_length)
                 REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                    author_param, ban_note=ban_note, ban_message=ban_reason)
+                    author_param, note=ban_note, ban_message=ban_reason)
             else:
                 print("non permanent ban", ban_length)
                 REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                    author_param, ban_note=ban_note, ban_message=ban_reason,
+                    author_param, note=ban_note, ban_message=ban_reason,
                     duration=ban_length)
             return "Ban for {} was successful".format(author_param), True
         except prawcore.exceptions.Forbidden:
@@ -1829,6 +1833,7 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
 
 
     elif command == "update":   # $update
+
         worked, status = tr_sub.update_from_yaml(force_update=True)
         help_text = ""
         if "404" in status:
@@ -2513,8 +2518,8 @@ def nsfw_checking():  # Does not expand comments
         tr_sub = WATCHED_SUBS[post.subreddit_name]
         assert isinstance(tr_sub, TrackedSubreddit)
 
-        if 'NOT' in dms_disabled and op_age<15:
-            tr_sub.send_modmail(body=f"Poster is <15 does NOT have PMs disabled. Remove post?  {post.get_url()}")
+        # if 'NOT' in dms_disabled and op_age<15:
+        #     tr_sub.send_modmail(body=f"Poster is <15 does NOT have PMs disabled. Remove post?  {post.get_url()}")
 
         time_since: timedelta = datetime.now(pytz.utc)-post.nsfw_last_checked.replace(tzinfo=timezone.utc)
         time_since_hrs = int(time_since.total_seconds()/3600)
@@ -2536,11 +2541,12 @@ def nsfw_checking():  # Does not expand comments
                     continue
                 if author_name in author_list:
                     continue
+                if author_name == "AutoModerator":
+                    continue
 
                 author: TrackedAuthor = s.query(TrackedAuthor).get(c.author.name)
                 if not author:
                     author = TrackedAuthor(c.author.name)
-
 
             if author:
                 author_list[author_name] = author
@@ -2549,15 +2555,16 @@ def nsfw_checking():  # Does not expand comments
                         or author.last_calculated.replace(tzinfo=timezone.utc) < \
                         (datetime.now(pytz.utc) - timedelta(days=7)):
                     nsfw_pct, items = author.calculate_nsfw(instaban_subs=tr_sub.nsfw_instaban_subs)
-                    if nsfw_pct <10 and items <10:
-                        new_flair_text = f"Warning: Minimal User History"
-                    else:
-                        new_flair_text = f"{int(nsfw_pct)}% NSFW"
-                    s.add(author)
-                    try:
-                        tr_sub.get_api_handle().flair.set(author_name, text=new_flair_text)
-                    except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
-                        pass
+                    if 'nsfw_pct_set_user_flair' in tr_sub and tr_sub.nsfw_pct_set_user_flair == True:
+                        if nsfw_pct <10 and items <10:
+                            new_flair_text = f"Warning: Minimal User History"
+                        else:
+                            new_flair_text = f"{int(nsfw_pct)}% NSFW"
+                        s.add(author)
+                        try:
+                            tr_sub.get_api_handle().flair.set(author_name, text=new_flair_text)
+                        except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
+                            pass
 
                 #tr_sub = TrackedSubreddit.get_subreddit_by_name('needafriend')
                 #assert isinstance(tr_sub, TrackedSubreddit)
@@ -2577,10 +2584,10 @@ def nsfw_checking():  # Does not expand comments
                         tr_sub.nsfw_pct_instant_ban and tr_sub.nsfw_pct_ban_duration_days
                     ) and author.nsfw_pct > tr_sub.nsfw_pct_threshold:
                         NSFWPCT = author.nsfw_pct
-                        ban_message = NAFSC.replace("{NSFWPCT}", author.nsfw_pct)
-                        ban_note = f"Having >80% NSFW ({author.nsfw_pct}%)"
+                        ban_message = NAFSC.replace("{NSFWPCT}", f"{author.nsfw_pct:.2f}")
+                        ban_note = f"Having >80% NSFW ({author.nsfw_pct:.2f}%)"
                         REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                            author_name, ban_note=ban_note, ban_message=ban_message, duration=tr_sub.nsfw_pct_ban_duration_days
+                            author_name, note=ban_note, ban_message=ban_message, duration=tr_sub.nsfw_pct_ban_duration_days
                         )
                     else:
                         comment_url = f"https://www.reddit.com/r/{post.subreddit_name}/comments/{post.id}/-/{c.id}"
