@@ -89,6 +89,7 @@ NAFSC = "Per recent community feedback, we are temp banning anyone with a histor
 
 NAFCF = f"Per our rules, catfishing -- identifying as different ages in different posts -- is a bannable offense."
 
+NSFW_SKIP_USERS = ["automoderator"]
 
 class PostedStatus(Enum):
     SELF_DEL = "self-deleted"
@@ -777,7 +778,7 @@ class TrackedSubreddit(Base):
             possible_settings = ('modmail_no_posts_reply', 'modmail_no_posts_reply_internal', 'modmail_posts_reply',
                                  'modmail_auto_approve_messages_with_links', 'modmail_all_reply',
                                  'modmail_notify_replied_internal', 'modmail_no_link_reply', 'canned_responses',
-                                 'modmail_removal_reason_helper')
+                                 'modmail_removal_reason_helper', 'modmail_receive_potential_predator_modmail')
             if m_settings:
                 for m_setting in m_settings:
                     if m_setting in possible_settings:
@@ -2474,6 +2475,11 @@ def nsfw_checking():  # Does not expand comments
     for post in posts_to_check:
         assert isinstance(post, SubmittedPost)
         op_age = get_age(post.title)
+        
+        if post.author.lower() in NSFW_SKIP_USERS:
+            s.add(post)
+            s.commit()
+            continue
 
         tock = datetime.now()
         if tock-tick > timedelta(minutes=3):
@@ -2590,7 +2596,8 @@ def nsfw_checking():  # Does not expand comments
                         REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
                             author_name, note=ban_note, ban_message=ban_message, duration=tr_sub.nsfw_pct_ban_duration_days
                         )
-                    else:
+                    
+                    if tr_sub.modmail_receive_potential_predator_modmail and tr_sub.modmail_receive_potential_predator_modmail == True:
                         comment_url = f"https://www.reddit.com/r/{post.subreddit_name}/comments/{post.id}/-/{c.id}"
                         smart_link = f"https://old.reddit.com/message/compose?to={BOT_NAME}" \
                                     f"&subject={post.subreddit_name}" \
