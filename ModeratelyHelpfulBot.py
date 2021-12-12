@@ -363,10 +363,12 @@ class SubmittedPost(Base):
                         s.add(author)
 
                         if nsfw_pct > 60:
-                            try:
-                                REDDIT_CLIENT.subreddit(self.subreddit_name).flair.set(self.author, text=new_flair_text)
-                            except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
-                                pass
+                            tr_sub = TrackedSubreddit(self.subreddit_name)
+                            if 'nsfw_pct_set_user_flair' in tr_sub and tr_sub.nsfw_pct_set_user_flair == True:
+                                try:
+                                    REDDIT_CLIENT.subreddit(self.subreddit_name).flair.set(self.author, text=new_flair_text)
+                                except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
+                                    pass
 
     def get_url(self) -> str:
         return f"http://redd.it/{self.id}"
@@ -791,6 +793,7 @@ class TrackedSubreddit(Base):
                 'nsfw_pct_ban_duration_days': 'int',
                 'nsfw_pct_threshold': 'int',
                 'nsfw_instaban_subs': 'list',
+                'nsfw_pct_set_user_flair': 'bool'
             }
 
             for n_setting in n_settings:
@@ -2551,15 +2554,16 @@ def nsfw_checking():  # Does not expand comments
                         or author.last_calculated.replace(tzinfo=timezone.utc) < \
                         (datetime.now(pytz.utc) - timedelta(days=7)):
                     nsfw_pct, items = author.calculate_nsfw(instaban_subs=tr_sub.nsfw_instaban_subs)
-                    if nsfw_pct <10 and items <10:
-                        new_flair_text = f"Warning: Minimal User History"
-                    else:
-                        new_flair_text = f"{int(nsfw_pct)}% NSFW"
-                    s.add(author)
-                    try:
-                        tr_sub.get_api_handle().flair.set(author_name, text=new_flair_text)
-                    except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
-                        pass
+                    if 'nsfw_pct_set_user_flair' in tr_sub and tr_sub.nsfw_pct_set_user_flair == True:
+                        if nsfw_pct <10 and items <10:
+                            new_flair_text = f"Warning: Minimal User History"
+                        else:
+                            new_flair_text = f"{int(nsfw_pct)}% NSFW"
+                        s.add(author)
+                        try:
+                            tr_sub.get_api_handle().flair.set(author_name, text=new_flair_text)
+                        except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
+                            pass
 
                 #tr_sub = TrackedSubreddit.get_subreddit_by_name('needafriend')
                 #assert isinstance(tr_sub, TrackedSubreddit)
