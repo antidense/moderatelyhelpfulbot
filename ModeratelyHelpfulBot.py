@@ -51,7 +51,6 @@ MAIN_SETTINGS = dict()
 WATCHED_SUBS = dict()
 SUBWIKI_CHECK_INTERVAL_HRS = 24
 UPDATE_LIST = True
-NSFW_CHECKING = ('needafriend', 'makenewfriendshere')
 
 DEFAULT_CONFIG = """---
 ###### If you edit this page, you must [click this link, then click "send"](https://old.reddit.com/message/compose?to=moderatelyhelpfulbot&subject=subredditname&message=update) to have the bot update
@@ -347,7 +346,8 @@ class SubmittedPost(Base):
 
 
         self.age = get_age(self.title)
-        if self.subreddit_name.lower() in NSFW_CHECKING:
+        tr_sub: TrackedSubreddit = s.query(TrackedSubreddit).get(self.subreddit_name)
+        if tr_sub and (tr_sub.enforce_nsfw_checking and isinstance(tr_sub.enforce_nsfw_checking, bool) and tr_sub.enforce_nsfw_checking):
             if 25 > self.age > 12:
                 self.post_flair = "strict sfw"
 
@@ -789,6 +789,7 @@ class TrackedSubreddit(Base):
             self.nsfw_pct_moderation = True
 
             possible_settings = {
+                'enforce_nsfw_checking': 'bool',
                 'nsfw_pct_instant_ban': 'bool',
                 'nsfw_pct_ban_duration_days': 'int',
                 'nsfw_pct_threshold': 'int',
