@@ -585,6 +585,7 @@ class TrackedSubreddit(Base):
     modmail_auto_approve_messages_with_links = False
     modmail_all_reply = None
     modmail_removal_reason_helper = False
+    modmail_receive_potential_predator_modmail = False
     approve = False
     blacklist_enabled = True
     lock_thread = True
@@ -817,7 +818,7 @@ class TrackedSubreddit(Base):
                         print(return_text)
                         return False, return_text
                 else:
-                    return_text = "Did not understand variable '{}' for {}".format(pr_setting, self.subreddit_name)
+                    return_text = "Did not understand variable '{}' for {}".format(n_setting, self.subreddit_name)
                     print(return_text)
 
         self.min_post_interval = self.min_post_interval if self.min_post_interval else timedelta(hours=72)
