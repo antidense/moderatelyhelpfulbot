@@ -1477,7 +1477,7 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
             if num_days == 999:
                 # Permanent ban
                 REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                    recent_post.author, ban_note="ModhelpfulBot: repeated spam", ban_reason="MHB: posting too much",
+                    recent_post.author, note="ModhelpfulBot: repeated spam", ban_reason="MHB: posting too much",
                     ban_message=ban_message[:999])
                 logger.info(f"PERMANENT ban for {recent_post.author} succeeded ")
             else:
@@ -1486,7 +1486,7 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
                                f"**Repeat infractions result in a permanent ban!**"
 
                 REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                            recent_post.author, ban_note="ModhelpfulBot: repeated spam", ban_message=ban_message[:999],
+                            recent_post.author, note="ModhelpfulBot: repeated spam", ban_message=ban_message[:999],
                             ban_reason="MHB: posting too much",
                             duration=num_days)
                 logger.info(f"Ban for {recent_post.author} succeeded for {num_days} days")
@@ -1735,11 +1735,11 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
             if ban_length == 999 or ban_length is None:
                 print("permanent ban", ban_length)
                 REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                    author_param, ban_note=ban_note, ban_message=ban_reason)
+                    author_param, note=ban_note, ban_message=ban_reason)
             else:
                 print("non permanent ban", ban_length)
                 REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                    author_param, ban_note=ban_note, ban_message=ban_reason,
+                    author_param, note=ban_note, ban_message=ban_reason,
                     duration=ban_length)
             return "Ban for {} was successful".format(author_param), True
         except prawcore.exceptions.Forbidden:
@@ -2582,7 +2582,7 @@ def nsfw_checking():  # Does not expand comments
                         ban_message = NAFSC.replace("{NSFWPCT}", str(author.nsfw_pct))
                         ban_note = f"Having >80% NSFW ({author.nsfw_pct}%)"
                         REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                            author_name, ban_note=ban_note, ban_message=ban_message, duration=tr_sub.nsfw_pct_ban_duration_days
+                            author_name, note=ban_note, ban_message=ban_message, duration=tr_sub.nsfw_pct_ban_duration_days
                         )
                     else:
                         comment_url = f"https://www.reddit.com/r/{post.subreddit_name}/comments/{post.id}/-/{c.id}"
