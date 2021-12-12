@@ -347,7 +347,7 @@ class SubmittedPost(Base):
 
         self.age = get_age(self.title)
         tr_sub: TrackedSubreddit = s.query(TrackedSubreddit).get(self.subreddit_name)
-        if tr_sub and (tr_sub.enforce_nsfw_checking and isinstance(tr_sub.enforce_nsfw_checking, bool) and tr_sub.enforce_nsfw_checking):
+        if tr_sub and (isinstance(tr_sub.enforce_nsfw_checking, bool) and tr_sub.enforce_nsfw_checking):
             if 25 > self.age > 12:
                 self.post_flair = "strict sfw"
 
@@ -597,6 +597,7 @@ class TrackedSubreddit(Base):
     nsfw_ban_duration_days = 0
     nsfw_pct_moderation = False
     nsfw_pct_threshold = 80
+    enforce_nsfw_checking = False
 
     def __init__(self, subreddit_name: str):
         self.subreddit_name = subreddit_name.lower()
