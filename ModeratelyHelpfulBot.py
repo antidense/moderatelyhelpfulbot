@@ -2551,6 +2551,8 @@ def nsfw_checking():  # Does not expand comments
                     continue
                 if author_name == "AutoModerator":
                     continue
+                if post.author.lower() in NSFW_SKIP_USERS:
+                    continue
 
                 author: TrackedAuthor = s.query(TrackedAuthor).get(c.author.name)
                 if not author:
