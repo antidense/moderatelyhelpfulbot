@@ -1717,27 +1717,6 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
         ban_length = int(parameters[1]) if parameters and len(parameters) >= 2 else None
         print(parameters, ban_length)
 
-        if command == "ban-sc":
-            tracked_author: TrackedAuthor = s.query(TrackedAuthor).get(author_handle.name)
-            if command.startswith("ban-") and not tracked_author:
-                return "could not find that username `{}`".format(author_param), True
-            ban_reason = f"Per recent community feedback, we are temp banning anyone with a history that is more than " \
-                         f"80% NSFW to protect minors and reduce sexual harassment in our subreddit.  " \
-                         f"Please get this down if you wish to continue to participate here. " \
-                         f"Your score is currently {tracked_author.nsfw_pct} and is recalculated weekly."
-            ban_note = f"Having {tracked_author.nsfw_pct}>80% NSFW"
-            #ban_length = 30
-            ban_length = 14 if tracked_author.nsfw_pct < 90 else 30
-        elif command == "ban-mc":
-            ban_reason = f"Per our rules, contacting minors while having a history of NSFW comments and/or posts " \
-                         f"is a bannable offense.  Your account was reviewed by a mod team and determined to be " \
-                         f"non-compliant with our rules."
-            ban_note = "Contacted Minor having a NSFW profile"
-            ban_length = 999
-        elif command == "ban-cf":
-            ban_reason = f"Per our rules, catfishing (identifying as different ages) is a bannable offense."
-            ban_note = "catfishing"
-            ban_length = 999
         try:
             if ban_length == 999 or ban_length is None:
                 print("permanent ban", ban_length)
