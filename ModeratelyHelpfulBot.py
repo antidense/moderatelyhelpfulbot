@@ -352,6 +352,8 @@ class SubmittedPost(Base):
 
             # Check the post author for nsfw_pct (if requested)
             post_author: TrackedAuthor = s.query(TrackedAuthor).get(self.author)
+            if not post_author:
+                post_author = TrackedAuthor(self.author)
             if post_author.nsfw_pct == -1 or not post_author.last_calculated \
                     or post_author.last_calculated.replace(tzinfo=timezone.utc) < \
                     (datetime.now(pytz.utc) - timedelta(days=7)):
@@ -366,6 +368,7 @@ class SubmittedPost(Base):
                         tr_sub.get_api_handle().flair.set(post_author.author_name, text=new_flair_text)
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
+                s.add(post_author)
 
             if 25 > self.age > 12:
                 self.post_flair = "strict sfw"
