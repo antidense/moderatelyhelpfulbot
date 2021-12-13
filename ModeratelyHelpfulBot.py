@@ -1857,12 +1857,16 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
                         "Please remove it.  " \
                         f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{BOT_NAME}. "
 
-        reply_text = "Received message to update config for {0}.  See the output below. {2}" \
-                     "Please message [/r/moderatelyhelpfulbot](https://www.reddit.com/" \
-                     "message/old?to=%2Fr%2Fmoderatelyhelpfulbot) if you have any questions \n\n" \
-                     "Update report: \n\n >{1}".format(subreddit_name, status, help_text)
-        bot_owner_message = "subreddit: {0}\n\nrequestor: {1}\n\nreport: {2}" \
-            .format(subreddit_name, requestor_name, status)
+        sub_status_code = tr_sub.active_status
+        sub_status_enum = str(SubStatus(sub_status_code))
+
+        reply_text = f"Received message to update config for {subreddit_name}.  See the output below. {status}" \
+                     f"Please message [/r/moderatelyhelpfulbot](https://www.reddit.com/" \
+                     f"message/old?to=%2Fr%2Fmoderatelyhelpfulbot) if you have any questions \n\n" \
+                     f"Update report: \n\n >{help_text}" \
+                     f"\n\nCurrent Status: {sub_status_code}: {sub_status_enum}  "
+        bot_owner_message = f"subreddit: {subreddit_name}\n\nrequestor: {requestor_name}\n\n" \
+                            f"report: {status}\n\nCurrent Status: {sub_status_code}: {sub_status_enum}  "
         # REDDIT_CLIENT.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
         try:
             assert isinstance(requestor_name, str)
@@ -2673,7 +2677,7 @@ def update_common_posts(subreddit_name, limit=1000):
 def check_common_posts(subreddit_names):
     #bot spam
     sub_list = str(subreddit_names).replace("[", "(").replace("]",")")
-    statement = f"select c.title, c.id, r.id, r.subreddit_name from CommonPosts c left join RedditPost r on c.title = r.title where r.subreddit_name in {sub_list} and r.id !=c.id and r.time_utc> utc_timestamp() - Interval 2 day and r.counted_status != 30;"
+    statement = f"select c.title, c.id, r.id, r.subreddit_name from CommonPosts c left join RedditPost r on c.title = r.title where r.subreddit_name in {sub_list} and r.id !=c.id and r.time_utc> utc_timestamp() - Interval 1 day and r.counted_status != 30;"
     blurbs = {}
     print(statement)
     rs = s.execute(statement)
@@ -2812,7 +2816,7 @@ def main_loop():
             if (i-1) % 300 == 0:
                 print("$updating top posts", datetime.now(pytz.utc) - start)
                 update_common_posts('nostalgia')
-                update_common_posts('homeimprovement')
+                #update_common_posts('homeimprovement')
 
             if i % 300 == 0:
                 print("$updating top posts", datetime.now(pytz.utc) - start)
