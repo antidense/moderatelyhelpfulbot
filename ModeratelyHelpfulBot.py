@@ -349,27 +349,26 @@ class SubmittedPost(Base):
         self.age = get_age(self.title)
         tr_sub: TrackedSubreddit = s.query(TrackedSubreddit).get(self.subreddit_name)
         if tr_sub and (isinstance(tr_sub.enforce_nsfw_checking, bool) and tr_sub.enforce_nsfw_checking):
+
+            # Check the post author for nsfw_pct (if requested)
+            post_author: TrackedAuthor = s.query(TrackedAuthor).get(self.author)
+            if post_author.nsfw_pct == -1 or not post_author.last_calculated \
+                    or post_author.last_calculated.replace(tzinfo=timezone.utc) < \
+                    (datetime.now(pytz.utc) - timedelta(days=7)):
+                nsfw_pct, items = post_author.calculate_nsfw(instaban_subs=tr_sub.nsfw_instaban_subs)
+                if hasattr(tr_sub, 'nsfw_pct_set_user_flair') and tr_sub.nsfw_pct_set_user_flair is True:
+                    if nsfw_pct < 10 and items < 10:
+                        new_flair_text = f"Warning: Minimal User History"
+                    else:
+                        new_flair_text = f"{int(nsfw_pct)}% NSFW"
+                    s.add(post_author)
+                    try:
+                        tr_sub.get_api_handle().flair.set(post_author.author_name, text=new_flair_text)
+                    except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
+                        pass
+
             if 25 > self.age > 12:
                 self.post_flair = "strict sfw"
-
-                author: TrackedAuthor = s.query(TrackedAuthor).get(self.author)
-                if not author:
-                    author = TrackedAuthor(self.author)
-                if author:
-                    if author.nsfw_pct == -1 or not author.last_calculated \
-                            or author.last_calculated.replace(tzinfo=timezone.utc) < \
-                            (datetime.now(pytz.utc) - timedelta(days=7)):
-                        nsfw_pct, items = author.calculate_nsfw()
-                        new_flair_text = f"{int(nsfw_pct)}% NSFW"
-                        s.add(author)
-
-                        if nsfw_pct > 60:
-                            tr_sub = TrackedSubreddit(self.subreddit_name)
-                            if hasattr(tr_sub, 'nsfw_pct_set_user_flair') and tr_sub.nsfw_pct_set_user_flair == True:
-                                try:
-                                    REDDIT_CLIENT.subreddit(self.subreddit_name).flair.set(self.author, text=new_flair_text)
-                                except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
-                                    pass
 
     def get_url(self) -> str:
         return f"http://redd.it/{self.id}"
@@ -551,8 +550,7 @@ class TrackedSubreddit(Base):
     active_status = Column(SMALLINT, nullable=True)
     mm_convo_id = Column(String(10), nullable=True, default=None)
     is_nsfw = Column(Boolean, nullable=False, default=0)
-
-
+    mod_list = None
     subreddit_mods = []
     rate_limiting_enabled = False
     min_post_interval_hrs = 72
@@ -611,11 +609,15 @@ class TrackedSubreddit(Base):
         self.active_status = SubStatus.UNKNOWN.value
 
     def get_mods_list(self, subreddit_handle=None) -> List[str]:
+        if self.mod_list is not None:
+            return self.mod_list
+
         self.api_handle = REDDIT_CLIENT.subreddit(self.subreddit_name) if not self.api_handle else self.api_handle
         try:
-            return list(moderator.name for moderator in self.api_handle.moderator())
+            self.mod_list = list(moderator.name for moderator in self.api_handle.moderator())
         except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden):
-            return []
+            self.mod_list = []
+        return self.mod_list
 
     def check_access(self) -> SubStatus:
         api_handle= REDDIT_CLIENT.subreddit(self.subreddit_name) if not self.api_handle else self.api_handle
@@ -2460,7 +2462,7 @@ def nsfw_checking():  # Does not expand comments
         assert isinstance(post, SubmittedPost)
         op_age = get_age(post.title)
         
-        if post.author.lower() in NSFW_SKIP_USERS:
+        if post.author.lower() in NSFW_SKIP_USERS or post.author_name == "AutoModerator":
             s.add(post)
             s.commit()
             continue
