@@ -2465,7 +2465,7 @@ def nsfw_checking():  # Does not expand comments
         assert isinstance(post, SubmittedPost)
         op_age = get_age(post.title)
         
-        if post.author.lower() in NSFW_SKIP_USERS or post.author_name == "AutoModerator":
+        if post.author.lower() in NSFW_SKIP_USERS or post.author == "AutoModerator":
             s.add(post)
             s.commit()
             continue
