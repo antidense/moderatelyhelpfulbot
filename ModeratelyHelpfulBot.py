@@ -348,7 +348,7 @@ class SubmittedPost(Base):
 
         self.age = get_age(self.title)
         tr_sub: TrackedSubreddit = s.query(TrackedSubreddit).get(self.subreddit_name)
-        if tr_sub and (isinstance(tr_sub.enforce_nsfw_checking, bool) and tr_sub.enforce_nsfw_checking):
+        if tr_sub and(hasattr(tr_sub, 'enforce_nsfw_checking') and tr_sub.enforce_nsfw_checking):
 
             # Check the post author for nsfw_pct (if requested)
             post_author: TrackedAuthor = s.query(TrackedAuthor).get(self.author)
@@ -368,11 +368,17 @@ class SubmittedPost(Base):
                         tr_sub.get_api_handle().flair.set(post_author.author_name, text=new_flair_text)
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
-                if nsfw_pct > 80:
+                if tr_sub.nsfw_pct_ban_duration_days and  author.nsfw_pct > tr_sub.nsfw_pct_threshold:
                     self.mod_remove()
                     TrackedSubreddit.get_subreddit_by_name(BOT_NAME).send_modmail(
                         subject="[Notification] MHB post removed for high NSFW rating",
                         body=f"{self.get_comments_url()}")
+                    if tr_sub.nsfw_pct_instant_ban:
+                        ban_message = NAFSC.replace("{NSFWPCT}", f"{author.nsfw_pct:.2f}")
+                        ban_note = f"Having >80% NSFW ({author.nsfw_pct:.2f}%)"
+                        REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
+                            author_name, note=ban_note, ban_message=ban_message, duration=tr_sub.nsfw_pct_ban_duration_days
+                        )
                 if post_author.has_banned_subs_activity:
                     self.mod_remove()
                     TrackedSubreddit.get_subreddit_by_name(BOT_NAME).send_modmail(
