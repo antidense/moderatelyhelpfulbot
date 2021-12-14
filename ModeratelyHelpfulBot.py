@@ -368,7 +368,10 @@ class SubmittedPost(Base):
                         tr_sub.get_api_handle().flair.set(post_author.author_name, text=new_flair_text)
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
+                    if post_author.has_banned_subs_activity:
+                        self.mod_remove()
                 s.add(post_author)
+
 
             if 25 > self.age > 12:
                 self.post_flair = "strict sfw"
@@ -2527,6 +2530,9 @@ def nsfw_checking():  # Does not expand comments
         print(
             f"checking post: {post.subreddit_name} {post.title} {post.time_utc} {post.get_comments_url()} {post.post_flair} {dms_disabled}")
         top_level_comments: List[praw.models.Comment] = list(post.get_api_handle().comments)
+
+
+
         for c in top_level_comments:
             author = None
             author_name = None
