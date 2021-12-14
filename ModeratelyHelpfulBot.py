@@ -348,7 +348,7 @@ class SubmittedPost(Base):
 
         self.age = get_age(self.title)
         tr_sub: TrackedSubreddit = s.query(TrackedSubreddit).get(self.subreddit_name)
-        if tr_sub and(hasattr(tr_sub, 'enforce_nsfw_checking') and tr_sub.enforce_nsfw_checking):
+        if tr_sub and tr_sub.nsfw_pct_moderation:
 
             # Check the post author for nsfw_pct (if requested)
             post_author: TrackedAuthor = s.query(TrackedAuthor).get(self.author)
@@ -368,7 +368,7 @@ class SubmittedPost(Base):
                         tr_sub.get_api_handle().flair.set(post_author.author_name, text=new_flair_text)
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
-                if tr_sub.nsfw_pct_ban_duration_days and  author.nsfw_pct > tr_sub.nsfw_pct_threshold:
+                if hasattr(tr_sub, 'nsfw_pct_ban_duration_days') and  author.nsfw_pct > tr_sub.nsfw_pct_threshold:
                     self.mod_remove()
                     TrackedSubreddit.get_subreddit_by_name(BOT_NAME).send_modmail(
                         subject="[Notification] MHB post removed for high NSFW rating",
@@ -617,7 +617,7 @@ class TrackedSubreddit(Base):
     nsfw_ban_duration_days = 0
     nsfw_pct_moderation = False
     nsfw_pct_threshold = 80
-    enforce_nsfw_checking = False
+    #enforce_nsfw_checking = False
 
     def __init__(self, subreddit_name: str):
         self.subreddit_name = subreddit_name.lower()
@@ -2608,7 +2608,7 @@ def nsfw_checking():  # Does not expand comments
                             author_name, note=ban_note, ban_message=ban_message, duration=tr_sub.nsfw_pct_ban_duration_days
                         )
                     
-                    if tr_sub.modmail_receive_potential_predator_modmail and tr_sub.modmail_receive_potential_predator_modmail == True:
+                    if tr_sub.modmail_receive_potential_predator_modmail:
                         comment_url = f"https://www.reddit.com/r/{post.subreddit_name}/comments/{post.id}/-/{c.id}"
                         smart_link = f"https://old.reddit.com/message/compose?to={BOT_NAME}" \
                                     f"&subject={post.subreddit_name}" \
