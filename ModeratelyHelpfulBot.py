@@ -368,8 +368,16 @@ class SubmittedPost(Base):
                         tr_sub.get_api_handle().flair.set(post_author.author_name, text=new_flair_text)
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
-                    if post_author.has_banned_subs_activity:
-                        self.mod_remove()
+                if nsfw_pct > 80:
+                    self.mod_remove()
+                    TrackedSubreddit.get_subreddit_by_name(BOT_NAME).send_modmail(
+                        subject="[Notification] MHB post removed for high NSFW rating",
+                        body=f"{self.get_comments_url()}")
+                if post_author.has_banned_subs_activity:
+                    self.mod_remove()
+                    TrackedSubreddit.get_subreddit_by_name(BOT_NAME).send_modmail(
+                        subject="[Notification] MHB post removed for  banned subs",
+                        body=f"{self.get_comments_url()}")
                 s.add(post_author)
 
 
