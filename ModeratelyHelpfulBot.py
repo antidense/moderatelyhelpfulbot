@@ -368,12 +368,13 @@ class SubmittedPost(Base):
                         tr_sub.get_api_handle().flair.set(post_author.author_name, text=new_flair_text)
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
-                if hasattr(tr_sub, 'nsfw_pct_ban_duration_days') and  author.nsfw_pct > tr_sub.nsfw_pct_threshold:
+                if hasattr(tr_sub, 'nsfw_pct_ban_duration_days') and  post_author.nsfw_pct > tr_sub.nsfw_pct_threshold:
                     self.mod_remove()
                     TrackedSubreddit.get_subreddit_by_name(BOT_NAME).send_modmail(
                         subject="[Notification] MHB post removed for high NSFW rating",
                         body=f"{self.get_comments_url()}")
                     if tr_sub.nsfw_pct_instant_ban:
+
                         ban_message = NAFSC.replace("{NSFWPCT}", f"{author.nsfw_pct:.2f}")
                         ban_note = f"Having >80% NSFW ({author.nsfw_pct:.2f}%)"
                         REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
@@ -1416,9 +1417,14 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
         else:
             recent_post.get_api_handle().report(f"{BOT_NAME}: repeatedly exceeding posting threshold")
     if tr_sub.message and recent_post.author:
-        recent_post.get_api_handle().author.message("Regarding your post",
-                                                    tr_sub.populate_tags(tr_sub.message, recent_post=recent_post,
-                                                                         post_list=most_recent_reposts))
+        try:
+            recent_post.get_api_handle().author.message("Regarding your post",
+                                                        tr_sub.populate_tags(tr_sub.message, recent_post=recent_post,
+                                                                             post_list=most_recent_reposts))
+        except praw.exceptions.APIException:
+            logger.debug("\tcould not remove post")
+        except prawcore.exceptions.Forbidden:
+            logger.debug("\tcould not remove post: Forbidden")
 
 
 def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: SubmittedPost,
