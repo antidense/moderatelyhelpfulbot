@@ -375,8 +375,8 @@ class SubmittedPost(Base):
                         body=f"{self.get_comments_url()}")
                     if tr_sub.nsfw_pct_instant_ban:
 
-                        ban_message = NAFSC.replace("{NSFWPCT}", f"{author.nsfw_pct:.2f}")
-                        ban_note = f"Having >80% NSFW ({author.nsfw_pct:.2f}%)"
+                        ban_message = NAFSC.replace("{NSFWPCT}", f"{post_author.nsfw_pct:.2f}")
+                        ban_note = f"Having >80% NSFW ({post_author.nsfw_pct:.2f}%)"
                         REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
                             author_name, note=ban_note, ban_message=ban_message, duration=tr_sub.nsfw_pct_ban_duration_days
                         )
