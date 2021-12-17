@@ -217,6 +217,10 @@ class TrackedAuthor(Base):
             return self.api_handle
 
     def calculate_nsfw(self, instaban_subs= None):
+        if author_name.lower() == "automoderator":
+            self.nsfw_pct=0
+
+            return 0,0
         subs = list()
         intended_total = 50
         total = 0
@@ -378,7 +382,7 @@ class SubmittedPost(Base):
                         ban_message = NAFSC.replace("{NSFWPCT}", f"{post_author.nsfw_pct:.2f}")
                         ban_note = f"Having >80% NSFW ({post_author.nsfw_pct:.2f}%)"
                         REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                            author_name, note=ban_note, ban_message=ban_message, duration=tr_sub.nsfw_pct_ban_duration_days
+                            post_author.author_name, note=ban_note, ban_message=ban_message, duration=tr_sub.nsfw_pct_ban_duration_days
                         )
                 if post_author.has_banned_subs_activity:
                     self.mod_remove()
@@ -1758,7 +1762,8 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
             return "Ban for {} was successful".format(author_param), True
         except prawcore.exceptions.Forbidden:
             return "Ban failed, I don't have permission to do that", True
-
+        except praw.exceptions.RedditAPIException:
+            return f"Ban failed, reddit reported {author_param} was not a valid user", True
     elif command == "showrules":
         lines = ["Rules for {}:".format(subreddit_name), ]
         rules = REDDIT_CLIENT.subreddit(subreddit_name).rules()['rules']
