@@ -1889,6 +1889,7 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
             BOT_SUB.send_modmail(body=bot_owner_message)
         s.add(tr_sub)
         s.commit()
+        global UPDATE_LIST
         UPDATE_LIST = True
         return reply_text, True
     else:
