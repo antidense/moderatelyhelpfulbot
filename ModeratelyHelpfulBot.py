@@ -217,7 +217,7 @@ class TrackedAuthor(Base):
             return self.api_handle
 
     def calculate_nsfw(self, instaban_subs= None):
-        if author_name.lower() == "automoderator":
+        if self.author_name and  self.author_name.lower() == "automoderator":
             self.nsfw_pct=0
 
             return 0,0
@@ -235,7 +235,11 @@ class TrackedAuthor(Base):
             comments: List[praw.models.reddit.comment.Comment] = list(comments_generator)
             for comment in comments:
                 assert isinstance(comment, praw.models.reddit.comment.Comment)
-                subs.append(comment.subreddit.display_name)
+                subreddit_name = comment.subreddit.display_name
+                # ignore  posts made in author's own subreddit
+                if self.author_name in subreddit_name:
+                    continue
+                subs.append(subreddit_name)
                 total += 1
                 if comment.subreddit.over18:
                     count += 1
@@ -245,7 +249,11 @@ class TrackedAuthor(Base):
                         self.age = age
             posts: List[praw.models.reddit.Submission.submission] = list(post_generator)
             for post in posts:
-                subs.append(post.subreddit.display_name)
+                subreddit_name = post.subreddit.display_name
+                subs.append(subreddit_name)
+                # ignore  posts made in author's own subreddit
+                if self.author_name in subreddit_name:
+                    continue
                 total += 1
                 if post.over_18:
                     count += 1
