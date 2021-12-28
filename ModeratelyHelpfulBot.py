@@ -216,7 +216,7 @@ class TrackedAuthor(Base):
         else:
             return self.api_handle
 
-    def calculate_nsfw(self, instaban_subs= None):
+    def calculate_nsfw(self, instaban_subs=None):
         if self.author_name and  self.author_name.lower() == "automoderator":
             self.nsfw_pct=0
 
@@ -2771,6 +2771,8 @@ def main_loop():
     sfw_sub_list = "mod"
     nsfw_sub_list = "mod"
 
+    sub_lists = []
+
 
 
     """
@@ -2801,30 +2803,36 @@ def main_loop():
                 print("updating list")
                 #trs = s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status != 0).all()
                 trs = s.query(TrackedSubreddit).all()
+                sub_list =[]
                 for tr in trs:
                     # print(tr.subreddit_name, tr.active_status)
                     assert isinstance(tr, TrackedSubreddit)
 
                     if tr.active_status > 0:
-                        if tr.is_nsfw == 1:
-                            nsfw_subs.append(tr.subreddit_name)
-                        else:
-                            sfw_subs.append(tr.subreddit_name)
-                sfw_sub_list = "+".join(sfw_subs)
-                nsfw_sub_list = "+".join(nsfw_subs)
+                        # if tr.is_nsfw == 1:
+                        #     nsfw_subs.append(tr.subreddit_name)
+                        # else:
+                        #     sfw_subs.append(tr.subreddit_name)
+                        sub_list.append(tr.subreddit_name)
+                    if len(sub_list)>=400:
+                        sub_lists.append(sub_list)
+                        sub_list = []
+                sub_lists.append(sub_list)
+                #sfw_sub_list = "+".join(sfw_subs)
+                #nsfw_sub_list = "+".join(nsfw_subs)
                 UPDATE_LIST = False
                 s.commit()
-            print(sfw_sub_list)
-            print(nsfw_sub_list)
+            #print(sfw_sub_list)
+            #print(nsfw_sub_list)
             if (i-1) % 15 == 0:
                 quick_mode = False
             else:
                 quick_mode = True
-            updated_subs = check_new_submissions(sub_list=nsfw_sub_list, quick_mode=quick_mode)
-            check_spam_submissions(sub_list=nsfw_sub_list)
-
-            updated_subs += check_new_submissions(sub_list=sfw_sub_list,  quick_mode=quick_mode)
-            check_spam_submissions(sub_list=sfw_sub_list)
+            for sub_list in sub_lists:
+                sub_list_str = "+".join(sub_list)
+                print(len(sub_list_str), sub_list_str)
+                updated_subs = check_new_submissions(sub_list=sub_list_str, quick_mode=quick_mode)
+                check_spam_submissions(sub_list=sub_list_str)
 
             start = datetime.now(pytz.utc)
 
