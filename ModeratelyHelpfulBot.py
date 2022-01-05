@@ -25,9 +25,9 @@ from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET, BOT_OWNER, DB_E
 """
 To do list:
 asyncio 
-incorporate toolbox? https://www.reddit.com/r/nostalgia/wiki/edit/toolbox check usernotes?
+incorporate toolbox? https://www.reddit.com/r/nostalgia/wiki/edit/toolbox check user notes?
 active status to an ENUM
-add nonbinary gender
+add non-binary gender
 """
 
 MINOR_KWS = []
@@ -107,8 +107,6 @@ class PostedStatus(Enum):
 class SubStatus(Enum):
     UNKNOWN = 20
     ACTIVE = 10
-
-
     NO_BAN_ACCESS = 8
     MHB_CONFIG_ERROR = 5
     YAML_SYNTAX_OK = 4
@@ -657,8 +655,7 @@ class TrackedSubreddit(Base):
         return self.mod_list
 
     def check_access(self) -> (SubStatus, str):
-        if not self.api_handle:
-            self.api_handle = REDDIT_CLIENT.subreddit(self.subreddit_name)
+        self.api_handle = REDDIT_CLIENT.subreddit(self.subreddit_name)
         if not self.api_handle:  # Subreddit doesn't exist
             return SubStatus.SUB_GONE, f"Reddit reports that there is no subreddit by the name of {self.subreddit_name}."
         #self.api_handle = api_handle # Else keep the reference to the subreddit
@@ -675,12 +672,12 @@ class TrackedSubreddit(Base):
                     self.bot_mod = wiki_page.revision_by.name
                 self.settings_yaml = yaml.safe_load(self.settings_yaml_txt)
             else:
-                return SubStatus.NO_CONFIG, f"I only found an empty config for /r/{self.subreddit.name}."
+                return SubStatus.NO_CONFIG, f"I only found an empty config for /r/{self.subreddit_name}."
         except prawcore.exceptions.NotFound:
-            return SubStatus.NO_CONFIG, f"I did not find a config for /r/{self.subreddit.name} Please create one at" \
+            return SubStatus.NO_CONFIG, f"I did not find a config for /r/{self.subreddit_name} Please create one at" \
                                         f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{BOT_NAME} ."
         except prawcore.exceptions.Forbidden:
-            return SubStatus.CONFIG_ACCESS_ERROR, f"I do not have any access to /r/{self.subreddit.name}."
+            return SubStatus.CONFIG_ACCESS_ERROR, f"I do not have any access to /r/{self.subreddit_name}."
         except prawcore.exceptions.Redirect:
             return SubStatus.SUB_GONE, f"Reddit reports that there is no subreddit by the name of {self.subreddit_name}."
         except (yaml.scanner.ScannerError, yaml.composer.ComposerError, yaml.parser.ParserError):
@@ -713,11 +710,13 @@ class TrackedSubreddit(Base):
         #self.active_status = 20
         self.subreddit_mods = self.get_mods_list(subreddit_handle=self.api_handle)
 
-        if force_update or self.settings_yaml_txt is None:
+        if force_update or self.settings_yaml_txt is None or self.settings_yaml is None:
             active_status, return_text = self.update_access()
+        else:
+            return_text = str(self.active_status)
 
         active_status = self.active_status
-        if active_status != SubStatus.YAML_SYNTAX_OK:
+        if active_status < 4:
             return False, return_text
 
 
@@ -769,7 +768,7 @@ class TrackedSubreddit(Base):
 
             }
             if not pr_settings:
-                self.active_status = SubStatus.MHB_CONFIG_ERROR
+                self.active_status = SubStatus.MHB_CONFIG_ERROR.value
                 return False, "No settings for post restriction"
             for pr_setting in pr_settings:
                 if pr_setting in possible_settings:
@@ -792,7 +791,7 @@ class TrackedSubreddit(Base):
                                       f"{possible_settings[pr_setting]} but is type {pr_setting_type}.  " \
                                       f"Make sure you use lowercase true and false"
                         print(return_text)
-                        self.active_status = SubStatus.MHB_CONFIG_ERROR
+                        self.active_status = SubStatus.MHB_CONFIG_ERROR.value
                         return False, return_text
                 else:
                     return_text = "Did not recognize variable '{}' for {}".format(pr_setting, self.subreddit_name)
@@ -825,7 +824,7 @@ class TrackedSubreddit(Base):
                     if m_setting in possible_settings:
                         setattr(self, m_setting, m_settings[m_setting])
                     else:
-                        self.active_status = SubStatus.MHB_CONFIG_ERROR
+                        self.active_status = SubStatus.MHB_CONFIG_ERROR.value
                         return_text = "Did not understand variable '{}'".format(m_setting)
 
         if 'nsfw_pct_moderation' in self.settings_yaml:
@@ -857,7 +856,7 @@ class TrackedSubreddit(Base):
                                       f"{possible_settings[n_setting]} but is type {n_setting_type}.  " \
                                       f"Make sure you use lowercase true and false"
                         print(return_text)
-                        self.active_status = SubStatus.MHB_CONFIG_ERROR
+                        self.active_status = SubStatus.MHB_CONFIG_ERROR.value
                         return False, return_text
                 else:
                     return_text = "Did not understand variable '{}' for {}".format(n_setting, self.subreddit_name)
@@ -868,7 +867,7 @@ class TrackedSubreddit(Base):
         self.active_status = SubStatus.ACTIVE.value
         self.last_updated = datetime.now()
         if self.ban_duration_days == 0:
-            self.active_status = SubStatus.MHB_CONFIG_ERROR
+            self.active_status = SubStatus.MHB_CONFIG_ERROR.value
             return False, "ban_duration_days can no longer be zero. Use `ban_duration_days: ~` to disable or use " \
                           "`ban_duration_days: 999` for permanent bans. Make sure there is a space after the colon."
 
@@ -1169,6 +1168,8 @@ def look_for_rule_violations2(do_cleanup: bool = False, subs_to_update = None):
     global WATCHED_SUBS
     logger.debug("querying recent post(s)")
 
+
+
     faster_statement = "select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status from RedditPost t inner join TrackedSubs s on t.subreddit_name = s.subreddit_name where s.active_status >3 and counted_status <2 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 72 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
     more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status >3 and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
 
@@ -1187,6 +1188,7 @@ def look_for_rule_violations2(do_cleanup: bool = False, subs_to_update = None):
     print(f"query took this long {datetime.now() - tick}")
 
 
+
     posting_groups=[]
     for row in rs:
         print(row[0], row[1], row[2], row[3], row[4])
@@ -1200,6 +1202,12 @@ def look_for_rule_violations2(do_cleanup: bool = False, subs_to_update = None):
         # predecessors = row[1].split(',')
         # predecessors_times = row[2].split(',')
         posting_groups.append(PostingGroup(author_name=row[3], subreddit_name=row[4].lower(), posts=posts))
+        last_post = posts[-1]
+        assert isinstance(last_post,SubmittedPost)
+        last_post.review_debug = row[1]
+        s.add(last_post)
+    s.commit()
+
     print(f"Total found: {len(posting_groups)}")
     tick = datetime.now(pytz.utc)
 
@@ -2514,7 +2522,7 @@ def nsfw_checking():  # Does not expand comments
     for post in posts_to_check:
         assert isinstance(post, SubmittedPost)
         op_age = get_age(post.title)
-        
+
         if post.author.lower() in NSFW_SKIP_USERS or post.author == "AutoModerator":
             s.add(post)
             s.commit()
@@ -2640,7 +2648,7 @@ def nsfw_checking():  # Does not expand comments
                         REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
                             author_name, note=ban_note, ban_message=ban_message, duration=tr_sub.nsfw_pct_ban_duration_days
                         )
-                    
+
                     if tr_sub.modmail_receive_potential_predator_modmail:
                         comment_url = f"https://www.reddit.com/r/{post.subreddit_name}/comments/{post.id}/-/{c.id}"
                         smart_link = f"https://old.reddit.com/message/compose?to={BOT_NAME}" \
@@ -2696,8 +2704,8 @@ def get_naughty_list():
     for x, y in authors_tuple:
         print("{1}\t\t{0}".format(x, y))
         """
-    
-    
+
+
 def update_common_posts(subreddit_name, limit=1000):
     top_posts = [a for a in REDDIT_CLIENT.subreddit(subreddit_name).top(limit=limit)]
     count = 0
