@@ -692,7 +692,13 @@ class TrackedSubreddit(Base):
 
         # if active_status == SubStatus.YAML_SYNTAX_OKAY and self.active_status == 10:
         #    return
-        self.active_status = active_status.value
+
+        if isinstance(active_status, SubStatus):
+            self.active_status = active_status.value
+
+        else:
+            print(f"this should not be...{active_status}")
+            self.active_status = active_status
         s.add(self)
         s.commit()
         return active_status, error_message
@@ -862,6 +868,7 @@ class TrackedSubreddit(Base):
 
         self.min_post_interval = self.min_post_interval if self.min_post_interval else timedelta(hours=72)
         self.max_count_per_interval = self.max_count_per_interval if self.max_count_per_interval else 1
+
         self.active_status = SubStatus.ACTIVE.value
         self.last_updated = datetime.now()
         if self.ban_duration_days == 0:
@@ -1169,6 +1176,20 @@ def look_for_rule_violations2(do_cleanup: bool = False, subs_to_update=None):
     global WATCHED_SUBS
     logger.debug("querying recent post(s)")
 
+    posting_groups = []
+
+    if not do_cleanup:
+        left_over_posts = s.query(SubmittedPost).filter(SubmittedPost.reviewed == 0,
+                                                        SubmittedPost.review_debug.isnot(None)).all()
+        for post in left_over_posts:
+            assert isinstance(post, SubmittedPost)
+            print(f"adding leftover post {post.id} ")
+            post_ids = post.review_debug.split(',')
+            posts = []
+            for post_id in post_ids:
+                posts.append(s.query(SubmittedPost).get(post_id))
+            posting_groups.append(PostingGroup(author_name=post.author, subreddit_name=post.subreddit_name, posts=posts))
+
     faster_statement = "select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status from RedditPost t inner join TrackedSubs s on t.subreddit_name = s.subreddit_name where s.active_status >3 and counted_status <2 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 72 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
     more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status >3 and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
 
@@ -1186,7 +1207,7 @@ def look_for_rule_violations2(do_cleanup: bool = False, subs_to_update=None):
         rs = s.execute(faster_statement)
     print(f"query took this long {datetime.now() - tick}")
 
-    posting_groups = []
+
     for row in rs:
         print(row[0], row[1], row[2], row[3], row[4])
         post_ids = row[1].split(',')
