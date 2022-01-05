@@ -380,7 +380,8 @@ class SubmittedPost(Base):
                         tr_sub.get_api_handle().flair.set(post_author.author_name, text=new_flair_text)
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
-                if hasattr(tr_sub, 'nsfw_pct_ban_duration_days') and  post_author.nsfw_pct > tr_sub.nsfw_pct_threshold:
+                if hasattr(tr_sub, 'nsfw_pct_ban_duration_days') and post_author.nsfw_pct and\
+                        post_author.nsfw_pct > tr_sub.nsfw_pct_threshold:
                     self.mod_remove()
                     TrackedSubreddit.get_subreddit_by_name(BOT_NAME).send_modmail(
                         subject="[Notification] MHB post removed for high NSFW rating",
@@ -735,7 +736,7 @@ class TrackedSubreddit(Base):
         if 'post_restriction' in self.settings_yaml:
             pr_settings = self.settings_yaml['post_restriction']
             self.rate_limiting_enabled = True
-            possible_settings = {
+            possible_settings = {  #'title_not_exempt_flair_keyword
                 'max_count_per_interval': "int",
                 'ignore_AutoModerator_removed': "bool",
                 'ignore_moderator_removed': "bool",
@@ -860,7 +861,7 @@ class TrackedSubreddit(Base):
         self.max_count_per_interval = self.max_count_per_interval if self.max_count_per_interval else 1
         mods_list = self.get_mods_list()
         if BOT_NAME not in mods_list:
-            return False, "I do not currently have mod privileges yet. If you just added me, please wait for approval"
+            return False, "I do not currently have mod privileges yet. If you just added me, please wait for approval. "
         self.active_status = SubStatus.ACTIVE.value
         self.last_updated = datetime.now()
         if self.ban_duration_days == 0:
@@ -1068,13 +1069,12 @@ class Task(Base):
     last_report = Column(Text, nullable=True)
     force_run = Column(Boolean, nullable=False)
 
-    def __init__(self, idno, name, start_time, end_time):
-        self.idno = idno
-        self.name = name
-        self.start_time_str = start_time
-        self.end_time_str = end_time
-        self.presenters = None
-        self.to_record = True
+    def __init__(self, task_name, run_interval):
+        self.task_name = task_name
+        self.run_interval = run_interval
+        self.last_ran = None
+        self.last_error = None
+        self.last_report = None
         self.force_run = False
 
 
@@ -1108,7 +1108,11 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
     if tr_sub.exempt_moderator_posts and recent_post.author in tr_sub.subreddit_mods:
         return CountedStatus.MODPOST_EXEMPT, "moderator exempt"
     # check if flair-exempt
-    author_flair = recent_post.get_api_handle().author_flair_text
+    try:
+        author_flair = recent_post.get_api_handle().author_flair_text
+    except prawcore.exceptions.Forbidden:
+        print("can't access flair")
+        author_flair = None
     # add CSS class to author_flair
     if author_flair and recent_post.get_api_handle().author_flair_css_class:
         author_flair = author_flair + recent_post.get_api_handle().author_flair_css_class
@@ -1136,17 +1140,20 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
 
     # title keywords only to restrict:
     if tr_sub.title_not_exempt_keyword:
-        linkflair = recent_post.get_api_handle().link_flair_text
-        flex_title = recent_post.title.lower()
-        if linkflair:
-            flex_title = recent_post.title.lower() + linkflair
-
+        link_flair = recent_post.get_api_handle().link_flair_text
+        if link_flair:
+            flex_title = recent_post.title.lower() + link_flair
+        else:
+            flex_title = recent_post.title.lower()
+        print(flex_title)
+        # example: restriction "Selfies"
+        # if there is a restriction and required keyword is not in title -> does not meet restriction criteria, exempt
         if (isinstance(tr_sub.title_not_exempt_keyword, str)
             and tr_sub.title_not_exempt_keyword.lower() not in flex_title) or \
                 (isinstance(tr_sub.title_not_exempt_keyword, list)
                  and all(x not in flex_title for x in [y.lower() for y in tr_sub.title_not_exempt_keyword])):
-            logger.debug(">>>title keyword restricted")
-            return CountedStatus.TITLE_KW_NOT_EXEMPT, f"title does not have {tr_sub.title_not_exempt_keyword} -> exemption"
+            logger.debug(f">>>meets restriction criteria: {flex_title}, restriction: {tr_sub.title_not_exempt_keyword}")
+            return CountedStatus.TITLE_CRITERIA_NOT_MET, f"title does not have {tr_sub.title_not_exempt_keyword} -> exemption"
     return CountedStatus.COUNTS, "no exemptions"
 
 class PostingGroup:
@@ -1428,7 +1435,7 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
             recent_post.get_api_handle().report((f"{BOT_NAME}: {rp_reason}")[0:99])
         else:
             recent_post.get_api_handle().report(f"{BOT_NAME}: repeatedly exceeding posting threshold")
-    if tr_sub.message and recent_post.author:
+    if tr_sub.message and recent_post.author and recent_post.get_api_handle().author:
         try:
             recent_post.get_api_handle().author.message("Regarding your post",
                                                         tr_sub.populate_tags(tr_sub.message, recent_post=recent_post,
@@ -1613,13 +1620,17 @@ def make_comment(subreddit: TrackedSubreddit, recent_post: SubmittedPost, most_r
     try:
         comment: praw.models.Comment = \
             recent_post.reply(response, distinguish=distinguish, approve=approve, lock_thread=lock_thread)
+
         # assert comment
-        if stickied:
-            comment.mod.distinguish(sticky=True)
-        try:
-            recent_post.bot_comment_id = comment.id
-        except (AttributeError):
-            pass
+
+        if stickied and comment:
+            comment.mod.distinguish(how= 'yes', sticky=True)
+            try:
+                recent_post.bot_comment_id = comment.id
+            except AttributeError:
+                print(comment, type(comment))
+                logger.warning(f'tried to sticky a comment but failed: Attribute Error')
+
     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
         logger.warning(f'something went wrong in creating comment {str(e)}')
     return comment
@@ -2762,83 +2773,78 @@ def init_logger(logger_name, filename=None):
     return logger
 
 
+def task_loop():
+    tasks = s.query(Task).all()
+    if len(tasks) ==0:
+        pass
+        # s.add(Task())
+        # task list:
+            # update all subs
+            #
+    for task in tasks:
+        if not task.last_ran or (task.last_ran + datetime.timedelta(
+                seconds=task.run_interval)) < datetime.datetime.now() or task.force_run:
+            func_name = 's_' + task.name
+            if func_name in globals():
+                globals()[func_name](task)
+                task.last_ran = datetime.datetime.now()
+                if task.force_run:
+                    task.force_run = False
+                s.add(task)
+                s.commit()
+
+    time.sleep(15)
+
+def update_sub_list(intensity= 0):
+    global ACTIVE_SUB_LIST
+    ACTIVE_SUB_LIST = []
+    if intensity == 0:
+        trs = s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status > 0).all()
+        for tr in trs:
+            assert isinstance(tr, TrackedSubreddit)
+            ACTIVE_SUB_LIST.append(tr.subreddit_name)
+        return
+    trs = s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status > 0).all()
+    # Recheck all subs here
+    for tr in trs:
+        assert isinstance(tr, TrackedSubreddit)
+        ACTIVE_SUB_LIST.append(tr.subreddit_name)
 
 def main_loop():
     load_settings()
-
-    sfw_subs = []
-    nsfw_subs = []
-    sfw_sub_list = "mod"
-    nsfw_sub_list = "mod"
-
     sub_lists = []
 
-
-
-    """
-    for _ in range(1, 1000):
-        tasks =  s.query(Task).all()
-        for task in tasks:
-            if not task.last_ran or (task.last_ran + datetime.timedelta(
-                    seconds=task.run_interval)) < datetime.datetime.now() or task.force_run:
-                func_name = 's_'+task.name
-                if func_name in globals():
-                    globals()[func_name](task)
-                    task.last_ran = datetime.datetime.now()
-                    if task.force_run:
-                        task.force_run = False
-                    s.add(task)
-                    s.commit()
-
-        time.sleep(15)
-    """
     global UPDATE_LIST
+    global ACTIVE_SUB_LIST
     i=0
     while True:
+        i += 1
         print('start_loop')
+
+        intensity = 1 if (i - 1) % 5 == 0 else 0
+
+        #First: Update sub list:
+        if UPDATE_LIST or len(ACTIVE_SUB_LIST) == 0:
+            print("updating list")
+            update_sub_list(intensity = intensity)
+            UPDATE_LIST = False
+
         try:
-            i += 1
+            # Gather posts
+            chunk_size = 75 if intensity == 2 else 400
+            chunked_list = [ACTIVE_SUB_LIST[j:j + chunk_size] for j in range(0, len(ACTIVE_SUB_LIST), chunk_size)]
 
-            if UPDATE_LIST:
-                print("updating list")
-                #trs = s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status != 0).all()
-                trs = s.query(TrackedSubreddit).all()
-                sub_list =[]
-                for tr in trs:
-                    # print(tr.subreddit_name, tr.active_status)
-                    assert isinstance(tr, TrackedSubreddit)
-
-                    if tr.active_status > 0:
-                        # if tr.is_nsfw == 1:
-                        #     nsfw_subs.append(tr.subreddit_name)
-                        # else:
-                        #     sfw_subs.append(tr.subreddit_name)
-                        sub_list.append(tr.subreddit_name)
-                    if len(sub_list)>=400:
-                        sub_lists.append(sub_list)
-                        sub_list = []
-                sub_lists.append(sub_list)
-                #sfw_sub_list = "+".join(sfw_subs)
-                #nsfw_sub_list = "+".join(nsfw_subs)
-                UPDATE_LIST = False
-                s.commit()
-            #print(sfw_sub_list)
-            #print(nsfw_sub_list)
-            if (i-1) % 15 == 0:
-                quick_mode = False
-            else:
-                quick_mode = True
-            for sub_list in sub_lists:
+            updated_subs = []
+            for sub_list in chunked_list:
                 sub_list_str = "+".join(sub_list)
                 print(len(sub_list_str), sub_list_str)
-                updated_subs = check_new_submissions(sub_list=sub_list_str, quick_mode=quick_mode)
+                updated_subs += check_new_submissions(sub_list=sub_list_str, quick_mode=quick_mode)
                 check_spam_submissions(sub_list=sub_list_str)
 
-            start = datetime.now(pytz.utc)
-
-            if i == 1:  # Don't skip any subs if first time runnign!
+            if intensity == 1:
                 updated_subs = None
 
+            start = datetime.now(pytz.utc)
             look_for_rule_violations2(do_cleanup=(i % 15 == 0), subs_to_update=updated_subs)  # uses a lot of resources
             print("$$$checking rule violations took this long", datetime.now(pytz.utc) - start)
 
@@ -2873,7 +2879,7 @@ def main_loop():
 
         except prawcore.exceptions.ServerError:
             import time
-            time.sleep(60*5) # sleep for a bit server errors
+            time.sleep(60*5)  # sleep for a bit server errors
         except Exception as e:
             import traceback
             trace = traceback.format_exc()
