@@ -107,12 +107,15 @@ class PostedStatus(Enum):
 class SubStatus(Enum):
     UNKNOWN = 20
     ACTIVE = 10
-    YAML_SYNTAX_OKAY = 8
-    NO_BAN_ACCESS = 4
-    CONFIG_ERROR =3
+
+
+    NO_BAN_ACCESS = 8
+    MHB_CONFIG_ERROR = 5
+    YAML_SYNTAX_OK = 4
+    YAML_SYNTAX_ERROR = 3
     NO_CONFIG = 2
     CONFIG_ACCESS_ERROR = 1
-    NOT_MOD = 0
+    NO_MOD_PRIV = 0
     SUB_GONE = -1
     SUB_FORBIDDEN = -2
 
@@ -653,39 +656,49 @@ class TrackedSubreddit(Base):
             self.mod_list = []
         return self.mod_list
 
-    def check_access(self) -> SubStatus:
-        api_handle= REDDIT_CLIENT.subreddit(self.subreddit_name) if not self.api_handle else self.api_handle
-        if not api_handle:  # Subreddit doesn't exist
-            return SubStatus.SUB_GONE
-        self.api_handle = api_handle # Else keep the reference to the subreddit
+    def check_access(self) -> (SubStatus, str):
+        if not self.api_handle:
+            self.api_handle = REDDIT_CLIENT.subreddit(self.subreddit_name)
+        if not self.api_handle:  # Subreddit doesn't exist
+            return SubStatus.SUB_GONE, f"Reddit reports that there is no subreddit by the name of {self.subreddit_name}."
+        #self.api_handle = api_handle # Else keep the reference to the subreddit
         if BOT_NAME not in self.get_mods_list():
-            self.active_status = SubStatus.NOT_MOD.value
-            return SubStatus.NOT_MOD
+            self.active_status = SubStatus.NO_MOD_PRIV.value
+            return SubStatus.NO_MOD_PRIV, f"The bot does not have moderator privileges to /r/{self.subreddit_name}."
         try:
-            logger.warning(f'accessing wiki config {self.subreddit_name}')
+            logger.debug(f'accessing wiki config {self.subreddit_name}')
             wiki_page = self.api_handle.wiki[BOT_NAME]
-            _ = wiki_page.revision_date
-            settings_yaml = yaml.safe_load(wiki_page.content_md)
+            if wiki_page:
+                self.settings_yaml_txt = wiki_page.content_md
+                self.settings_revision_date = wiki_page.revision_date
+                if wiki_page.revision_by and wiki_page.revision_by.name != BOT_NAME:
+                    self.bot_mod = wiki_page.revision_by.name
+                self.settings_yaml = yaml.safe_load(self.settings_yaml_txt)
+            else:
+                return SubStatus.NO_CONFIG, f"I only found an empty config for /r/{self.subreddit.name}."
         except prawcore.exceptions.NotFound:
-            return SubStatus.NO_CONFIG
+            return SubStatus.NO_CONFIG, f"I did not find a config for /r/{self.subreddit.name} Please create one at" \
+                                        f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{BOT_NAME} ."
         except prawcore.exceptions.Forbidden:
-            return SubStatus.CONFIG_ACCESS_ERROR
+            return SubStatus.CONFIG_ACCESS_ERROR, f"I do not have any access to /r/{self.subreddit.name}."
         except prawcore.exceptions.Redirect:
-            print(f'Redirect for {self.subreddit_name}')
-            return SubStatus.SUB_GONE
+            return SubStatus.SUB_GONE, f"Reddit reports that there is no subreddit by the name of {self.subreddit_name}."
         except (yaml.scanner.ScannerError, yaml.composer.ComposerError, yaml.parser.ParserError):
-            return SubStatus.CONFIG_ERROR
-        return SubStatus.YAML_SYNTAX_OKAY
+            return SubStatus.YAML_SYNTAX_ERROR, f"There is a syntax error in your config: " \
+                                                f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{BOT_NAME} ."\
+                                                f"Please validate your config using http://www.yamllint.com/. "
+
+        return SubStatus.YAML_SYNTAX_OK, "Syntax is valid"
 
     def update_access(self):
-        active_status = self.check_access()
+        active_status, error_message = self.check_access()
 
         #if active_status == SubStatus.YAML_SYNTAX_OKAY and self.active_status == 10:
         #    return
         self.active_status = active_status.value
         s.add(self)
         s.commit()
-        return active_status
+        return active_status, error_message
 
     def update_from_yaml(self, force_update: bool = False) -> (Boolean, String):
         return_text = "Updated Successfully!"
@@ -701,33 +714,22 @@ class TrackedSubreddit(Base):
         self.subreddit_mods = self.get_mods_list(subreddit_handle=self.api_handle)
 
         if force_update or self.settings_yaml_txt is None:
-            try:
-                logger.warning(f'accessing wiki config {self.subreddit_name}')
-                wiki_page = REDDIT_CLIENT.subreddit(self.subreddit_name).wiki[BOT_NAME]
-                if wiki_page:
-                    self.settings_yaml_txt = wiki_page.content_md
-                    self.settings_revision_date = wiki_page.revision_date
-                    if wiki_page.revision_by and wiki_page.revision_by.name !=BOT_NAME:
-                        self.bot_mod = wiki_page.revision_by.name
-                    else:
-                        self.active_status = SubStatus.NO_CONFIG.value
-            except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden) as e:
-                logger.warning(f'no config accessible for {self.subreddit_name}')
-                self.rate_limiting_enabled = False
-                self.active_status = SubStatus.CONFIG_ACCESS_ERROR.value
+            active_status, return_text = self.update_access()
+
+        active_status = self.active_status
+        if active_status != SubStatus.YAML_SYNTAX_OK:
+            return False, return_text
 
 
-                return False, str(e)
+        # if self.settings_yaml_txt is None:
+        #     return False, "Is the wiki updated? I could not find any settings in the wiki"
+        # try:
+        #     self.settings_yaml = yaml.safe_load(self.settings_yaml_txt)
+        # except (yaml.scanner.ScannerError, yaml.composer.ComposerError, yaml.parser.ParserError) as e:
+        #   return False, str(e)
 
-        if self.settings_yaml_txt is None:
-            return False, "Is the wiki updated? I could not find any settings in the wiki"
-        try:
-            self.settings_yaml = yaml.safe_load(self.settings_yaml_txt)
-        except (yaml.scanner.ScannerError, yaml.composer.ComposerError, yaml.parser.ParserError) as e:
-            return False, str(e)
-
-        if self.settings_yaml is None:
-            return False, "I couldn't get settings from the wiki for some reason :/"
+        # if self.settings_yaml is None:
+        #    return False, "I couldn't get settings from the wiki for some reason :/"
 
         if 'save_text' in self.settings_yaml:
             self.save_text = self.settings_yaml['save_text']
@@ -767,7 +769,8 @@ class TrackedSubreddit(Base):
 
             }
             if not pr_settings:
-                return False, "Bad config"
+                self.active_status = SubStatus.MHB_CONFIG_ERROR
+                return False, "No settings for post restriction"
             for pr_setting in pr_settings:
                 if pr_setting in possible_settings:
                     pr_setting_value = pr_settings[pr_setting]
@@ -784,11 +787,12 @@ class TrackedSubreddit(Base):
                         setattr(self, pr_setting, pr_setting_value)
 
                     else:
-                        return_text = f"{self.subreddit_name} invalid data type in yaml: `{pr_setting}` which " \
+                        return_text = f"{self.subreddit_name} invalid data type in your config: `{pr_setting}` which " \
                                       f"is written as `{pr_setting_value}` should be of type " \
                                       f"{possible_settings[pr_setting]} but is type {pr_setting_type}.  " \
                                       f"Make sure you use lowercase true and false"
                         print(return_text)
+                        self.active_status = SubStatus.MHB_CONFIG_ERROR
                         return False, return_text
                 else:
                     return_text = "Did not recognize variable '{}' for {}".format(pr_setting, self.subreddit_name)
@@ -821,6 +825,7 @@ class TrackedSubreddit(Base):
                     if m_setting in possible_settings:
                         setattr(self, m_setting, m_settings[m_setting])
                     else:
+                        self.active_status = SubStatus.MHB_CONFIG_ERROR
                         return_text = "Did not understand variable '{}'".format(m_setting)
 
         if 'nsfw_pct_moderation' in self.settings_yaml:
@@ -852,19 +857,18 @@ class TrackedSubreddit(Base):
                                       f"{possible_settings[n_setting]} but is type {n_setting_type}.  " \
                                       f"Make sure you use lowercase true and false"
                         print(return_text)
+                        self.active_status = SubStatus.MHB_CONFIG_ERROR
                         return False, return_text
                 else:
                     return_text = "Did not understand variable '{}' for {}".format(n_setting, self.subreddit_name)
-                    print(return_text)
+                    return False, return_text
 
         self.min_post_interval = self.min_post_interval if self.min_post_interval else timedelta(hours=72)
         self.max_count_per_interval = self.max_count_per_interval if self.max_count_per_interval else 1
-        mods_list = self.get_mods_list()
-        if BOT_NAME not in mods_list:
-            return False, "I do not currently have mod privileges yet. If you just added me, please wait for approval. "
         self.active_status = SubStatus.ACTIVE.value
         self.last_updated = datetime.now()
         if self.ban_duration_days == 0:
+            self.active_status = SubStatus.MHB_CONFIG_ERROR
             return False, "ban_duration_days can no longer be zero. Use `ban_duration_days: ~` to disable or use " \
                           "`ban_duration_days: 999` for permanent bans. Make sure there is a space after the colon."
 
@@ -1033,8 +1037,6 @@ class TrackedSubreddit(Base):
             return self.api_handle
         else:
             return self.api_handle
-
-
 
 class ActionedComments(Base):
     __tablename__ = 'ActionedComments'
@@ -2798,17 +2800,21 @@ def task_loop():
 def update_sub_list(intensity= 0):
     global ACTIVE_SUB_LIST
     ACTIVE_SUB_LIST = []
-    if intensity == 0:
+    if intensity == 3:
         trs = s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status > 0).all()
         for tr in trs:
             assert isinstance(tr, TrackedSubreddit)
-            ACTIVE_SUB_LIST.append(tr.subreddit_name)
-        return
+            active_status, error = tr.check_access()
+            print(f"Checked {tr.subreddit_name}:\t{tr.active_status}\t{error}")
+
     trs = s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status > 0).all()
-    # Recheck all subs here
     for tr in trs:
         assert isinstance(tr, TrackedSubreddit)
         ACTIVE_SUB_LIST.append(tr.subreddit_name)
+    return
+    trs = s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status > 0).all()
+    # Recheck all subs here
+
 
 def main_loop():
     load_settings()
@@ -2817,11 +2823,13 @@ def main_loop():
     global UPDATE_LIST
     global ACTIVE_SUB_LIST
     i=0
+    # update_sub_list(intensity=2)
     while True:
         i += 1
         print('start_loop')
 
         intensity = 1 if (i - 1) % 5 == 0 else 0
+        quick_mode = (intensity==0)
 
         #First: Update sub list:
         if UPDATE_LIST or len(ACTIVE_SUB_LIST) == 0:
