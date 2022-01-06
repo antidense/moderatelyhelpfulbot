@@ -43,7 +43,7 @@ REDDIT_CLIENT = praw.Reddit(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, pa
                             user_agent="ModeratelyHelpfulBot v0.4", username=BOT_NAME)
 
 # Set up some global variables
-ACCEPTING_NEW_SUBS = True
+ACCEPTING_NEW_SUBS = False
 LINK_REGEX = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
 REDDIT_LINK_REGEX = r'r/([a-zA-Z0-9_]*)/comments/([a-z0-9_]*)/([a-zA-Z0-9_]{0,50})'
 RESPONSE_TAIL = ""
@@ -134,7 +134,7 @@ class CountedStatus(Enum):
     FLAIR_EXEMPT = 12
     FLAIR_NOT_EXEMPT = 13
     TITLE_KW_EXEMPT = 14
-    TITLE_KW_NOT_EXEMPT = 15
+    TITLE_CRITERIA_NOT_MET = 15
     MODPOST_EXEMPT = 16
     GRACE_PERIOD_EXEMPT = 17
     FLAIR_HELPER = 18
@@ -710,8 +710,10 @@ class TrackedSubreddit(Base):
         #self.active_status = 20
         self.subreddit_mods = self.get_mods_list(subreddit_handle=self.api_handle)
 
-        if force_update or self.settings_yaml_txt is None or self.settings_yaml is None:
+        if force_update or  self.settings_yaml is None:
             active_status, return_text = self.update_access()
+            if not self.settings_yaml:
+                return False, f"Error: {return_text}"
         else:
             return_text = str(self.active_status)
 
@@ -730,9 +732,9 @@ class TrackedSubreddit(Base):
         # if self.settings_yaml is None:
         #    return False, "I couldn't get settings from the wiki for some reason :/"
 
-        if 'save_text' in self.settings_yaml:
-            self.save_text = self.settings_yaml['save_text']
-            # print(self.save_text)
+        #if 'save_text' in hasattr(self.settings_yaml, 'save_text'):
+        #    self.save_text = self.settings_yaml['save_text']
+        #    # print(self.save_text)
 
         if 'post_restriction' in self.settings_yaml:
             pr_settings = self.settings_yaml['post_restriction']
@@ -1163,23 +1165,49 @@ class PostingGroup:
         self.subreddit_name = subreddit_name
         self.posts = posts
 
-def look_for_rule_violations2(do_cleanup: bool = False, subs_to_update = None):
+def look_for_rule_violations2(intensity = 0, subs_to_update = None):
     global REDDIT_CLIENT
     global WATCHED_SUBS
     logger.debug("querying recent post(s)")
 
+    posting_groups = []
+
+    if intensity == 1 :
+        left_over_posts = s.query(SubmittedPost).filter(SubmittedPost.reviewed == 0,
+                                                        SubmittedPost.review_debug.isnot(None)).all()
+        for post in left_over_posts:
+            assert isinstance(post, SubmittedPost)
+            print(f"adding leftover post {post.id} ")
+            post_ids = post.review_debug.split(',')
+            posts = []
+            for post_id in post_ids:
+                posts.append(s.query(SubmittedPost).get(post_id))
+            posting_groups.append(
+                PostingGroup(author_name=post.author, subreddit_name=post.subreddit_name, posts=posts))
 
 
-    faster_statement = "select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status from RedditPost t inner join TrackedSubs s on t.subreddit_name = s.subreddit_name where s.active_status >3 and counted_status <2 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 72 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
+    faster_statement = "select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status from RedditPost t inner join TrackedSubs s on t.subreddit_name = s.subreddit_name where s.active_status >3 and counted_status <2 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 48 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
     more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status >3 and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
 
-    if subs_to_update and not do_cleanup:
+
+    if subs_to_update and intensity <5:
         sub_list = str(subs_to_update).replace("[", "(").replace("]", ")")
-        faster_statement = f"select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status from RedditPost t inner join TrackedSubs s on t.subreddit_name = s.subreddit_name where s.subreddit_name IN {sub_list} and s.active_status >3 and counted_status <2 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 72 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
-        #faster_statement = f"SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.subreddit_name in {sub_list} and s.active_status >3 and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
+        faster_statement = f"select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status from RedditPost t inner join TrackedSubs s on t.subreddit_name = s.subreddit_name where s.subreddit_name IN {sub_list} and s.active_status >3 and counted_status <2 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 48 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
+        #faster_statement = f"SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.subreddit_name in {sub_list} and s.active_status >3 and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 48 HOUR AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
+
+    search_back=48
+    if len(posting_groups)  <5:
+        search_back=72
+    if len(posting_groups)  >100:
+        search_back = 24
+
+
+    faster_statement = faster_statement.replace('48', str(search_back))
+    more_accurate_statement = more_accurate_statement.replace('48', str(search_back))
+
 
     tick = datetime.now()
-    if do_cleanup:
+    if intensity == 5:
         print("doing more accurate")
         rs = s.execute(more_accurate_statement)
     else:
@@ -1189,7 +1217,7 @@ def look_for_rule_violations2(do_cleanup: bool = False, subs_to_update = None):
 
 
 
-    posting_groups=[]
+    #posting_groups=[]
     for row in rs:
         print(row[0], row[1], row[2], row[3], row[4])
         post_ids = row[1].split(',')
@@ -1201,24 +1229,29 @@ def look_for_rule_violations2(do_cleanup: bool = False, subs_to_update = None):
         # post = s.query(SubmittedPost).get(row[0])
         # predecessors = row[1].split(',')
         # predecessors_times = row[2].split(',')
-        posting_groups.append(PostingGroup(author_name=row[3], subreddit_name=row[4].lower(), posts=posts))
+
         last_post = posts[-1]
         assert isinstance(last_post,SubmittedPost)
-        last_post.review_debug = row[1]
-        s.add(last_post)
+        if not last_post.review_debug:
+            posting_groups.append(PostingGroup(author_name=row[3], subreddit_name=row[4].lower(), posts=posts))
+            last_post.review_debug = row[1]
+            s.add(last_post)
+        else:
+            print(f"skipped {last_post.id}--already need to check")
     s.commit()
 
     print(f"Total found: {len(posting_groups)}")
     tick = datetime.now(pytz.utc)
 
+    posting_groups.sort(key=lambda y: y.posts[-1].id, reverse=True)
     # Go through posting group
     for i, pg in enumerate(posting_groups):
-        print(f"========================{i+1}/{len(posting_groups)}=================================")
+        print(f"========================{i+1}/{len(posting_groups)}============{search_back}=====================")
 
 
         # Break if taking too long
         tock = datetime.now(pytz.utc) - tick
-        if tock > timedelta(minutes=5) and do_cleanup is False:
+        if tock > timedelta(minutes=5) and intensity==0:
             logger.debug("Aborting, taking more than 5 min")
             s.commit()
             break
@@ -2350,7 +2383,7 @@ def update_list_with_subreddit(subreddit_name: str, request_update_if_needed=Fal
 
 
 def purge_old_records():
-    purge_statement = "delete t  from RedditPost t inner join TrackedSubs s on t.subreddit_name = s.subreddit_name where  t.time_utc  < utc_timestamp() - INTERVAL greatest(s.min_post_interval_mins, 60*24*14) MINUTE  and t.flagged_duplicate=0 and t.pre_duplicate=0"
+    purge_statement = "delete t  from RedditPost t inner join TrackedSubs s on t.subreddit_name = s.subreddit_name where  t.time_utc  < utc_timestamp() - INTERVAL greatest(s.min_post_interval_mins, 60*24*10) MINUTE  and t.flagged_duplicate=0 and t.pre_duplicate=0"
     _ = s.execute(purge_statement)
 
 
@@ -2369,11 +2402,11 @@ def purge_old_records_by_subreddit(tr_sub: TrackedSubreddit):
     s.commit()
 
 
-def check_new_submissions(query_limit=800, sub_list='mod', quick_mode=True):
+def check_new_submissions(query_limit=800, sub_list='mod', intensity=0):
     global REDDIT_CLIENT
     subreddit_names = []
     subreddit_names_complete = []
-    logger.info(f"pulling new posts!  quickmode: {quick_mode}")
+    logger.info(f"pulling new posts!  intensity: {intensity}")
 
     possible_new_posts = [a for a in REDDIT_CLIENT.subreddit(sub_list).new(limit=query_limit)]
 
@@ -2381,7 +2414,7 @@ def check_new_submissions(query_limit=800, sub_list='mod', quick_mode=True):
     for post_to_review in possible_new_posts:
 
         subreddit_name = str(post_to_review.subreddit).lower()
-        if quick_mode and subreddit_name in subreddit_names_complete:
+        if intensity==0 and subreddit_name in subreddit_names_complete:
             # print(f'done w/ {subreddit_name}')
             continue
         previous_post: SubmittedPost = s.query(SubmittedPost).get(post_to_review.id)
@@ -2400,7 +2433,7 @@ def check_new_submissions(query_limit=800, sub_list='mod', quick_mode=True):
     return subreddit_names
 
 
-def check_spam_submissions(sub_list='mod'):
+def check_spam_submissions(sub_list='mod', intensity=0):
     global REDDIT_CLIENT
     possible_spam_posts = []
     try:
@@ -2409,7 +2442,7 @@ def check_spam_submissions(sub_list='mod'):
         pass
     for post_to_review in possible_spam_posts:
         previous_post: SubmittedPost = s.query(SubmittedPost).get(post_to_review.id)
-        if previous_post:
+        if previous_post and intensity==0:
             break
         if not previous_post:
             post = SubmittedPost(post_to_review)
@@ -2788,8 +2821,10 @@ def task_loop():
     if len(tasks) ==0:
         pass
         # s.add(Task())
+        # s.add(Task())
         # task list:
-            # update all subs
+            # pull new posts
+            # pull spam posts
             #
     for task in tasks:
         if not task.last_ran or (task.last_ran + datetime.timedelta(
@@ -2851,17 +2886,20 @@ def main_loop():
             chunked_list = [ACTIVE_SUB_LIST[j:j + chunk_size] for j in range(0, len(ACTIVE_SUB_LIST), chunk_size)]
 
             updated_subs = []
+
             for sub_list in chunked_list:
                 sub_list_str = "+".join(sub_list)
                 print(len(sub_list_str), sub_list_str)
-                updated_subs += check_new_submissions(sub_list=sub_list_str, quick_mode=quick_mode)
-                check_spam_submissions(sub_list=sub_list_str)
+                updated_subs += check_new_submissions(sub_list=sub_list_str, intensity=0)
+                check_spam_submissions(sub_list=sub_list_str, intensity=0)
 
             if intensity == 1:
                 updated_subs = None
 
             start = datetime.now(pytz.utc)
-            look_for_rule_violations2(do_cleanup=(i % 15 == 0), subs_to_update=updated_subs)  # uses a lot of resources
+            if i % 15 == 0:
+                intensity = 5
+            look_for_rule_violations2(intensity = intensity, subs_to_update=updated_subs)  # uses a lot of resources
             print("$$$checking rule violations took this long", datetime.now(pytz.utc) - start)
 
             if i % 75 == 0:
@@ -2893,9 +2931,10 @@ def main_loop():
                 calculate_stats()
 
 
-        except prawcore.exceptions.ServerError:
+        except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException):
             import time
-            time.sleep(60*5)  # sleep for a bit server errors
+            print("sleeping due to server error")
+            time.sleep(60*60*5)  # sleep for a bit server errors
         except Exception as e:
             import traceback
             trace = traceback.format_exc()
