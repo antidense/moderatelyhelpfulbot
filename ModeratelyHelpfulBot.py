@@ -52,7 +52,9 @@ MAIN_SETTINGS = dict()
 WATCHED_SUBS = dict()
 SUBWIKI_CHECK_INTERVAL_HRS = 24
 UPDATE_LIST = True
-
+ACTIVE_SUB_LIST = []
+NEW_SUBMISSION_Q = queue.Queue()
+SPAM_SUBMISSION_Q = queue.Queue()
 DEFAULT_CONFIG = """---
 ###### If you edit this page, you must [click this link, then click "send"](https://old.reddit.com/message/compose?to=moderatelyhelpfulbot&subject=subredditname&message=update) to have the bot update
 ######https://www.reddit.com/r/moderatelyhelpfulbot/wiki/index
@@ -80,13 +82,16 @@ modmail:
 """
 
 
-NAFMC = "Per our rules, contacting minors while having a history of NSFW comments and/or posts is a bannable offense.  " \
-        "Your account was reviewed by a mod team and determined to be non-compliant with our rules."
+NAFMC = "Per our rules, contacting users less than 18 years old while having a history of NSFW comments and/or posts " \
+        "is a bannable offense. Your account was reviewed by a mod team and determined to be non-compliant with our rules."
 
 NAFSC = "Per recent community feedback, we are temp banning anyone with a history that is more than " \
-        "80% NSFW to protect minors and reduce sexual harassment in our subreddit.  " \
+        "80% NSFW to protect minors (users younger than 18) and reduce sexual harassment in our subreddit.  " \
         "Please get this down if you wish to continue to participate here. " \
         "Your score is currently {NSFWPCT}% and is recalculated weekly."
+
+NAFBS = "It appears you have content on your profile from certain subreddits that we feel are incompatible " \
+        "with searching for platonic frienships. See https://www.reddit.com/r/Needafriend/wiki/banned_subs"
 
 NAFCF = f"Per our rules, catfishing -- identifying as different ages in different posts -- is a bannable offense."
 
@@ -362,12 +367,14 @@ class SubmittedPost(Base):
 
         self.age = get_age(self.title)
         tr_sub: TrackedSubreddit = s.query(TrackedSubreddit).get(self.subreddit_name)
+        assert isinstance(tr_sub, TrackedSubreddit)
         if tr_sub and tr_sub.nsfw_pct_moderation:
 
             # Check the post author for nsfw_pct (if requested)
             post_author: TrackedAuthor = s.query(TrackedAuthor).get(self.author)
             if not post_author:
                 post_author = TrackedAuthor(self.author)
+            assert isinstance(post_author, TrackedAuthor)
             if post_author.nsfw_pct == -1 or not post_author.last_calculated \
                     or post_author.last_calculated.replace(tzinfo=timezone.utc) < \
                     (datetime.now(pytz.utc) - timedelta(days=7)):
@@ -393,13 +400,24 @@ class SubmittedPost(Base):
                         ban_message = NAFSC.replace("{NSFWPCT}", f"{post_author.nsfw_pct:.2f}")
                         ban_note = f"Having >80% NSFW ({post_author.nsfw_pct:.2f}%)"
                         REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                            post_author.author_name, note=ban_note, ban_message=ban_message, duration=tr_sub.nsfw_pct_ban_duration_days
+                            post_author.author_name, note=ban_note, ban_message=ban_message, duration=tr_sub.nsfw_ban_duration_days
                         )
                 if post_author.has_banned_subs_activity:
                     self.mod_remove()
                     TrackedSubreddit.get_subreddit_by_name(BOT_NAME).send_modmail(
                         subject="[Notification] MHB post removed for  banned subs",
-                        body=f"{self.get_comments_url()}")
+                        body=f"post: {self.get_comments_url()} \n "
+                             f"author name: {post.author.author_name} \n"
+                             f"author activity: /u/{post_author.sub_counts} \n"
+                    )
+
+                    ban_message = "Your account is in violation of rule #11: " \
+                                  " https://www.reddit.com/r/Needafriend/about/rules/" \
+                                  "If this ban is in error, please contact the moderators."
+                    ban_note = f"Banned subs activity"
+                    REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
+                        post_author.author_name, note=ban_note, ban_message=ban_message,
+                        duration=tr_sub.nsfw_pct_ban_duration_days)
                 s.add(post_author)
 
 
@@ -1161,7 +1179,8 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
     return CountedStatus.COUNTS, "no exemptions"
 
 class PostingGroup:
-    def __init__(self, author_name=None, subreddit_name=None, posts=None):
+    def __init__(self, latest_post_id, author_name=None, subreddit_name=None, posts=None):
+        self.latest_post_id = latest_post_id
         self.author_name=author_name
         self.subreddit_name = subreddit_name
         self.posts = posts
@@ -1187,7 +1206,7 @@ def look_for_rule_violations2(intensity = 0, subs_to_update = None):
             for post_id in post_ids:
                 posts.append(s.query(SubmittedPost).get(post_id))
             posting_groups.append(
-                PostingGroup(author_name=post.author, subreddit_name=post.subreddit_name, posts=posts))
+                PostingGroup(post.id, author_name=post.author, subreddit_name=post.subreddit_name, posts=posts))
 
 
     faster_statement = "select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status from RedditPost t inner join TrackedSubs s on t.subreddit_name = s.subreddit_name where s.active_status >3 and counted_status <2 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 48 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
@@ -1238,7 +1257,7 @@ def look_for_rule_violations2(intensity = 0, subs_to_update = None):
         last_post = posts[-1]
         assert isinstance(last_post,SubmittedPost)
         if not last_post.review_debug:
-            posting_groups.append(PostingGroup(author_name=row[3], subreddit_name=row[4].lower(), posts=posts))
+            posting_groups.append(PostingGroup(last_post.id, author_name=row[3], subreddit_name=row[4].lower(), posts=posts))
             last_post.review_debug = row[1]
             s.add(last_post)
         else:
@@ -1248,7 +1267,7 @@ def look_for_rule_violations2(intensity = 0, subs_to_update = None):
     print(f"Total found: {len(posting_groups)}")
     tick = datetime.now(pytz.utc)
 
-    posting_groups.sort(key=lambda y: y.posts[-1].id, reverse=True)
+    posting_groups.sort(key=lambda y: y.latest_post_id, reverse=True)
     # Go through posting group
     for i, pg in enumerate(posting_groups):
         print(f"========================{i+1}/{len(posting_groups)}============{search_back}=====================")
@@ -1264,7 +1283,7 @@ def look_for_rule_violations2(intensity = 0, subs_to_update = None):
         # Load subreddit settings
         tr_sub = update_list_with_subreddit(pg.subreddit_name, request_update_if_needed=True)
         max_count = tr_sub.max_count_per_interval
-        if tr_sub.active_status < 3:
+        if tr_sub.active_status < 6:
             continue
 
 
@@ -1285,7 +1304,8 @@ def look_for_rule_violations2(intensity = 0, subs_to_update = None):
                     f"{i}-{j}\t\tAlready handled")
                 continue
             # Check for soft blacklist
-            if subreddit_author and post.time_utc < subreddit_author.next_eligible:
+            if subreddit_author and subreddit_author.next_eligible and post.time_utc\
+                and post.time_utc < subreddit_author.next_eligible:
 
                 logger.info(
                     f"{i}-{j}\t\tpost removed - prior to eligibility")
@@ -2507,7 +2527,7 @@ def look_for_rule_violations_db(intensity = 0):  # requires db -> memory
         last_post = posts[-1]
         assert isinstance(last_post,SubmittedPost)
         if not last_post.review_debug:
-            posting_groups.append(PostingGroup(author_name=row[3], subreddit_name=row[4].lower(), posts=posts))
+            posting_groups.append(PostingGroup(last_post.id, author_name=row[3], subreddit_name=row[4].lower(), posts=posts))
             last_post.review_debug = row[1]
             s.add(last_post)
         else:
@@ -2994,31 +3014,49 @@ def nsfw_checking():  # Does not expand comments
                                     f"&subject={post.subreddit_name}" \
                                     f"&message="
 
-                        ban_mc_link = f"{smart_link}$ban {author_name} 999 {NAFMC}".replace(" ", "%20")
-                        ban_sc_link = f"{smart_link}$ban {author_name} 30 {NAFSC}".replace("{NSFWPCT}",
-                                                                                        str(int(author.nsfw_pct)))
-                        ban_cf_link = f"{smart_link}$ban {author_name} 999 {NAFCF}"
+                        has_bs_activity = author.has_banned_subs_activity if hasattr(author,
+                                                                                    'has_banned_subs_activity') else "unknown"
 
-                        response = f"Author very nsfw: http://www.reddit.com/u/{author_name} . " \
-                                f"Commented on: {post.get_comments_url()} \n\n. " \
-                                f"Link to comment: {comment_url} \n\n. " \
-                                f"Poster's age {op_age}. Commenter's age {author.age} \n\n" \
-                                f"Has nsfw post? {author.has_nsfw_post} \n\n" \
-                                f"Comment text: {c.body} \n\n" \
-                                f"Sub activity: {sub_counts} \n\n" \
-                                f"[$ban-sc (ban for sexual content)]({ban_sc_link}) | " \
-                                f"[$ban-mc (ban for minor contact)]({ban_mc_link}) | " \
-                                f"[$ban-cf (ban for catfishing)]({ban_cf_link}) | "
+                        if has_bs_activity and author.nsfw_pct and author.nsfw_pct > tr_sub.nsfw_pct_threshold:
+                            ban_note = f"{author.author_name} has activity on watched sub \n\n " \
+                                       f"{author.sub_counts} and was banned"
 
-                        subject = f"[Notification] Found this potential predator {author_name} score={int(author.nsfw_pct)}"
-                        print(response)
-                        try:
-                            c.mod.remove()
-                        except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
-                            pass
-                        tr_sub.send_modmail(subject=subject, body=response)
+                            tr_sub.get_api_handle().banned.add(
+                                author.author_name, note="activity on banned subs", ban_message=NAFBS,
+                                duration=tr_sub.nsfw_pct_ban_duration_days)
+                            tr_sub.send_modmail(body=ban_note)
 
-                        REDDIT_CLIENT.redditor(BOT_OWNER).message(subject, response)
+                        else:
+                            ban_mc_link = f"{smart_link}$ban {author_name} 999 {NAFMC}".replace(" ", "%20")
+                            ban_sc_link = f"{smart_link}$ban {author_name} 30 {NAFSC}".replace("{NSFWPCT}",
+                                                                                            str(int(author.nsfw_pct)))
+                            ban_cf_link = f"{smart_link}$ban {author_name} 999 {NAFCF}"
+                            ban_bs_link = f"{smart_link}$ban {author_name} 30 {NAFBS}"
+
+
+
+                            response = f"Author very nsfw: http://www.reddit.com/u/{author_name} . " \
+                                    f"Commented on: {post.get_comments_url()} \n\n. " \
+                                    f"Link to comment: {comment_url} \n\n. " \
+                                    f"Has activity on banned subs?: {has_bs_activity} \n\n. " \
+                                    f"Poster's age {op_age}. Commenter's age {author.age} \n\n" \
+                                    f"Has nsfw post? {author.has_nsfw_post} \n\n" \
+                                    f"Comment text: {c.body} \n\n" \
+                                    f"Sub activity: {sub_counts} \n\n" \
+                                    f"[$ban-sc (ban for sexual content)]({ban_sc_link}) | " \
+                                    f"[$ban-mc (ban for minor contact)]({ban_mc_link}) | " \
+                                    f"[$ban-sb (ban for subreddit history)]({ban_bs_link}) | " \
+                                    f"[$ban-cf (ban for catfishing)]({ban_cf_link}) | "
+
+                            subject = f"[Notification] Found this potential predator {author_name} score={int(author.nsfw_pct)}"
+                            print(response)
+                            try:
+                                c.mod.remove()
+                            except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
+                                pass
+                            tr_sub.send_modmail(subject=subject, body=response)
+
+                            REDDIT_CLIENT.redditor(BOT_OWNER).message(subject, response)
                     record_actioned(f"comment-{c.id}")
         post.nsfw_repliers_checked = True
         post.nsfw_last_checked = datetime.now(pytz.utc)
@@ -3196,7 +3234,7 @@ def main_loop():
         i += 1
         print('start_loop')
 
-        intensity = 1 if (i - 1) % 5 == 0 else 0
+        intensity = 1 if (i - 1) % 15 == 0 else 0
 
 
         #First: Update sub list:
@@ -3207,7 +3245,7 @@ def main_loop():
 
         try:
             # Gather posts
-            chunk_size = 50 if intensity == 1 else 300
+            chunk_size = 200 if intensity == 1 else 300
             chunked_list = [ACTIVE_SUB_LIST[j:j + chunk_size] for j in range(0, len(ACTIVE_SUB_LIST), chunk_size)]
 
             updated_subs = []
@@ -3259,7 +3297,7 @@ def main_loop():
         except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException):
             import time
             print("sleeping due to server error")
-            time.sleep(60*60*5)  # sleep for a bit server errors
+            time.sleep(60*5)  # sleep for a bit server errors
         except Exception as e:
             import traceback
             trace = traceback.format_exc()
