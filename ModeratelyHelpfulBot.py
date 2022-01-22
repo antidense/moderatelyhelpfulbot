@@ -86,12 +86,12 @@ NAFMC = "Per our rules, contacting users less than 18 years old while having a h
         "is a bannable offense. Your account was reviewed by a mod team and determined to be non-compliant with our rules."
 
 NAFSC = "Per recent community feedback, we are temp banning anyone with a history that is more than " \
-        "80% NSFW to protect minors (users younger than 18) and reduce sexual harassment in our subreddit.  " \
+        "80% NSFW to protect users younger than 18 and reduce sexual harassment in our subreddit.  " \
         "Please get this down if you wish to continue to participate here. " \
         "Your score is currently {NSFWPCT}% and is recalculated weekly."
 
 NAFBS = "It appears you have content on your profile from certain subreddits that we feel are incompatible " \
-        "with searching for platonic frienships. See https://www.reddit.com/r/Needafriend/wiki/banned_subs"
+        "with searching for platonic friendships. See https://www.reddit.com/r/Needafriend/wiki/banned_subs"
 
 NAFCF = f"Per our rules, catfishing -- identifying as different ages in different posts -- is a bannable offense."
 
@@ -365,6 +365,7 @@ class SubmittedPost(Base):
         self.nsfw_repliers_checked = False
 
 
+
         self.age = get_age(self.title)
         tr_sub: TrackedSubreddit = s.query(TrackedSubreddit).get(self.subreddit_name)
         assert isinstance(tr_sub, TrackedSubreddit)
@@ -400,7 +401,7 @@ class SubmittedPost(Base):
                         ban_message = NAFSC.replace("{NSFWPCT}", f"{post_author.nsfw_pct:.2f}")
                         ban_note = f"Having >80% NSFW ({post_author.nsfw_pct:.2f}%)"
                         REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
-                            post_author.author_name, note=ban_note, ban_message=ban_message, duration=tr_sub.nsfw_ban_duration_days
+                            post_author.author_name, note=ban_note, ban_message=ban_message, duration=tr_sub.nsfw_pct_ban_duration_days
                         )
                 if post_author.has_banned_subs_activity:
                     self.mod_remove()
@@ -648,7 +649,8 @@ class TrackedSubreddit(Base):
     nsfw_instaban_subs = None
 
     nsfw_pct_instant_ban = False
-    nsfw_ban_duration_days = 0
+    #nsfw_ban_duration_days = 0
+    nsfw_pct_ban_duration_days = -1
     nsfw_pct_moderation = False
     nsfw_pct_threshold = 80
     #enforce_nsfw_checking = False
@@ -1270,12 +1272,12 @@ def look_for_rule_violations2(intensity = 0, subs_to_update = None):
     posting_groups.sort(key=lambda y: y.latest_post_id, reverse=True)
     # Go through posting group
     for i, pg in enumerate(posting_groups):
-        print(f"========================{i+1}/{len(posting_groups)}============{search_back}=====================")
+        print(f"========================{i+1}/{len(posting_groups)}============{search_back}======={intensity}==============")
 
 
         # Break if taking too long
         tock = datetime.now(pytz.utc) - tick
-        if tock > timedelta(minutes=5) and intensity==0:
+        if tock > timedelta(minutes=5) and intensity<5:
             logger.debug("Aborting, taking more than 5 min")
             s.commit()
             break
@@ -1284,6 +1286,7 @@ def look_for_rule_violations2(intensity = 0, subs_to_update = None):
         tr_sub = update_list_with_subreddit(pg.subreddit_name, request_update_if_needed=True)
         max_count = tr_sub.max_count_per_interval
         if tr_sub.active_status < 6:
+            logger.debug(f"Subreddit is not active {tr_sub.subreddit_name} {tr_sub.active_status}")
             continue
 
 
@@ -1331,6 +1334,8 @@ def look_for_rule_violations2(intensity = 0, subs_to_update = None):
                 logger.info(f"\t\tpost status: {counted_status} {result}")
                 if counted_status == CountedStatus.COUNTS:
                     left_over_posts.append(post)
+                if i%25 ==0:
+                    s.commit()
 
             else:
                 logger.info(f"{i}-{j}\t\tpost status: "
@@ -1832,9 +1837,14 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
 
         ban_reason = " ".join(parameters[2:]) if parameters and len(parameters) >= 2 else None
         ban_note = "ModhelpfulBot: per modmail command"
+        try:
+            ban_length = int(parameters[1]) if parameters and len(parameters) >= 2 else None
+            print(parameters, ban_length)
+            if ban_length>999 or ban_length<1:
+                return f"Invalid ban length: '{ban_length}'" , True
+        except ValueError:
+            return f"Invalid ban length: '{ban_length}'" , True
 
-        ban_length = int(parameters[1]) if parameters and len(parameters) >= 2 else None
-        print(parameters, ban_length)
 
         try:
             if ban_length == 999 or ban_length is None:
