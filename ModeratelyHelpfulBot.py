@@ -2,7 +2,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import List
-
 import humanize
 import iso8601
 import praw
@@ -21,6 +20,8 @@ from enum import Enum  # has to be at the end?
 import queue
 
 from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET, BOT_OWNER, DB_ENGINE
+from enums import *
+from static import *
 
 
 """
@@ -31,9 +32,6 @@ active status to an ENUM
 add non-binary gender
 """
 
-MINOR_KWS = []
-ASL_REGEX = r"((?P<age>[0-9]{2})([/ \\-]?|(\]? \[))(?P<g>[mMFf]{1}))|" \
-            r"((?P<g2>[mMFf]{1})([/ \\-]?|(\]? \[))(?P<age2>[0-9]{2}))"
 
 # Set up database
 engine = create_engine(DB_ENGINE)
@@ -42,110 +40,6 @@ Base = declarative_base(bind=engine)
 # Set up PRAW
 REDDIT_CLIENT = praw.Reddit(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, password=BOT_PW,
                             user_agent="ModeratelyHelpfulBot v0.4", username=BOT_NAME)
-
-# Set up some global variables
-ACCEPTING_NEW_SUBS = False
-LINK_REGEX = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
-REDDIT_LINK_REGEX = r'r/([a-zA-Z0-9_]*)/comments/([a-z0-9_]*)/([a-zA-Z0-9_]{0,50})'
-RESPONSE_TAIL = ""
-MAIN_SETTINGS = dict()
-WATCHED_SUBS = dict()
-SUBWIKI_CHECK_INTERVAL_HRS = 24
-UPDATE_LIST = True
-ACTIVE_SUB_LIST = []
-NEW_SUBMISSION_Q = queue.Queue()
-SPAM_SUBMISSION_Q = queue.Queue()
-DEFAULT_CONFIG = """---
-###### If you edit this page, you must [click this link, then click "send"](https://old.reddit.com/message/compose?to=moderatelyhelpfulbot&subject=subredditname&message=update) to have the bot update
-######https://www.reddit.com/r/moderatelyhelpfulbot/wiki/index
-
-###### [User Summary, click this link](https://www.reddit.com/message/compose?to=moderatelyhelpfulbot&subject=subredditname&message=$summary u/username) - Will show you the users posts
-
-###### [User Extra Post, click this link](https://www.reddit.com/message/compose?to=moderatelyhelpfulbot&subject=subredditname&message=$hallpass u/username)  - Will allow the user one extra post
-post_restriction: 
-    max_count_per_interval: 1
-    min_post_interval_hrs: 72
-    action: remove
-    ban_threshold_count: 5
-    ban_duration_days: ~
-    comment: "Hello and thank you for posting to {subreddit}! It seems you have previously posted {maxcount} submission within {interval}, so your post has been removed as per the post frequency rule.  If you believe your post has been removed by mistake please [message the moderators](https://old.reddit.com/message/compose?to=%2Fr%2F{subreddit}).\n"
-    distinguish: true
-    grace_period_mins: 60
-    ignore_AutoModerator_removed: true
-    ignore_moderator_removed: true
-    title_exempt_keyword: Modpost
-modmail: 
-    modmail_all_reply: ~
-    modmail_no_posts_reply: "Hello, and thank you for your message. I could not find any prior posts from you. If you have a particular question about a post, please reply with a link to the post!\n"
-    modmail_no_posts_reply_internal: false
-    modmail_posts_reply: ~
-"""
-
-
-NAFMC = "Per our rules, contacting users less than 18 years old while having a history of NSFW comments and/or posts " \
-        "is a bannable offense. Your account was reviewed by a mod team and determined to be non-compliant with our rules."
-
-NAFSC = "Per recent community feedback, we are temp banning anyone with a history that is more than " \
-        "80% NSFW to protect users younger than 18 and reduce sexual harassment in our subreddit.  " \
-        "Please get this down if you wish to continue to participate here. " \
-        "Your score is currently {NSFWPCT}% and is recalculated weekly."
-
-NAFBS = "It appears you have content on your profile from certain subreddits that we feel are incompatible " \
-        "with searching for platonic friendships. See https://www.reddit.com/r/Needafriend/wiki/banned_subs"
-
-NAFCF = f"Per our rules, catfishing -- identifying as different ages in different posts -- is a bannable offense."
-
-NSFW_SKIP_USERS = ["automoderator"]
-
-class PostedStatus(Enum):
-    SELF_DEL = "self-deleted"
-    UP = "up"
-    MOD_RM = "mod-removed"
-    AUTOMOD_RM = "AutoMod-removed"
-    MHB_RM = "MHB-removed"
-    BOT_RM = "Bot-removed"
-    SPAM_FLT = "Spam-filtered"
-    UNKNOWN = "Unknown status"
-    FH_RM = "Flair_Helper removed"
-
-
-
-class SubStatus(Enum):
-    UNKNOWN = 20
-    ACTIVE = 10
-    NO_BAN_ACCESS = 8
-    MHB_CONFIG_ERROR = 5
-    YAML_SYNTAX_OK = 4
-    YAML_SYNTAX_ERROR = 3
-    NO_CONFIG = 2
-    CONFIG_ACCESS_ERROR = 1
-    NO_MOD_PRIV = 0
-    SUB_GONE = -1
-    SUB_FORBIDDEN = -2
-
-class CountedStatus(Enum):
-    NOT_CHKD = -1   # include in search
-    PREV_EXEMPT = 0  # Previously the code for exemption, switched to 2
-    COUNTS = 1  # include in search
-    EXEMPTED = 2  # don't include in search  0 --> CHANGE to 2*****  no longer use, use more specific
-    BLKLIST = 3  # don't include in search
-    HALLPASS = 4  # don't include in search
-    FLAGGED = 5
-    SPAMMED_EXMPT = 6
-    AM_RM_EXEMPT = 7
-    MOD_RM_EXEMPT = 8
-    OC_EXEMPT = 9
-    SELF_EXEMPT = 10
-    LINK_EXEMPT = 11
-    FLAIR_EXEMPT = 12
-    FLAIR_NOT_EXEMPT = 13
-    TITLE_KW_EXEMPT = 14
-    TITLE_CRITERIA_NOT_MET = 15
-    MODPOST_EXEMPT = 16
-    GRACE_PERIOD_EXEMPT = 17
-    FLAIR_HELPER = 18
-    REMOVED = 20
-    BOT_SPAM = 30
 
 
 # For messaging subreddits that use bot
@@ -395,7 +289,9 @@ class SubmittedPost(Base):
                     self.mod_remove()
                     TrackedSubreddit.get_subreddit_by_name(BOT_NAME).send_modmail(
                         subject="[Notification] MHB post removed for high NSFW rating",
-                        body=f"{self.get_comments_url()}")
+                        body=f"post: {self.get_comments_url()} \n "
+                             f"author name: {self.author} \n"
+                             f"author activity: /u/{post_author.sub_counts} \n")
                     if tr_sub.nsfw_pct_instant_ban:
 
                         ban_message = NAFSC.replace("{NSFWPCT}", f"{post_author.nsfw_pct:.2f}")
@@ -408,12 +304,15 @@ class SubmittedPost(Base):
                     TrackedSubreddit.get_subreddit_by_name(BOT_NAME).send_modmail(
                         subject="[Notification] MHB post removed for  banned subs",
                         body=f"post: {self.get_comments_url()} \n "
-                             f"author name: {post.author.author_name} \n"
-                             f"author activity: /u/{post_author.sub_counts} \n"
+                             f"author name: {self.author} \n"
+                             f"author activity: {post_author.sub_counts} \n"
                     )
 
                     ban_message = "Your account is in violation of rule #11: " \
-                                  " https://www.reddit.com/r/Needafriend/about/rules/" \
+                                  " https://www.reddit.com/r/Needafriend/about/rules/. \n\n" \
+                                  f"Your activity: {post_author.sub_counts}. \n\n"  \
+                                  "To keep this sub as family-friendly as possible, we temporarily restrict accounts " \
+                                  "that have activity on certain NSFW subs. " \
                                   "If this ban is in error, please contact the moderators."
                     ban_note = f"Banned subs activity"
                     REDDIT_CLIENT.subreddit(tr_sub.subreddit_name).banned.add(
@@ -469,7 +368,7 @@ class SubmittedPost(Base):
             # first try to lock thread - useless to make a comment unless it's possible
             if lock_thread:
                 self.get_api_handle().mod.lock()
-            comment = self.get_api_handle().reply(response)
+            comment = self.get_api_handle().reply(body=response)
             if distinguish:
                 comment.mod.distinguish()
             if approve:
@@ -969,7 +868,7 @@ class TrackedSubreddit(Base):
             REDDIT_CLIENT.subreddit(self.subreddit_name).modmail(thread_id).reply(body, internal=true)
         else:
             try:
-                REDDIT_CLIENT.subreddit(self.subreddit_name).message(subject, body)
+                REDDIT_CLIENT.subreddit(self.subreddit_name).message(subject=subject, message=body)
             except (praw.exceptions.APIException, prawcore.exceptions.Forbidden, AttributeError):
                 logger.warning('something went wrong in sending modmail')
 
@@ -1199,7 +1098,11 @@ def look_for_rule_violations2(intensity = 0, subs_to_update = None):
 
     if intensity == 1 :
         left_over_posts = s.query(SubmittedPost).filter(SubmittedPost.reviewed == 0,
-                                                        SubmittedPost.review_debug.isnot(None)).all()
+                                                        SubmittedPost.review_debug.isnot(None),
+                                                        SubmittedPost.time_utc > datetime.now() - timedelta(hours=48)
+                                                        ).all()
+
+
         for post in left_over_posts:
             assert isinstance(post, SubmittedPost)
             print(f"adding leftover post {post.id} ")
@@ -1482,6 +1385,11 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
     if tr_sub.action == "remove":
         post_status = recent_post.get_posted_status()
         if post_status == PostedStatus.UP:
+            if recent_post.time_utc < datetime.now() - timedelta(hours=24):
+                recent_post.counted_status = CountedStatus.AGED_OUT
+                return
+
+
             try:
                 was_successful = recent_post.mod_remove()
                 recent_post.counted_status = CountedStatus.REMOVED
@@ -1552,8 +1460,10 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
             # tr_sub.ignore_AutoModerator_removed
 
             REDDIT_CLIENT.redditor(recent_post.author).message(
+                subject=
                 f"Beep! Boop! Please note that you are close approaching "
                 f"your posting limit for {recent_post.subreddit_name}",
+                message =
                 f"This subreddit (/r/{recent_post.subreddit_name}) only allows {tr_sub.max_count_per_interval} post(s) "
                 f"per {humanize.precisedelta(tr_sub.min_post_interval)}. "
                 f"This {'does NOT' if tr_sub.ignore_moderator_removed else 'DOES'} include mod-removed posts. "
@@ -1771,7 +1681,7 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
     print("asking for permission: {}, mod list: {}".format(requestor_name, ",".join(moderators)))
     if requestor_name is not None and requestor_name not in moderators and requestor_name != BOT_OWNER \
             and requestor_name != "[modmail]":
-        if subreddit_name is "subredditname":
+        if subreddit_name is "subredditname" or subreddit_name is "yoursubredditname":
             return "Please change 'subredditname' to the name of your subreddit so I know what subreddit you mean!", \
                    True
         return f"You do not have permission to do this. Are you sure you are a moderator of {subreddit_name}?\n\n " \
@@ -1795,7 +1705,7 @@ def handle_dm_command(subreddit_name: str, requestor_name, command, parameters, 
             try:
                 _ = author_handle.id  # force load actual username capitalization
                 author_param = author_handle.name
-            except prawcore.exceptions.NotFound:
+            except (prawcore.exceptions.NotFound, AttributeError):
                 pass
 
         if command == 'summary':
@@ -2029,7 +1939,7 @@ def handle_direct_messages():
                 tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name)
                 if tr_sub and tr_sub.modmail_posts_reply and message.author:
                     try:
-                        message.reply(tr_sub.get_author_summary(message.author.name))
+                        message.reply(body=tr_sub.get_author_summary(message.author.name))
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
         # Respond to an invitation to moderate
@@ -2047,7 +1957,7 @@ def handle_direct_messages():
             if tr_sub and thread_id:
                 tr_sub.send_modmail(body=response[:9999], thread_id=thread_id)
             else:
-                message.reply(response[:9999])
+                message.reply(body=response[:9999])
             bot_owner_message = f"subreddit: {subreddit_name}\n\n" \
                                 f"requestor: {requestor_name}\n\n" \
                                 f"command: {command}\n\n"  \
@@ -2064,7 +1974,7 @@ def handle_direct_messages():
                 # ignore profanity
                 if "fuck" in message.body:
                     continue
-                message.reply("Hi, thank you for messaging me! "
+                message.reply(body="Hi, thank you for messaging me! "
                               "I am a non-sentient bot, and I act only in the accordance of the rules set by the "
                               "moderators "
                               "of the subreddit. Unfortunately, I am unable to answer or direct requests. Please "
@@ -2097,10 +2007,10 @@ def mod_mail_invitation_to_moderate(message):
         try:
             sub.mod.accept_invite()
         except praw.exceptions.APIException:
-            message.reply("Error: Invite message has been rescinded? or already accepted?")
+            message.reply(body="Error: Invite message has been rescinded? or already accepted?")
             message.mark_read()
 
-        message.reply(f"Hi, thank you for inviting me!  I will start working now. Please make sure I have a config. "
+        message.reply(body=f"Hi, thank you for inviting me!  I will start working now. Please make sure I have a config. "
                       f"I will try to create one at https://www.reddit.com/r/{subreddit_name}/wiki/{BOT_NAME} . "
                       f"You may need to create it. You can find examples at "
                       f"https://www.reddit.com/r/{BOT_NAME}/wiki/index . ")
@@ -2123,7 +2033,7 @@ def mod_mail_invitation_to_moderate(message):
             tr_sub.active_status = SubStatus.CONFIG_ACCESS_ERROR.value
             s.add(tr_sub)
     else:
-        message.reply(f"Invitation received. Please wait for approval by bot owner. In the mean time, "
+        message.reply(body=f"Invitation received. Please wait for approval by bot owner. In the mean time, "
                       f"you may create a config at https://www.reddit.com/r/{subreddit_name}/wiki/{BOT_NAME} .")
     message.mark_read()
 
@@ -2298,7 +2208,8 @@ def handle_modmail_message(convo):
                         f"[$unban {initiating_author_name}]({smart_link}$unban {initiating_author_name}) | "
                         f"[$approve {last_post.id}]({smart_link}$approve {last_post.id}) | "
                         f"[$remove {last_post.id}]({smart_link}$remove {last_post.id}) | "
-                        f"\n\nPlease subscribe to /r/ModeratelyHelpfulBot for updates\n\n", None,
+                        f"\n\nDO NOT CLICK ON LinkedIn LINKS OR URL shorteners - they have been used to doxx moderators."
+                        f"\n\nPlease subscribe to /r/ModeratelyHelpfulBot for updates.\n\n", None,
                         post_list=recent_posts)
 
                     response_internal = True
@@ -2327,10 +2238,11 @@ def handle_modmail_message(convo):
                 response, response_internal = handle_dm_command(subreddit_name, last_author_name, command,
                                                                 body_parts[1:])
             #Catch messages that weren't meant to be internal
+            """  doesn't work anymore?
             elif convo.num_messages > 2 and convo.messages[-2].author.name == BOT_NAME and last_message.is_internal:
                 if not check_actioned(f"ic-{convo.id}") and tr_sub.modmail_notify_replied_internal:
                     response = "Hey sorry to bug you, but was this last message not meant to be moderator-only?  " \
-                               f"https://mod.reddit.com/mail/-/{convo.id} \n\n" \
+                               f"https://mod.reddit.com/mail/perma/{convo.id} \n\n" \
                                "Set `modmail_notify_replied_internal: false` to disable this message"
 
                     response_internal = True
@@ -2339,9 +2251,10 @@ def handle_modmail_message(convo):
                         subject="[Notification] Possible moderator-only reply not meant to be moderator-only",
                         body=response)
                     response = None
+            """
     if response:
         try:
-            convo.reply(tr_sub.populate_tags2(response[0:9999], recent_post=last_post), internal=response_internal)
+            convo.reply(body=tr_sub.populate_tags2(response[0:9999], recent_post=last_post), internal=response_internal)
 
             bot_owner_message = f"subreddit: {subreddit_name}\n\nresponse:\n\n{response}\n\n" \
                                 f"https://mod.reddit.com/mail/all/{convo.id}"[0:9999]
@@ -2928,7 +2841,7 @@ def nsfw_checking():  # Does not expand comments
             except (praw.exceptions.APIException, prawcore.exceptions.Forbidden, ):
                 pass
             try:
-                REDDIT_CLIENT.redditor(post.author).message("Strict SFW Mode", warning_message)
+                REDDIT_CLIENT.redditor(post.author).message(subject="Strict SFW Mode", message=warning_message)
                 dms_disabled = "NOT DISABLED"
             except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                 dms_disabled = "disabled"
@@ -3019,7 +2932,7 @@ def nsfw_checking():  # Does not expand comments
                         )
 
                     if tr_sub.modmail_receive_potential_predator_modmail:
-                        comment_url = f"https://www.reddit.com/r/{post.subreddit_name}/comments/{post.id}/-/{c.id}"
+                        comment_url = f"https://www.reddit.com/r/{post.subreddit_name}/comments/{post.id}/perma/{c.id}"
                         smart_link = f"https://old.reddit.com/message/compose?to={BOT_NAME}" \
                                     f"&subject={post.subreddit_name}" \
                                     f"&message="
@@ -3287,9 +3200,9 @@ def main_loop():
                 print("$updating top posts", datetime.now(pytz.utc) - start)
                 update_common_posts('nostalgia')
 
-            if i % 70 == 0:
-                print("$Looking for botspam posts", datetime.now(pytz.utc) - start)
-                check_common_posts(['nostalgia'])
+            #if i % 70 == 0:
+            #    print("$Looking for botspam posts", datetime.now(pytz.utc) - start)
+            #    check_common_posts(['nostalgia'])
 
 
 
