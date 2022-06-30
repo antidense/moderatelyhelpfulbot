@@ -11,17 +11,19 @@ from enums import SubStatus, PostedStatus
 from models.reddit_models import SubmittedPost, TrackedSubreddit, TrackedAuthor
 
 from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET
+from typing import List
 
 # Set up PRAW
 
 class RedditInterface:
-
+    bot_sub = None
     reddit_client = None
 
     def __init__(self):
         self.reddit_client = praw.Reddit(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, password=BOT_PW,
                                     user_agent="ModeratelyHelpfulBot v0.4", username=BOT_NAME)
 
+    '''SUBMISSION STUFF'''
     def get_submission_api_handle(self, submission: SubmittedPost) -> praw.models.Submission:
         if not submission.api_handle:
             submission.api_handle = self.reddit_client.submission(id=submission.id)
@@ -98,7 +100,7 @@ class RedditInterface:
             logger.warning(f'Something with replying to this post:: http://redd.it/{submission.id}')
             return False
 
-
+    """REDDITOR STUFF"""
     def get_author_api_handle(self, author: TrackedAuthor) -> praw.models.Redditor:
         if not author.api_handle:
             author.api_handle = self.reddit_client.redditor(author.author_name)
@@ -106,7 +108,7 @@ class RedditInterface:
         else:
             return author.api_handle
 
-
+    """SUBREDDIT STUFF"""
     def get_subreddit_str_api_handle(self, subreddit_name) -> praw.models.Subreddit:
             return self.reddit_client.subreddit(subreddit_name)
 
@@ -122,31 +124,45 @@ class RedditInterface:
         print(f" si: {si}")
         return si
 
-    def get_subreddit_info(self, subreddit_name=None):
-        si = SubredditInfo(ri=self,  subreddit_name=subreddit_name)
-        print(f" si: {si}")
-        return si
-
+    def get_modmail_thread_id(self, subreddit_name=None):
+        for convo in self.reddit_client.subreddit(subreddit_name).modmail.conversations(state="mod", sort='unread', limit=30):
+            initiating_author_name = convo.authors[0].name  # praw query
+            #subreddit_name = convo.owner.display_name  # praw query
+            if initiating_author_name == BOT_NAME:
+                return convo.id
 
     def send_modmail(self, subreddit=None, subreddit_name=None, subject=f"[Notification] Message from {BOT_NAME}", body="Unspecified text",
                      thread_id=None, use_same_thread=False):
-        assert isinstance(subreddit, TrackedSubreddit)
-        if not thread_id and use_same_thread:
+        conversation = None
+        # assert isinstance(subreddit, TrackedSubreddit)
+        if subreddit_name == BOT_NAME:
+            subreddit = self.bot_sub
             thread_id = subreddit.mm_convo_id
+
+        if subreddit and not thread_id and use_same_thread:
+            thread_id = subreddit.mm_convo_id
+
+
         if not subreddit_name and subreddit:
             subreddit_name = subreddit.subreddit_name
         if thread_id:
-            self.reddit_client.subreddit(subreddit_name).modmail(thread_id).reply(body, internal=True)
+            conversation = self.reddit_client.subreddit(subreddit_name).modmail(thread_id).reply(body, internal=True)
         else:
             try:
-                self.reddit_client.subreddit(subreddit_name).message(subject=subject, message=body)
+                conversation = self.reddit_client.subreddit(subreddit_name).message(subject=subject, message=body)
+                if subreddit:
+                    subreddit.mm_convo_id = conversation.id  # won't get saved?
             except (praw.exceptions.APIException, prawcore.exceptions.Forbidden, AttributeError):
                 logger.warning('something went wrong in sending modmail')
+
+        return conversation
 
 
 
     def send_message(self, redditor, subject, message):
-        self.reddit_client.send_message(redditor=post.author, message=message, subject=subject)
+        if isinstance(redditor, str):
+            redditor = self.reddit_client.redditor(redditor)
+        redditor.message(message=message, subject=subject)
 
     def get_removed_explanation(self, submittedpost):
         if not submittedpost.bot_comment_id:
@@ -156,29 +172,39 @@ class RedditInterface:
             return comment.body
         else:
             return None
-    def get_mod_list(self, subreddit_name=None):
+    def get_mod_list(self, subreddit_name=None, subreddit=None) -> List[str]:
+        if subreddit and not subreddit_name:
+            subreddit_name = subreddit.subreddit_name
         try:
             return list(moderator.name for moderator in self.reddit_client.subreddit(subreddit_name).moderator())
         except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden):
             return None
 
 
-""" 
-class PostInfo:
-       self.id = submission.id
+
+class SubmissionInfo:
+    def __init__(self, submission):
+        subm_api_handle = None
+        # static
+        self.id = submission.id
         self.title = submission.title[0:190]
-        self.author = str(submission.author)
-        if save_text:
-            self.submission_text = submission.selftext[0:190]
+        self.submission_text = submission.selftext[0:190]
         self.time_utc = datetime.utcfromtimestamp(submission.created_utc)
         self.subreddit_name = str(submission.subreddit).lower()
         self.is_self = submission.is_self
+        self.is_nsfw = submission.over18
+
+        # may change
+        self.author = str(submission.author)  # don't change once deleted
+        self.banned_by = submission.banned_by
         self.post_flair = submission.link_flair_text
         self.author_flair = submission.author_flair_text
 
-
-"""
-
+    def update(self, submission):
+        self.author = str(submission.author)
+        self.banned_by = submission.banned_by
+        self.post_flair = submission.link_flair_text
+        self.author_flair = submission.author_flair_text
 
 class SubredditInfo:
     subreddit_api_handle = None

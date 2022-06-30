@@ -28,10 +28,11 @@ from static import *
 ACCEPTING_NEW_SUBS = False
 LINK_REGEX = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
 REDDIT_LINK_REGEX = r'r/([a-zA-Z0-9_]*)/comments/([a-z0-9_]*)/([a-zA-Z0-9_]{0,50})'
-RESPONSE_TAIL = """    
-    -------------------------------------------------
-    
-     ^^BOOP! ^^BLEEP! ^^I ^^am ^^a ^^bot. ^^Concerns? ^^Message ^^[/r/{subreddit}](https://www.reddit.com/message/compose?to=%2Fr%2F{subreddit}&subject=problem%20with%20bot)."""
+RESPONSE_TAIL = """
+
+-------------------------------------------------
+
+^^BOOP! ^^BLEEP! ^^I ^^am ^^a ^^bot. ^^Concerns? ^^Message ^^[/r/{subreddit}](https://www.reddit.com/message/compose?to=%2Fr%2F{subreddit}&subject=problem%20with%20bot)."""
 MAIN_SETTINGS = dict()
 WATCHED_SUBS = dict()
 SUBWIKI_CHECK_INTERVAL_HRS = 24

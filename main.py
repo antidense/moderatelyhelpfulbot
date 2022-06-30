@@ -48,9 +48,20 @@ def main_loop():
     wd.s = dbobj.s
     wd.ri = RedditInterface()
     # load_settings(wd)
+    sub_info = wd.ri.get_subreddit_info(subreddit_name=BOT_NAME)
+    wd.ri.bot_sub : TrackedSubreddit = wd.s.query(TrackedSubreddit).get(BOT_NAME)
+    if not wd.ri.bot_sub:
+        wd.ri.bot_sub = TrackedSubreddit(subreddit_name=BOT_NAME, sub_info=sub_info)
+    if not wd.ri.bot_sub.mm_convo_id:
+        wd.ri.bot_sub.mm_convo_id = wd.ri.get_modmail_thread_id(subreddit_name=BOT_NAME)
+    wd.s.add(wd.ri.bot_sub)
+    wd.s.commit()
+
 
     i = 0
     # update_sub_list(intensity=2)
+    purge_old_records(wd)
+
     while True:
         i += 1
         print('start_loop')
@@ -82,7 +93,7 @@ def main_loop():
             start = datetime.now(pytz.utc)
             if i % 15 == 0:
                 intensity = 5
-            look_for_rule_violations2(intensity=intensity, subs_to_update=updated_subs, wd=wd)  # uses a lot of resource
+            look_for_rule_violations2(wd, intensity=intensity, subs_to_update=updated_subs)  # uses a lot of resource
             print("$$$checking rule violations took this long", datetime.now(pytz.utc) - start)
 
             if i % 75 == 0:
@@ -120,6 +131,8 @@ def main_loop():
             print(trace)
             wd.ri.send_modmail(subreddit_name=BOT_NAME, subject="[Notification] MHB Exception", body=trace,
                                use_same_thread=True)
+            wd.s.add(wd.ri.bot_sub)
+            wd.s.commit()
 
 """
 def load_settings(wd: WorkingData):  # Not being used
@@ -155,6 +168,17 @@ def update_sub_list(wd: WorkingData, intensity=0):
             worked, status = tr.reload_yaml_settings()
             wd.sub_dict[tr.subreddit_name] = tr
             print(f"---- {worked}, {status}")
+        if not tr.mm_convo_id and tr.active_status > 0:
+            tr.checking_mail_enabled = True
+            try:
+                tr.mm_convo_id = wd.ri.get_modmail_thread_id(subreddit_name=tr.subreddit_name)
+
+            except prawcore.exceptions.Forbidden:
+                tr.checking_mail_enabled = False
+            if tr.mm_convo_id:
+                print(f"found convo id: {tr.mm_convo_id}")
+            wd.s.add(tr)
+            wd.s.commit()
         """
         if tr.subreddit_name not in wd.sub_dict:
             if tr.last_updated < datetime.now() - timedelta(days=7) and tr.active_status >= 0:
@@ -170,6 +194,7 @@ def update_sub_list(wd: WorkingData, intensity=0):
 
         wd.sub_dict[tr.subreddit_name] = tr
         """
+    wd.s.commit()
     return
 
 
@@ -337,7 +362,7 @@ def calculate_stats(wd: WorkingData):
             wd.s.add(sub_stat3)
 
     wd.s.commit()
-    rs = wd.s.execute(statement)
+    wd.s.execute(statement)
 
 
 def check_post_nsfw_eligibility(wd: WorkingData, submitted_post):
@@ -365,7 +390,7 @@ def check_post_nsfw_eligibility(wd: WorkingData, submitted_post):
                     wd.ri.reddit_client.subreddit(tr_sub.subreddit_name).flair.set(post_author.author_name,
                                                                                text=new_flair_text)
 
-                    #tr_sub.get_api_handle().flair.set(post_author.author_name, text=new_flair_text)
+                    # tr_sub.get_api_handle().flair.set(post_author.author_name, text=new_flair_text)
                 except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                     pass
             if hasattr(tr_sub, 'nsfw_pct_ban_duration_days') and post_author.nsfw_pct and \
@@ -387,7 +412,7 @@ def check_post_nsfw_eligibility(wd: WorkingData, submitted_post):
                     )
             if post_author.has_banned_subs_activity:
                 wd.ri.mod_remove(submitted_post)
-                TrackedSubreddit.get_subreddit_by_name(BOT_NAME).send_modmail(
+                wd.ri.send_modmail(subreddit_name=BOT_NAME,
                     subject="[Notification] MHB post removed for  banned subs",
                     body=f"post: {submitted_post.get_comments_url()} \n "
                          f"author name: {submitted_post.author} \n"
@@ -495,7 +520,7 @@ def nsfw_checking(wd: WorkingData):  # Does not expand comments
             f"checking post: {post.subreddit_name} {post.title} {post.time_utc} "
             f"{post.get_comments_url()} {post.post_flair} {dms_disabled}")
         top_level_comments: List[praw.models.Comment] = list(
-            wd.ri.get_submission_post(post).comments)
+            wd.ri.get_submission_api_handle(post).comments)
 
         for c in top_level_comments:
             author = None
@@ -667,6 +692,7 @@ def check_common_posts(wd: WorkingData, subreddit_names):
                            body="".join(blurbs[subreddit_name]), subreddit=subreddit_name, use_same_thread=True)
         wd.ri.send_modmail(subject=f"[Notification] botspam notification {subreddit_name}",
                            body="".join(blurbs[subreddit_name]), subreddit_name=BOT_NAME,use_same_thread=True)
+
     wd.s.commit()
 
 
@@ -678,10 +704,10 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
 
     command: str = command[1:] if command.startswith("$") else command
 
-    tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=True)
+    tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=True)
     if not tr_sub:
         return "Error retrieving information for /r/{}".format(subreddit_name), True
-    moderators: List[str] = tr_sub.get_mods_list()
+    moderators: List[str] = wd.ri.get_mod_list(subreddit=tr_sub)
     print("asking for permission: {}, mod list: {}".format(requestor_name, ",".join(moderators)))
     if requestor_name is not None and requestor_name not in moderators and requestor_name != BOT_OWNER \
             and requestor_name != "[modmail]":
@@ -894,7 +920,7 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
         try:
             assert isinstance(requestor_name, str)
         except AssertionError:
-            wd.ri.send_modmail(subreddit_name=BOT_NAME, body="Invalid user: bot_owner_message", use_same_thread=True)
+            wd.ri.send_modmail(subreddit_name=BOT_NAME,body="Invalid user: bot_owner_message", use_same_thread=True)
             return "bad requestor", True
         if requestor_name and requestor_name.lower() != BOT_OWNER.lower():
             wd.ri.send_modmail(subreddit_name=BOT_NAME, body=bot_owner_message, use_same_thread=True)
@@ -1000,12 +1026,12 @@ def handle_direct_messages(wd: WorkingData):
 
 def mod_mail_invitation_to_moderate(wd: WorkingData, message):
     subreddit_name = message.subject.replace("invitation to moderate /r/", "")
-    tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=False)
+    tr_sub = wd.ri.get_subreddit_by_name(subreddit_name, create_if_not_exist=False)
 
     # accept invite if accepting invites or had been accepted previously
     if ACCEPTING_NEW_SUBS or tr_sub and 'karma' not in subreddit_name.lower():
         if not tr_sub:
-            tr_sub = TrackedSubreddit.get_subreddit_by_name(subreddit_name, create_if_not_exist=True)
+            tr_sub = wd.ri.get_subreddit_by_name(subreddit_name, create_if_not_exist=True)
         sub = wd.ri.get_subreddit_api_handle(tr_sub)
         try:
             sub.mod.accept_invite()
@@ -1026,7 +1052,7 @@ def mod_mail_invitation_to_moderate(wd: WorkingData, message):
                     reason="default_config"
                 )
 
-                tr_sub.send_modmail(subject=f"[Notification] Config created",
+                wd.ri.send_modmail(wd, subject=f"[Notification] Config created",
                                     body=f"There was no configuration created for {BOT_NAME} so "
                                          "one was automatically generated. Please check it to make sure it is "
                                          f"what you want. https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{BOT_NAME}")
@@ -1050,13 +1076,18 @@ def handle_modmail_message(wd: WorkingData, convo):
         return
     initiating_author_name = convo.authors[0].name  # praw query
     subreddit_name = convo.owner.display_name  # praw query
-    tr_sub = get_subreddit_by_name(subreddit_name=subreddit_name, create_if_not_exist=True, update_if_due=True)
+    tr_sub = get_subreddit_by_name(wd, subreddit_name=subreddit_name, create_if_not_exist=True, update_if_due=True)
     if not tr_sub:
         return
 
+    print(f"catching convoid {convo.id} {initiating_author_name}")
     if initiating_author_name and initiating_author_name.lower() == BOT_NAME.lower():
         tr_sub.mm_convo_id = convo.id
         wd.s.add(tr_sub)
+        wd.s.commit()
+    else:
+        print("not found?"
+              "")
 
     # Ignore if already actioned (at this many message #s)
     if check_actioned(wd, "mm{}-{}".format(convo.id, convo.num_messages)):  # sql query
@@ -1127,7 +1158,7 @@ def handle_modmail_message(wd: WorkingData, convo):
             removal_reason = None
             # Check again if still no posts in database
             if not recent_posts:
-                check_spam_submissions(subreddit_name)
+                check_spam_submissions(wd, sub_list=subreddit_name)
                 recent_posts: List[SubmittedPost] = wd.s.query(SubmittedPost) \
                     .filter(SubmittedPost.subreddit_name.ilike(subreddit_name)) \
                     .filter(SubmittedPost.author == initiating_author_name).all()
@@ -1146,7 +1177,7 @@ def handle_modmail_message(wd: WorkingData, convo):
                     if last_post.bot_comment_id:  # found it now?
                         wd.s.add(last_post)
                         wd.s.commit()
-                        removal_reason = last_post.get_removed_explanation()  # try to get removal reason
+                        removal_reason = wd.ri.get_removed_explanation(last_post)  # try to get removal reason
                         if removal_reason:
                             removal_reason = removal_reason.replace("\n\n", "\n\n>")
                             removal_reason = f"-------------------------------------------------\n\n{removal_reason}"

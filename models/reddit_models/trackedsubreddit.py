@@ -3,8 +3,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Tuple
 
 import humanize
-import praw
-import prawcore
 import pytz
 import yaml
 from core import dbobj
@@ -288,7 +286,6 @@ class TrackedSubreddit(dbobj.Base):
 
         return True, return_text
 
-
     def get_author_summary(self, wd, author_name: str) -> str:
         if author_name.startswith('u/'):
             author_name = author_name.replace("u/", "")
@@ -339,8 +336,6 @@ class TrackedSubreddit(dbobj.Base):
                "total_identified: {}" \
                "\n\n{}".format(total_reviewed, total_identified, "\n\n".join(response_lines))
 
-
-
     def populate_tags(self, input_text, recent_post=None, prev_post=None, post_list=None):
         if not isinstance(input_text, str):
             print("error: {0} is not a string".format(input_text))
@@ -375,13 +370,12 @@ class TrackedSubreddit(dbobj.Base):
             input_text = input_text.replace("{title}", recent_post.title)
             input_text = input_text.replace("{url}", recent_post.get_url())
 
-
         input_text = input_text.replace("{subreddit}", self.subreddit_name)
         input_text = input_text.replace("{maxcount}", "{0}".format(self.max_count_per_interval))
         input_text = input_text.replace("{interval}", "{0}m".format(self.min_post_interval_txt))
         return input_text
 
-    def populate_tags2(self, input_text, recent_post=None, prev_post=None, post_list=None):
+    def populate_tags2(self, input_text, recent_post=None, prev_post=None, post_list=None, wd=None):
         if not isinstance(input_text, str):
             print("error: {0} is not a string".format(input_text))
             return "error: `{0}` is not a string in your config".format(str(input_text))
@@ -397,13 +391,14 @@ class TrackedSubreddit(dbobj.Base):
             response_lines = ["\n\n|ID|Time|Author|Title|Status|Counted?|\n"
                               "|:---|:-------|:------|:-----------|:------|:------|\n"]
             for post in post_list:
+                posted_status = wd.ri.get_posted_status(post) if wd else None
                 response_lines.append(
                     f"|{post.id}"
                     f"|{post.time_utc}"
                     f"|[{post.author}](/u/{post.author})"
                     f"|[{post.title}]({post.get_comments_url()})"
-                    # f"|{post.get_posted_status().value}"
-                    f"|ERROR"
+                    f"|{posted_status}"
+                    # post.get_posted_status().value
                     f"|{CountedStatus(post.counted_status)}"
                     f"|\n")
             final_response = "".join(response_lines)
@@ -412,7 +407,7 @@ class TrackedSubreddit(dbobj.Base):
         if prev_post:
             if prev_post.submission_text:
                 mydict["{prev.selftext}"] = prev_post.submission_text
-            mydict.update({"{prev.title}": prev_post.title,"{prev.url}": prev_post.get_url(),
+            mydict.update({"{prev.title}": prev_post.title, "{prev.url}": prev_post.get_url(),
                            "{time}": prev_post.time_utc.strftime("%Y-%m-%d %H:%M:%S UTC"),
                            "{timedelta}": humanize.naturaltime(datetime.now(pytz.utc)
                                                                - prev_post.time_utc.replace(tzinfo=timezone.utc)),

@@ -122,9 +122,7 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
     return CountedStatus.COUNTS, "no exemptions"
 
 
-def look_for_rule_violations2(intensity=0, subs_to_update=None, wd=None):  # ri only used for reporting hall passes
-    global REDDIT_CLIENT
-    global WATCHED_SUBS
+def look_for_rule_violations2(wd, intensity=0, subs_to_update=None):  # ri only used for reporting hall passes
     logger.debug("querying recent post(s)")
 
     posting_groups = []
@@ -137,7 +135,7 @@ def look_for_rule_violations2(intensity=0, subs_to_update=None, wd=None):  # ri 
 
         for post in left_over_posts:
             assert isinstance(post, SubmittedPost)
-            print(f"adding leftover post {post.id} ")
+            # print(f"adding leftover post {post.id} ", end=" ")
             post_ids = post.review_debug.split(',')
             posts = []
             for post_id in post_ids:
@@ -153,6 +151,7 @@ def look_for_rule_violations2(intensity=0, subs_to_update=None, wd=None):  # ri 
         faster_statement = f"select max(t.id), group_concat(t.id order by t.id), group_concat(t.reviewed order by t.id), t.author, t.subreddit_name, count(t.author), max( t.time_utc), t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status from RedditPost t inner join TrackedSubs s on t.subreddit_name = s.subreddit_name where s.subreddit_name IN {sub_list} and s.active_status >3 and counted_status <2 and t.time_utc> utc_timestamp() - Interval s.min_post_interval_mins  minute and t.time_utc > utc_timestamp() - Interval 48 hour group by t.author, t.subreddit_name having count(t.author) > s.max_count_per_interval and (max(t.time_utc)> max(t.last_checked) or max(t.last_checked) is NULL) order by max(t.time_utc) desc ;"
         # faster_statement = f"SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.subreddit_name in {sub_list} and s.active_status >3 and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 48 HOUR AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
 
+
     search_back = 48
     if len(posting_groups) < 10:
         search_back = 72
@@ -163,8 +162,12 @@ def look_for_rule_violations2(intensity=0, subs_to_update=None, wd=None):  # ri 
     more_accurate_statement = more_accurate_statement.replace('48', str(search_back))
 
     tick = datetime.now()
-    if intensity == 5:
-        print("doing more accurate")
+    if intensity >= 5:
+        # clear queue if doing most accurate one
+        print("clearing queue for most accurate version")
+        wd.s.execute("update RedditPost set review_debug = NULL")
+
+        print(f"doing more accurate {datetime.now()}")
         rs = wd.s.execute(more_accurate_statement)
     else:
         print("doing usual")
@@ -253,7 +256,7 @@ def look_for_rule_violations2(intensity=0, subs_to_update=None, wd=None):  # ri 
                         make_comment(tr_sub, post, [last_valid_post, ],
                                      tr_sub.comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve,
                                      lock_thread=tr_sub.lock_thread, stickied=tr_sub.comment_stickied,
-                                     next_eligibility=subreddit_author.next_eligible, blacklist=True)
+                                     next_eligibility=subreddit_author.next_eligible, blacklist=True, wd=wd)
                         post.update_status(reviewed=True, flagged_duplicate=True, counted_status=CountedStatus.BLKLIST)
                         wd.s.add(post)
                 except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
@@ -378,10 +381,8 @@ def look_for_rule_violations2(intensity=0, subs_to_update=None, wd=None):  # ri 
                 notification_text = f"Hall pass was used by {subreddit_author.author_name}: http://redd.it/{post.id}"
                 # REDDIT_CLIENT.redditor(BOT_OWNER).message(pg.subreddit_name, notification_text)
 
-                wd.ri.send_modmail(subject="[Notification]  Hall pass was used", body=notification_text,
-                                   reddit_oj=REDDIT_CLIENT)
-                tr_sub.send_modmail(subject="[Notification]  Hall pass was used", body=notification_text,
-                                    reddit_oj=REDDIT_CLIENT)
+                wd.ri.send_modmail(subreddit=tr_sub, subject="[Notification]  Hall pass was used", body=notification_text)
+                # tr_sub.send_modmail(subject="[Notification]  Hall pass was used", body=notification_text)
                 post.update_status(reviewed=True, counted_status=CountedStatus.HALLPASS)
                 wd.s.add(subreddit_author)
             # Must take action on post
@@ -413,9 +414,8 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
         if message is True:
             message = "Repost that violates rules: [{title}]({url}) by [{author}](/u/{author})"
         # send_modmail_populate_tags(tr_sub, message, recent_post=recent_post, prev_post=possible_repost, )
-        tr_sub.send_modmail(body=tr_sub.populate_tags(message, recent_post=recent_post, prev_post=possible_repost),
-                            subject="[Notification] Post that violates rule frequency restriction",
-                            reddit_oj=REDDIT_CLIENT)
+        wd.ri.send_modmail(subreddit=tr_sub, body=tr_sub.populate_tags(message, recent_post=recent_post, prev_post=possible_repost),
+                            subject="[Notification] Post that violates rule frequency restriction", use_same_thread=True)
     if tr_sub.action == "remove":
         post_status = wd.ri.get_posted_status(recent_post)
         if post_status == PostedStatus.UP:
@@ -583,10 +583,9 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
                                       f"[{recent_post.title}]({recent_post.get_comments_url()})\n")
 
                 # send_modmail_populate_tags(tr_sub, "\n\n".join(response_lines), recent_post=recent_post, prev_post=possible_repost)
-                tr_sub.send_modmail(subject="[Notification] Multiple post frequency violations",
+                wd.ri.send_modmail(subreddit=tr_sub, subject="[Notification] Multiple post frequency violations",
                                     body=tr_sub.populate_tags2("\n\n".join(response_lines),
-                                                               recent_post=recent_post, prev_post=possible_repost),
-                                    reddit_oj=REDDIT_CLIENT)
+                                                               recent_post=recent_post, prev_post=possible_repost))
             if tr_sub.ban_duration_days > 998:
                 # Only do a 2 week ban if specified permanent ban
                 time_next_eligible = datetime.now(pytz.utc) + timedelta(days=999)
@@ -617,7 +616,7 @@ def make_comment(subreddit: TrackedSubreddit, recent_post: SubmittedPost, most_r
     ids = ids.replace(" ", " ^^")
     comment = None
     response = subreddit.populate_tags2(f"{comment_template}{RESPONSE_TAIL}{ids}",
-                                        recent_post=recent_post, prev_post=prev_submission)
+                                        recent_post=recent_post, prev_post=prev_submission, wd=wd)
     try:
         comment: praw.models.Comment = \
             wd.ri.reply(recent_post, response, distinguish=distinguish, approve=approve, lock_thread=lock_thread)
@@ -667,7 +666,7 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
 
     # Give up as requested if not in db
     if not tr_sub and create_if_not_exist:
-        print(f"doesn't exist and not supposed to create  {sub_info}")
+        print(f"doesn't exist and not supposed to create  {subreddit_name}")
         return None
 
     # If need to create, do so now
