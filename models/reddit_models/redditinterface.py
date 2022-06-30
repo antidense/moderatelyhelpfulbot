@@ -129,7 +129,10 @@ class RedditInterface:
 
 
     def send_modmail(self, subreddit=None, subreddit_name=None, subject=f"[Notification] Message from {BOT_NAME}", body="Unspecified text",
-                     thread_id=None):
+                     thread_id=None, use_same_thread=False):
+        assert isinstance(subreddit, TrackedSubreddit)
+        if not thread_id and use_same_thread:
+            thread_id = subreddit.mm_convo_id
         if not subreddit_name and subreddit:
             subreddit_name = subreddit.subreddit_name
         if thread_id:

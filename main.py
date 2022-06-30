@@ -118,7 +118,8 @@ def main_loop():
             import traceback
             trace = traceback.format_exc()
             print(trace)
-            wd.ri.send_modmail(subreddit_name=BOT_NAME, subject="[Notification] MHB Exception", body=trace)
+            wd.ri.send_modmail(subreddit_name=BOT_NAME, subject="[Notification] MHB Exception", body=trace,
+                               use_same_thread=True)
 
 """
 def load_settings(wd: WorkingData):  # Not being used
@@ -374,7 +375,8 @@ def check_post_nsfw_eligibility(wd: WorkingData, submitted_post):
                                    subject="[Notification] MHB post removed for high NSFW rating",
                                    body=f"post: {submitted_post.get_comments_url()} \n "
                                         f"author name: {submitted_post.author} \n"
-                                        f"author activity: /u/{post_author.sub_counts} \n")
+                                        f"author activity: /u/{post_author.sub_counts} \n",
+                                   use_same_thread=True)
                 if tr_sub.nsfw_pct_instant_ban:
                     ban_message = NAFSC.replace("{NSFWPCT}", f"{post_author.nsfw_pct:.2f}")
                     ban_note = f"Having >80% NSFW ({post_author.nsfw_pct:.2f}%)"
@@ -475,7 +477,7 @@ def nsfw_checking(wd: WorkingData):  # Does not expand comments
 
             post.nsfw_repliers_checked = True
             wd.s.add(post)
-        tr_sub = get_subreddit_by_name(post.subreddit_name, create_if_not_exist=False, update_if_due=False)
+        tr_sub = get_subreddit_by_name(wd, post.subreddit_name, create_if_not_exist=False, update_if_due=False)
         assert isinstance(tr_sub, TrackedSubreddit)
 
         # if 'NOT' in dms_disabled and op_age<15:
@@ -539,7 +541,7 @@ def nsfw_checking(wd: WorkingData):  # Does not expand comments
 
                     # tr_sub.get_api_handle().banned.add(
                     #     self.author_name, ban_note=ban_note, ban_message=ban_note)
-                    wd.ri.send_modmail(body=ban_note, subreddit=tr_sub)
+                    wd.ri.send_modmail(body=ban_note, subreddit=tr_sub, use_same_thread=True)
 
                 if not check_actioned(wd, f"comment-{c.id}") and (
                         (author.nsfw_pct > 80 or (op_age < 18 < author.age and author.age)
@@ -573,7 +575,7 @@ def nsfw_checking(wd: WorkingData):  # Does not expand comments
                             wd.ri.get_subreddit_api_handle(tr_sub).banned.add(
                                 author.author_name, note="activity on banned subs", ban_message=NAFBS,
                                 duration=tr_sub.nsfw_pct_ban_duration_days)
-                            wd.ri.send_modmail(body=ban_note, subreddit=tr_sub)
+                            wd.ri.send_modmail(body=ban_note, subreddit=tr_sub, use_same_thread=True)
 
                         else:
                             ban_mc_link = f"{smart_link}$ban {author_name} 999 {NAFMC}".replace(" ", "%20")
@@ -603,7 +605,7 @@ def nsfw_checking(wd: WorkingData):  # Does not expand comments
                                 c.mod.remove()
                             except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                                 pass
-                            wd.ri.send_modmail(subject=subject, body=response, subreddit=tr_sub)
+                            wd.ri.send_modmail(subject=subject, body=response, subreddit=tr_sub, use_same_thread=True)
 
                             wd.ri.reddit_client.redditor(BOT_OWNER).message(subject, response)
                     record_actioned(wd, f"comment-{c.id}")
@@ -662,13 +664,13 @@ def check_common_posts(wd: WorkingData, subreddit_names):
 
     for subreddit_name in blurbs:
         wd.ri.send_modmail(subject=f"[Notification] Post by possible karma hackers:",
-                           body="".join(blurbs[subreddit_name]), subreddit=subreddit_name)
+                           body="".join(blurbs[subreddit_name]), subreddit=subreddit_name, use_same_thread=True)
         wd.ri.send_modmail(subject=f"[Notification] botspam notification {subreddit_name}",
-                           body="".join(blurbs[subreddit_name]), subreddit_name=BOT_NAME)
+                           body="".join(blurbs[subreddit_name]), subreddit_name=BOT_NAME,use_same_thread=True)
     wd.s.commit()
 
 
-def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, command, parameters, thread_id=None) \
+def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, command, parameters) \
         -> tuple[str, bool]:
     subreddit_name: str = subreddit_name[2:] if subreddit_name.startswith('r/') else subreddit_name
     subreddit_name: str = subreddit_name[3:] if subreddit_name.startswith('/r/') else subreddit_name
@@ -892,10 +894,10 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
         try:
             assert isinstance(requestor_name, str)
         except AssertionError:
-            wd.ri.send_modmail(subreddit_name=BOT_NAME, body="Invalid user: bot_owner_message")
+            wd.ri.send_modmail(subreddit_name=BOT_NAME, body="Invalid user: bot_owner_message", use_same_thread=True)
             return "bad requestor", True
         if requestor_name and requestor_name.lower() != BOT_OWNER.lower():
-            wd.ri.send_modmail(subreddit_name=BOT_NAME, body=bot_owner_message)
+            wd.ri.send_modmail(subreddit_name=BOT_NAME, body=bot_owner_message, use_same_thread=True)
         wd.s.add(tr_sub)
         wd.s.commit()
         wd.to_update_list = True
@@ -905,7 +907,6 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
 
 
 def handle_direct_messages(wd: WorkingData):
-    # Reply to pms or
 
     for message in wd.ri.reddit_client.inbox.unread(limit=None):
         logger.info("got this email author:{} subj:{}  body:{} ".format(message.author, message.subject, message.body))
@@ -966,7 +967,7 @@ def handle_direct_messages(wd: WorkingData):
                                 f"wiki: https://www.reddit.com/r/{subreddit_name}/wiki/{BOT_NAME}\n\n"
             if requestor_name.lower() != BOT_OWNER.lower():
                 wd.ri.send_modmail(subreddit_name=BOT_NAME, subject="[Notification]  Command processed",
-                                   body=bot_owner_message)
+                                   body=bot_owner_message, use_same_thread=True)
             # wd.ri.reddit_client.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
 
         elif requestor_name and not check_actioned(wd, requestor_name):
@@ -1049,12 +1050,16 @@ def handle_modmail_message(wd: WorkingData, convo):
         return
     initiating_author_name = convo.authors[0].name  # praw query
     subreddit_name = convo.owner.display_name  # praw query
-    tr_sub = get_subreddit_by_name(subreddit_name, create_if_not_exist=True, update_if_due=True)
+    tr_sub = get_subreddit_by_name(subreddit_name=subreddit_name, create_if_not_exist=True, update_if_due=True)
     if not tr_sub:
         return
 
+    if initiating_author_name and initiating_author_name.lower() == BOT_NAME.lower():
+        tr_sub.mm_convo_id = convo.id
+        wd.s.add(tr_sub)
+
     # Ignore if already actioned (at this many message #s)
-    if check_actioned("mm{}-{}".format(convo.id, convo.num_messages)):  # sql query
+    if check_actioned(wd, "mm{}-{}".format(convo.id, convo.num_messages)):  # sql query
         try:
             convo.read()  # praw query
             convo.read()  # praw query24
@@ -1265,7 +1270,7 @@ def handle_modmail_message(wd: WorkingData, convo):
             if debug_notify:
                 # wd.ri.reddit_client.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
                 wd.ri.send_modmail(subreddit_name=BOT_NAME, subject="[Notification] MHB Command used",
-                                   body=bot_owner_message)
+                                   body=bot_owner_message, use_same_thread=True)
         except (prawcore.exceptions.BadRequest, praw.exceptions.RedditAPIException):
             logger.debug("reply failed {0}".format(response))
     record_actioned(wd, f"mm{convo.id}-{convo.num_messages}")
