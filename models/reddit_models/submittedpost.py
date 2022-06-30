@@ -1,0 +1,95 @@
+from datetime import datetime
+
+import praw
+import prawcore
+import pytz
+from core import dbobj
+from logger import logger
+from praw.models import Submission
+from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from enums import CountedStatus
+from settings import login_credentials
+
+s = dbobj.s
+
+BOT_NAME = login_credentials["bot_name"]
+
+
+class SubmittedPost(dbobj.Base):  # need posted_status
+    __tablename__ = 'RedditPost'
+    id = Column(String(10), nullable=True, primary_key=True)
+    title = Column(String(191), nullable=True)
+    author = Column(String(21), nullable=True)
+    submission_text = Column(String(191), nullable=True)
+    time_utc = Column(DateTime, nullable=False)
+    subreddit_name = Column(String(21), nullable=True)
+    # banned_by = Column(String(21), nullable=True)  # Can delete this now ---------
+    flagged_duplicate = Column(Boolean, nullable=True)
+    pre_duplicate = Column(Boolean, nullable=True)
+    # self_deleted = Column(Boolean, nullable=True)  # Can delete this now -------
+    reviewed = Column(Boolean, nullable=True)   # could be combined into an Enum: reviewed,  pre_duplicate
+    last_checked = Column(DateTime, nullable=False)  # redundant with reviewed?  can't use as inited with old date
+    bot_comment_id = Column(String(10), nullable=True)  # wasn't using before but using now
+    is_self = Column(Boolean, nullable=True)  # Can delete this now----------
+    # removed_status = Column(String(21), nullable=True)  # not used
+    post_flair = Column(String(21), nullable=True)
+    author_flair = Column(String(42), nullable=True)
+    counted_status = Column(Integer)
+    # newly added
+    response_time = Column(DateTime, nullable=True)  # need to add everywhere
+    review_debug = Column(String(191), nullable=True)
+    flushed_to_log = Column(Boolean, nullable=False)
+    nsfw_repliers_checked = Column(Boolean, nullable=False)  # REMOVE!!
+    nsfw_last_checked = Column(DateTime, nullable=True)
+
+    api_handle = None
+
+    def __init__(self, submission: Submission, save_text: bool = False):
+        self.id = submission.id
+        self.title = submission.title[0:190]
+        self.author = str(submission.author)
+        if save_text:
+            self.submission_text = submission.selftext[0:190]
+        self.time_utc = datetime.utcfromtimestamp(submission.created_utc)
+        self.subreddit_name = str(submission.subreddit).lower()
+        self.flagged_duplicate = False
+        self.reviewed = False
+        self.banned_by = None
+        self.api_handle = submission
+        self.pre_duplicate = False
+        self.self_deleted = False
+        self.is_self = submission.is_self
+        self.counted_status = CountedStatus.NOT_CHKD.value
+        self.post_flair = submission.link_flair_text
+        self.author_flair = submission.author_flair_text
+        self.response_time = None
+        self.nsfw_last_checked = self.time_utc
+        self.nsfw_repliers_checked = False
+
+    def get_url(self) -> str:
+        return f"http://redd.it/{self.id}"
+
+    def get_comments_url(self) -> str:
+        return f"https://www.reddit.com/r/{self.subreddit_name}/comments/{self.id}"
+
+    def get_removed_explanation_url(self):
+        if not self.bot_comment_id:
+            return None
+        return f"https://www.reddit.com/r/{self.subreddit_name}/comments/{self.id}//{self.bot_comment_id}"
+
+
+
+    def update_status(self, reviewed=None, flagged_duplicate=None, counted_status=None):
+        if reviewed is not None:
+            self.reviewed = reviewed
+
+        if counted_status is not None and counted_status != CountedStatus.REMOVED:
+            self.counted_status = counted_status.value
+        if flagged_duplicate is not None:
+            self.flagged_duplicate = flagged_duplicate
+            if flagged_duplicate is True:
+                self.counted_status = CountedStatus.FLAGGED.value
+        self.last_checked = datetime.now(pytz.utc)
+        # self.response_time = datetime.now(pytz.utc)-self.time_utc.replace(tzinfo=timezone.utc)
+        if not self.response_time:
+            self.response_time = datetime.now(pytz.utc)

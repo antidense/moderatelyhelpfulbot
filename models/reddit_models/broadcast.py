@@ -3,7 +3,7 @@ from sqlalchemy import Boolean, Column, String
 
 
 # For messaging subreddits that use bot
-class Broadcast(Base):
+class Broadcast(dbobj.Base):
     __tablename__ = 'Broadcast'
     id = Column(String(10), nullable=True, primary_key=True)
     title = Column(String(191), nullable=True)
