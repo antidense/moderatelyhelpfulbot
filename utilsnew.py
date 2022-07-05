@@ -1,5 +1,6 @@
 """ None of these are implemented yet """
 
+
 def load_new_submissions_db():  #requires database:  memory -> db
     global NEW_SUBMISSION_Q
     global SPAM_SUBMISSION_Q

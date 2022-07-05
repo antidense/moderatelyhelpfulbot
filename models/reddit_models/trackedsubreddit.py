@@ -47,6 +47,13 @@ class TrackedSubreddit(dbobj.Base):
     mm_convo_id = Column(String(10), nullable=True, default=None)
     is_nsfw = Column(Boolean, nullable=False, default=0)
 
+    mod_list = Column(String(191), nullable=True, primary_key=False)  # added 7/4/22
+    ignore_Automoderator_removed = Column(Boolean, nullable=True)
+    ignore_moderator_removed = Column(Boolean, nullable=True)
+    exempt_self_posts = Column(Boolean, nullable=True)
+    exempt_link_posts = Column(Boolean, nullable=True)
+    exempt_oc = Column(Boolean, nullable=True)
+
     subreddit_mods = []
     rate_limiting_enabled = False
     min_post_interval_hrs = 72
@@ -96,6 +103,8 @@ class TrackedSubreddit(dbobj.Base):
     nsfw_pct_threshold = 80
     # enforce_nsfw_checking = False
 
+
+
     def __init__(self, subreddit_name: str, sub_info=None):
         self.subreddit_name = subreddit_name.lower()
         self.save_text = False
@@ -123,6 +132,7 @@ class TrackedSubreddit(dbobj.Base):
         self.bot_mod = sub_info.bot_mod
         self.is_nsfw = sub_info.is_nsfw
         self.last_updated = datetime.now()
+
         return self.reload_yaml_settings()
 
     def reload_yaml_settings(self) -> (Boolean, String):

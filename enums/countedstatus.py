@@ -26,3 +26,4 @@ class CountedStatus(Enum):
     AGED_OUT = 40
     REMOVE_FAILED = 50
     NOT_TO_REMOVE = 90
+    BLKLIST_NEED_REMOVE = 503

@@ -226,7 +226,7 @@ class SubredditInfo:
             active_status = SubStatus.SUB_GONE
             return
         try:
-            self.mod_list = list(moderator.name for moderator in self.subreddit_api_handle.moderator())
+            self.mod_list = ",".join(list(moderator.name for moderator in self.subreddit_api_handle.moderator()))
         except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden):
             pass
         active_status, _ = self.check_sub_access(ri)

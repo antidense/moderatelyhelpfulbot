@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from praw import exceptions
+import Queue
 from praw.models import Submission
 from static import *
 from datetime import datetime, timedelta, timezone
@@ -21,7 +22,7 @@ from enum import Enum  # has to be at the end?
 import queue
 """
 
-from utils import look_for_rule_violations2, get_age, get_subreddit_by_name
+from utils import look_for_rule_violations2, look_for_rule_violations3, get_age, get_subreddit_by_name
 from models.reddit_models.redditinterface import SubredditInfo
 # from modmail import handle_modmail_messages, handle_direct_messages
 from models.reddit_models import ActionedComments, CommonPost, Stats2, SubAuthor, SubmittedPost, TrackedAuthor, \
@@ -93,7 +94,8 @@ def main_loop():
             start = datetime.now(pytz.utc)
             if i % 15 == 0:
                 intensity = 5
-            look_for_rule_violations2(wd, intensity=intensity, subs_to_update=updated_subs)  # uses a lot of resource
+            look_for_rule_violations3(wd)  # uses a lot of resource
+            # look_for_rule_violations2(wd, intensity=intensity, sub_list=sub_list)  # uses a lot of resource
             print("$$$checking rule violations took this long", datetime.now(pytz.utc) - start)
 
             if i % 75 == 0:
@@ -157,9 +159,20 @@ def update_sub_list(wd: WorkingData, intensity=0):
             active_status, error = tr.update_from_subinfo(wd.ri.get_subreddit_info(tr))
 
             print(f"Checked {tr.subreddit_name}:\t{tr.active_status}\t{error}")
+            if not tr.mm_convo_id and tr.active_status > 0:
+                tr.checking_mail_enabled = True
+                try:
+                    tr.mm_convo_id = wd.ri.get_modmail_thread_id(subreddit_name=tr.subreddit_name)
+
+                except prawcore.exceptions.Forbidden:
+                    tr.checking_mail_enabled = False
+                if tr.mm_convo_id:
+                    print(f"found convo id: {tr.mm_convo_id}")
+                wd.s.add(tr)
+                wd.s.commit()
     trs = wd.s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status > 0).all()
     for tr in trs:
-        print(f'updating /r/{tr.subreddit_name}', end="")
+        # print(f'updating /r/{tr.subreddit_name}', end="")
         assert isinstance(tr, TrackedSubreddit)
 
         wd.sub_list.append(tr.subreddit_name)
@@ -167,18 +180,19 @@ def update_sub_list(wd: WorkingData, intensity=0):
         if tr.subreddit_name not in wd.sub_dict:
             worked, status = tr.reload_yaml_settings()
             wd.sub_dict[tr.subreddit_name] = tr
-            print(f"---- {worked}, {status}")
-        if not tr.mm_convo_id and tr.active_status > 0:
-            tr.checking_mail_enabled = True
-            try:
-                tr.mm_convo_id = wd.ri.get_modmail_thread_id(subreddit_name=tr.subreddit_name)
+            # print(f"---- {worked}, {status}")
+            if not tr.mod_list:
+                try:
+                    tr.mod_list = str(wd.ri.get_mod_list(tr.subreddit_name))
+                except prawcore.exceptions.Forbidden:
+                    tr.active_status = SubStatus.SUB_GONE
 
-            except prawcore.exceptions.Forbidden:
-                tr.checking_mail_enabled = False
-            if tr.mm_convo_id:
-                print(f"found convo id: {tr.mm_convo_id}")
-            wd.s.add(tr)
-            wd.s.commit()
+                # print(tr.mod_list)
+                wd.s.add(tr)
+
+
+
+
         """
         if tr.subreddit_name not in wd.sub_dict:
             if tr.last_updated < datetime.now() - timedelta(days=7) and tr.active_status >= 0:
@@ -257,12 +271,15 @@ def check_new_submissions(wd: WorkingData, query_limit=800, sub_list='mod', inte
                 check_post_nsfw_eligibility(wd, post)
             if subreddit_name not in subreddit_names:
                 subreddit_names.append(subreddit_name)
+
             wd.s.add(post)
             count += 1
     logger.info(f'found {count} posts')
     logger.debug("updating database...")
     wd.s.commit()
     return subreddit_names
+
+
 
 
 def check_spam_submissions(wd: WorkingData, sub_list='mod', intensity=0):
@@ -277,6 +294,8 @@ def check_spam_submissions(wd: WorkingData, sub_list='mod', intensity=0):
             break
         if not previous_post:
             post = SubmittedPost(post_to_review)
+            post.posted_status=PostedStatus.SPAM_FLT
+            post.reviewed = True
             sub_list = post.subreddit_name.lower()
             # logger.info("found spam post: '{0}...' http://redd.it/{1} ({2})".format(post.title[0:20], post.id,
             #                                                                         subreddit_name))
@@ -528,7 +547,7 @@ def nsfw_checking(wd: WorkingData):  # Does not expand comments
 
             if hasattr(c, 'author') and c.author and hasattr(c.author, 'name'):
                 author_name = c.author.name
-                if author_name in wd.ri.get_mod_list(subreddit_name=tr_sub.subreddit_name):
+                if author_name in tr_sub.mod_list:
                     continue
                 if author_name in author_list:
                     continue
@@ -691,7 +710,7 @@ def check_common_posts(wd: WorkingData, subreddit_names):
         wd.ri.send_modmail(subject=f"[Notification] Post by possible karma hackers:",
                            body="".join(blurbs[subreddit_name]), subreddit=subreddit_name, use_same_thread=True)
         wd.ri.send_modmail(subject=f"[Notification] botspam notification {subreddit_name}",
-                           body="".join(blurbs[subreddit_name]), subreddit_name=BOT_NAME,use_same_thread=True)
+                           body="".join(blurbs[subreddit_name]), subreddit_name=BOT_NAME, use_same_thread=True)
 
     wd.s.commit()
 
@@ -1080,14 +1099,12 @@ def handle_modmail_message(wd: WorkingData, convo):
     if not tr_sub:
         return
 
-    print(f"catching convoid {convo.id} {initiating_author_name}")
-    if initiating_author_name and initiating_author_name.lower() == BOT_NAME.lower():
+    # print(f"catching convoid {convo.id} {initiating_author_name}")
+    if not tr_sub.mm_convo_id and initiating_author_name and initiating_author_name.lower() == BOT_NAME.lower():
         tr_sub.mm_convo_id = convo.id
         wd.s.add(tr_sub)
         wd.s.commit()
-    else:
-        print("not found?"
-              "")
+
 
     # Ignore if already actioned (at this many message #s)
     if check_actioned(wd, "mm{}-{}".format(convo.id, convo.num_messages)):  # sql query
@@ -1183,14 +1200,14 @@ def handle_modmail_message(wd: WorkingData, convo):
                             removal_reason = f"-------------------------------------------------\n\n{removal_reason}"
                     if not removal_reason:  # still couldn't find removal reason, just use posted status
                         removal_reason = f"status: {posted_status.value}\n\n " \
-                                         f"flair: {wd.ri.get_submission_post(last_post).link_flair_text}"
+                                         f"flair: {wd.ri.get_submission_api_handle(last_post).link_flair_text}"
                         if posted_status == PostedStatus.SPAM_FLT:
                             removal_reason += " \n\nThis means the Reddit spam filter thought your post was spam " \
                                               "and it was NOT removed by the subreddit moderators.  You can try " \
                                               "verifying your email and building up karma to avoid the spam filter." \
                                               "There is more information here: " \
                                               "https://www.reddit.com/r/NewToReddit/wiki/ntr-guidetoreddit"
-                        r_last_post = wd.ri.get_submission_post(last_post)
+                        r_last_post = wd.ri.get_submission_api_handle(last_post)
                         if hasattr(r_last_post, 'removal_reason') and r_last_post.removal_reason \
                                 and not posted_status == posted_status.UP:
                             removal_reason += f"\n\n{r_last_post.removal_reason}"

@@ -7,7 +7,7 @@ from core import dbobj
 from logger import logger
 from praw.models import Submission
 from sqlalchemy import Boolean, Column, DateTime, Integer, String
-from enums import CountedStatus
+from enums import CountedStatus, PostedStatus
 from settings import login_credentials
 
 s = dbobj.s
@@ -42,6 +42,11 @@ class SubmittedPost(dbobj.Base):  # need posted_status
     nsfw_repliers_checked = Column(Boolean, nullable=False)  # REMOVE!!
     nsfw_last_checked = Column(DateTime, nullable=True)
 
+    added_time = Column(DateTime, nullable=True)  # added 6/30/22
+    posted_status = Column(String(30), nullable=False)
+    banned_by = Column(String(21), nullable=True)
+    is_oc = Column(Boolean, nullable=False)
+
     api_handle = None
 
     def __init__(self, submission: Submission, save_text: bool = False):
@@ -52,6 +57,7 @@ class SubmittedPost(dbobj.Base):  # need posted_status
             self.submission_text = submission.selftext[0:190]
         self.time_utc = datetime.utcfromtimestamp(submission.created_utc)
         self.subreddit_name = str(submission.subreddit).lower()
+        self.added_time = datetime.now(pytz.utc)
         self.flagged_duplicate = False
         self.reviewed = False
         self.banned_by = None
@@ -65,6 +71,8 @@ class SubmittedPost(dbobj.Base):  # need posted_status
         self.response_time = None
         self.nsfw_last_checked = self.time_utc
         self.nsfw_repliers_checked = False
+        self.posted_status = PostedStatus.UNKNOWN.value
+
 
     def get_url(self) -> str:
         return f"http://redd.it/{self.id}"
