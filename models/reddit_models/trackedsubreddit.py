@@ -54,6 +54,13 @@ class TrackedSubreddit(dbobj.Base):
     exempt_link_posts = Column(Boolean, nullable=True)
     exempt_oc = Column(Boolean, nullable=True)
 
+    author_exempt_flair_keyword = Column(String(191), nullable=True, primary_key=False)
+    author_not_exempt_flair_keyword = Column(String(191), nullable=True, primary_key=False)
+    title_exempt_keyword = Column(String(191), nullable=True, primary_key=False)
+    title_not_exempt_keyword = Column(String(191), nullable=True, primary_key=False)
+
+    last_pulled = Column(DateTime, nullable=True)
+
     subreddit_mods = []
     rate_limiting_enabled = False
     min_post_interval_hrs = 72
@@ -61,23 +68,21 @@ class TrackedSubreddit(dbobj.Base):
     min_post_interval = timedelta(hours=72)
     grace_period = timedelta(minutes=30)
     ban_duration_days = 0
-    ignore_AutoModerator_removed = True
-    ignore_moderator_removed = True
     ban_threshold_count = 5
     notify_about_spammers = False
-    author_exempt_flair_keyword = None
-    author_not_exempt_flair_keyword = None
-    title_exempt_keyword = None
+
+
     action = None
     modmail = None
     message = None
     report_reason = None
     comment = None
     distinguish = True
-    exempt_self_posts = False
-    exempt_link_posts = False
+
+    ignore_AutoModerator_removed = True
+
     exempt_moderator_posts = True
-    exempt_oc = False
+
     modmail_posts_reply = True
     modmail_no_link_reply = False
     modmail_no_posts_reply = None
@@ -91,7 +96,7 @@ class TrackedSubreddit(dbobj.Base):
     blacklist_enabled = True
     lock_thread = True
     comment_stickied = False
-    title_not_exempt_keyword = None
+
     canned_responses = {}
     api_handle = None
     nsfw_instaban_subs = None
@@ -108,6 +113,16 @@ class TrackedSubreddit(dbobj.Base):
     def __init__(self, subreddit_name: str, sub_info=None):
         self.subreddit_name = subreddit_name.lower()
         self.save_text = False
+        self.ignore_moderator_removed = True
+        self.exempt_self_posts = False
+        self.exempt_link_posts = False
+        self.exempt_oc = False
+        self.author_exempt_flair_keyword = None
+        self.author_not_exempt_flair_keyword = None
+        self.title_exempt_keyword = None
+        self.title_not_exempt_keyword = None
+        self.last_pulled = datetime.now(pytz.utc)-timedelta(hours=24)
+
         if not sub_info:
             self.active_status = SubStatus.NO_CONFIG.value
         self.active_status = sub_info.active_status
@@ -132,6 +147,8 @@ class TrackedSubreddit(dbobj.Base):
         self.bot_mod = sub_info.bot_mod
         self.is_nsfw = sub_info.is_nsfw
         self.last_updated = datetime.now()
+        if not self.last_pulled:
+            self.last_pulled = datetime.now(pytz.utc) - timedelta(hours=24)
 
         return self.reload_yaml_settings()
 
@@ -195,6 +212,7 @@ class TrackedSubreddit(dbobj.Base):
                 return False, "No settings for post restriction"
             for pr_setting in pr_settings:
                 if pr_setting in possible_settings:
+
                     pr_setting_value = pr_settings[pr_setting]
                     pr_setting_value = True if pr_setting_value == 'True' else pr_setting_value
                     pr_setting_value = False if pr_setting_value == 'False' else pr_setting_value
@@ -206,6 +224,9 @@ class TrackedSubreddit(dbobj.Base):
 
                     # print(f"{self.subreddit_name}: {pr_setting} {pr_setting_value} {pr_setting_type}, {possible_settings[pr_setting]}")
                     if pr_setting_type == "NoneType" or pr_setting_type in possible_settings[pr_setting].split(";"):
+                        if isinstance(pr_setting_value, list):
+                            # print([x for x in list])
+                            pr_setting_value = "|".join(pr_setting_value)
                         setattr(self, pr_setting, pr_setting_value)
 
                     else:

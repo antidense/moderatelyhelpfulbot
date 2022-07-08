@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from praw import exceptions
-import Queue
 from praw.models import Submission
 from static import *
 from datetime import datetime, timedelta, timezone

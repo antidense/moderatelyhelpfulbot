@@ -6,13 +6,14 @@ import praw
 import yaml
 import prawcore
 from logger import logger
-from enums import SubStatus, PostedStatus
+from enums import SubStatus, PostedStatus, CountedStatus
 
 from models.reddit_models import SubmittedPost, TrackedSubreddit, TrackedAuthor
 
 from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET
 from typing import List
-
+from datetime import datetime
+import pytz
 # Set up PRAW
 
 class RedditInterface:
@@ -30,6 +31,37 @@ class RedditInterface:
             return submission.api_handle
         else:
             return submission.api_handle
+
+    def update_posted_status(self, submission: SubmittedPost):
+        post_api_handle = self.get_submission_api_handle(submission)
+        try:
+            submission.self_deleted = False if submission.api_handle.author else True
+        except prawcore.exceptions.Forbidden:
+            submission.posted_status = PostedStatus.UNAVAILABLE.value
+        submission.banned_by = submission.api_handle.banned_by
+        if not submission.banned_by and not submission.self_deleted:
+            submission.posted_status = PostedStatus.UP.value
+        elif submission.banned_by:
+            if submission.banned_by is True:
+                submission.posted_status =  PostedStatus.SPAM_FLT.value
+            elif submission.banned_by == "AutoModerator":
+                submission.posted_status =   PostedStatus.AUTOMOD_RM.value
+            elif submission.banned_by == BOT_NAME:
+                submission.posted_status = PostedStatus.MHB_RM.value
+            else:
+                submission.posted_status =   PostedStatus.MOD_RM.value
+        elif submission.self_deleted:
+            submission.posted_status =   PostedStatus.SELF_DEL.value
+        else:
+            print(f"unknown status: {submission.banned_by}")
+            submission.posted_status =   PostedStatus.UNKNOWN.value
+        submission.post_flair = post_api_handle.link_flair_text
+        submission.author_flair = post_api_handle.author_flair_text
+        if submission.counted_status == 1:
+            submission.counted_status = CountedStatus.NEEDS_UPDATE.value
+        submission.last_checked = datetime.now(pytz.utc)
+
+
 
     def get_posted_status(self, submission: SubmittedPost, get_removed_info=False) -> PostedStatus:
         # _ = submission.get_api_handle()  what was this for again?
@@ -192,7 +224,7 @@ class SubmissionInfo:
         self.time_utc = datetime.utcfromtimestamp(submission.created_utc)
         self.subreddit_name = str(submission.subreddit).lower()
         self.is_self = submission.is_self
-        self.is_nsfw = submission.over18
+        # self.is_nsfw = submission.over18
 
         # may change
         self.author = str(submission.author)  # don't change once deleted
@@ -201,7 +233,7 @@ class SubmissionInfo:
         self.author_flair = submission.author_flair_text
 
     def update(self, submission):
-        self.author = str(submission.author)
+        # self.author = str(submission.author)
         self.banned_by = submission.banned_by
         self.post_flair = submission.link_flair_text
         self.author_flair = submission.author_flair_text

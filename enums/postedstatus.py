@@ -10,3 +10,4 @@ class PostedStatus(Enum):
     SPAM_FLT = "Spam-filtered"
     UNKNOWN = "Unknown status"
     FH_RM = "Flair_Helper removed"
+    UNAVAILABLE = "Unavailable"

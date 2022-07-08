@@ -9,6 +9,7 @@ from praw.models import Submission
 from sqlalchemy import Boolean, Column, DateTime, Integer, String
 from enums import CountedStatus, PostedStatus
 from settings import login_credentials
+from models.reddit_models.redditinterface import SubmissionInfo
 
 s = dbobj.s
 
@@ -47,32 +48,57 @@ class SubmittedPost(dbobj.Base):  # need posted_status
     banned_by = Column(String(21), nullable=True)
     is_oc = Column(Boolean, nullable=False)
 
+    reply_comment = Column(String(191), nullable=True)
+
     api_handle = None
 
-    def __init__(self, submission: Submission, save_text: bool = False):
-        self.id = submission.id
-        self.title = submission.title[0:190]
-        self.author = str(submission.author)
-        if save_text:
-            self.submission_text = submission.selftext[0:190]
-        self.time_utc = datetime.utcfromtimestamp(submission.created_utc)
-        self.subreddit_name = str(submission.subreddit).lower()
-        self.added_time = datetime.now(pytz.utc)
-        self.flagged_duplicate = False
-        self.reviewed = False
-        self.banned_by = None
-        self.api_handle = submission
-        self.pre_duplicate = False
-        self.self_deleted = False
-        self.is_self = submission.is_self
-        self.counted_status = CountedStatus.NOT_CHKD.value
-        self.post_flair = submission.link_flair_text
-        self.author_flair = submission.author_flair_text
-        self.response_time = None
-        self.nsfw_last_checked = self.time_utc
-        self.nsfw_repliers_checked = False
-        self.posted_status = PostedStatus.UNKNOWN.value
+    def __init__(self, submission, save_text: bool = False):
 
+        if isinstance(submission, Submission):
+
+            self.id = submission.id
+            self.title = submission.title[0:190]
+            self.author = str(submission.author)
+            if save_text:
+                self.submission_text = submission.selftext[0:190]
+            self.time_utc = datetime.utcfromtimestamp(submission.created_utc)
+            self.subreddit_name = str(submission.subreddit).lower()
+            self.added_time = datetime.now(pytz.utc)
+            self.flagged_duplicate = False
+            self.reviewed = False
+            self.banned_by = None
+            self.api_handle = submission
+            self.pre_duplicate = False
+            self.self_deleted = False
+            self.is_self = submission.is_self
+            self.counted_status = CountedStatus.NOT_CHKD.value
+            self.post_flair = submission.link_flair_text
+            self.author_flair = submission.author_flair_text
+            self.response_time = None
+            self.nsfw_last_checked = self.time_utc
+            self.nsfw_repliers_checked = False
+            self.posted_status = PostedStatus.UNKNOWN.value
+        else:
+            subm_info = submission
+            self.id = subm_info.id
+            self.title = subm_info.title
+            self.submission_text = None
+            self.subreddit_name = subm_info.subreddit_name
+            self.added_time = datetime.now(pytz.utc)
+            self.flagged_duplicate = False
+            self.reviewed = False
+            self.banned_by = subm_info.banned_by
+            self.api_handle = None
+            self.pre_duplicate = False
+            self.self_deleted = False
+            self.is_self = subm_info.is_self
+            self.counted_status = -1  # CountedStatus.NOT_CHKD.value
+            self.post_flair = subm_info.post_flair
+            self.author_flair = subm_info.author_flair
+            self.response_time = None
+            self.nsfw_last_checked = self.time_utc
+            self.nsfw_repliers_checked = False
+            self.posted_status = PostedStatus.UNKNOWN.value
 
     def get_url(self) -> str:
         return f"http://redd.it/{self.id}"
@@ -84,7 +110,6 @@ class SubmittedPost(dbobj.Base):  # need posted_status
         if not self.bot_comment_id:
             return None
         return f"https://www.reddit.com/r/{self.subreddit_name}/comments/{self.id}//{self.bot_comment_id}"
-
 
 
     def update_status(self, reviewed=None, flagged_duplicate=None, counted_status=None):
