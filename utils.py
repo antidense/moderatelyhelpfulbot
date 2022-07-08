@@ -15,7 +15,7 @@ from sqlalchemy import *
 from sqlalchemy.ext.declarative import declarative_base
 from praw.models.listing.generator import ListingGenerator
 import queue
-from models.reddit_models import ActionedComments, Broadcast, CommonPost, Stats2, SubAuthor, SubmittedPost, \
+from models.reddit_models import  SubAuthor, SubmittedPost, \
     TrackedAuthor, TrackedSubreddit, RedditInterface, PostingGroup
 from logger import logger
 from sqlalchemy import exc
@@ -45,6 +45,7 @@ def get_age(input_text):
 
 def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPost, wd=None):  # uses some reddit api
     # check if removed
+
 
     status = wd.ri.get_posted_status(recent_post, get_removed_info=True)  # uses some reddit api
     # banned_by = recent_post.get_api_handle().banned_by
@@ -116,185 +117,169 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
     return CountedStatus.COUNTS, "no exemptions"
 
 
-def automated_reviews(wd):
-    print("excluding mod posts...")
+def automated_reviews(s):
+    print("AR: excluding mod posts...")
     # ignore moderators
-    rs = wd.s.execute('UPDATE RedditPost t '
-                      'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
-                      'SET counted_status = :counted_status, reviewed = 1 '
-                      'WHERE t.reviewed = 0 and s.mod_list like CONCAT("%", t.author, "%") ',
-                      {"counted_status": CountedStatus.MODPOST_EXEMPT.value})
+    rs = s.execute('UPDATE RedditPost t '
+                   'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
+                   'SET counted_status = :counted_status, reviewed = 1 '
+                   'WHERE t.counted_status < 1 and t.reviewed = 0 and s.mod_list like CONCAT("%", t.author, "%") ',
+                   {"counted_status": CountedStatus.MODPOST_EXEMPT.value})
+    print(rs.rowcount)
+    s.close()
 
-    print("excluding self posts...")
+    print("AR: excluding self posts...")
     # ignore self posts
-    rs = wd.s.execute("UPDATE RedditPost t "
-                      "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
-                      "SET counted_status = :counted_status, reviewed = 1 "
-                      "WHERE t.reviewed = 0 and t.is_self is TRUE and s.exempt_self_posts is TRUE",
-                      {"counted_status": CountedStatus.SELF_EXEMPT.value,
-                       "banned_by": "AutoModerator"})
+    rs = s.execute("UPDATE RedditPost t "
+                   "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
+                   "SET counted_status = :counted_status, reviewed = 1 "
+                   "WHERE t.counted_status < 1 "
+                   "AND t.reviewed = 0 and t.is_self is TRUE and s.exempt_self_posts is TRUE",
+                   {"counted_status": CountedStatus.SELF_EXEMPT.value,
+                    "banned_by": "AutoModerator"})
     print(rs.rowcount)
-    print("excluding link posts...")
+    s.close()
+    print("AR: excluding link posts...")
     # ignore link posts
-    rs = wd.s.execute("UPDATE RedditPost t "
-                      "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
-                      "SET counted_status = :counted_status, reviewed = 1 "
-                      "WHERE t.reviewed = 0 and t.is_self is FALSE and s.exempt_link_posts is TRUE",
-                      {"counted_status": CountedStatus.LINK_EXEMPT.value})
+    rs = s.execute("UPDATE RedditPost t "
+                   "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
+                   "SET counted_status = :counted_status, reviewed = 1 "
+                   "WHERE t.counted_status < 1 "
+                   "AND t.reviewed = 0 and t.is_self is FALSE and s.exempt_link_posts is TRUE",
+                   {"counted_status": CountedStatus.LINK_EXEMPT.value})
     print(rs.rowcount)
-    print("excluding OC posts")
+    s.close()
+    print("AR excluding OC posts")
     # ignore OC
-    rs = wd.s.execute("UPDATE RedditPost t "
-                      "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
-                      "SET counted_status = :counted_status, reviewed = 1 "
-                      "WHERE t.reviewed = 0 and t.is_oc is TRUE and s.exempt_oc is TRUE",
-                      {"counted_status": CountedStatus.OC_EXEMPT.value})
+    rs = s.execute("UPDATE RedditPost t "
+                   "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
+                   "SET counted_status = :counted_status, reviewed = 1 "
+                   "WHERE t.counted_status < 1 "
+                   "AND  t.reviewed = 0 and t.is_oc is TRUE and s.exempt_oc is TRUE",
+                   {"counted_status": CountedStatus.OC_EXEMPT.value})
+    print("AR excluding autoremoved posts...")
+    rs = s.execute("UPDATE RedditPost t "
+                   "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
+                   "SET counted_status = :counted_status, reviewed = 1 "
+                   "WHERE t.counted_status < 1 "
+                   "AND  s.ignore_Automoderator_removed = 1 AND t.posted_status like :posted_status",
+                   {"counted_status": CountedStatus.AM_RM_EXEMPT.value,
+                    "posted_status": PostedStatus.AUTOMOD_RM.value})
     print(rs.rowcount)
-    # Handle soft blacklists
-    print("marking blacklist posts")
-    rs = wd.s.execute("UPDATE RedditPost t "
-                      "INNER JOIN SubAuthor s ON s.subreddit_name = t.subreddit_name and s.author =  s.author_name"
-                      "SET counted_status = :counted_status, reviewed = 1 "
-                      "WHERE t.reviewed = 0 and t.is_self is FALSE and s.exempt_link_posts is TRUE",
-                      {"counted_status": CountedStatus.BLKLIST_NEED_REMOVE})
+    print("AR excluding moderator removed posts...DOES NOT INCLUDE Flair helper??")
+    # ignore link posts
+    rs = s.execute("UPDATE RedditPost t "
+                   "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
+                   "SET counted_status = :counted_status, reviewed = 1 "
+                   "WHERE t.counted_status < 1 "
+                   "AND  s.ignore_moderator_removed = 1 AND t.posted_status like :posted_status",
+                   {"counted_status": CountedStatus.MOD_RM_EXEMPT.value,
+                    "posted_status": PostedStatus.MOD_RM.value})
+    print(rs.rowcount)
+
+    print("AR: excluding author flair")
+    rs = s.execute('UPDATE RedditPost t '
+                   'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
+                   'SET counted_status = :counted_status, reviewed = 1 '
+                   'WHERE t.reviewed = 0 AND t.counted_status <1 '
+                   'AND s.author_exempt_flair_keyword is not NULL and t.author_flair is not NULL '
+                   'AND t.author_flair REGEXP s.author_exempt_flair_keyword ',
+                   {"counted_status": CountedStatus.FLAIR_EXEMPT})
+    print(rs.rowcount)
+    print("AR: author flair inclusion")
+    rs = s.execute('UPDATE RedditPost t '
+                   'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
+                   'SET counted_status = :counted_status, reviewed = 1 '
+                   'WHERE t.reviewed = 0 AND t.counted_status <1 '
+                   'AND s.author_not_exempt_flair_keyword is NOT NULL '
+                   'AND (t.author_flair is NULL '
+                   'OR NOT (t.author_flair REGEXP s.author_not_exempt_flair_keyword)'
+                   ')',
+                   {"counted_status": CountedStatus.FLAIR_EXEMPT})
+    print(rs.rowcount)
+    print("AR: excluding title/post_flair")
+    rs = s.execute('UPDATE RedditPost t '
+                   'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
+                   'SET counted_status = :counted_status, reviewed = 1 '
+                   'WHERE t.reviewed = 0 AND t.counted_status <1 '
+                   'AND s.title_exempt_keyword is not NULL '
+                   'AND CONCAT(t.title, COALESCE(t.post_flair)) REGEXP s.author_exempt_flair_keyword ',
+                   {"counted_status": CountedStatus.TITLE_KW_EXEMPT})
+    print(rs.rowcount)
+    print("AR: inclusion title/post flair - reversed")
+    rs = s.execute('UPDATE RedditPost t '
+                   'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
+                   'SET counted_status = :counted_status, reviewed = 1 '
+                   'WHERE t.reviewed = 0 AND t.counted_status <1 '
+                   'AND s.title_not_exempt_keyword  is NOT NULL '
+                   'AND NOT (CONCAT(t.title, COALESCE(t.post_flair)) REGEXP s.title_not_exempt_keyword)',
+                   {"counted_status": CountedStatus.TITLE_KW_EXEMPT})
+    print(rs.rowcount)
 
     """
-      # flair keyword - not currently in db
-    rs = wd.s.execute('UPDATE RedditPost t '
-                      'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
-                      'SET counted_status = :counted_status, reviewed = 1 '
-                      'WHERE s.author_exempt_flair_keyword is not null like CONCAT("%", t.author, "%") ',
-                      {"counted_status": CountedStatus.MODPOST_EXEMPT.value})
-   """
+    logger.info(f"finding blacklist violations")
+    rs = s.execute('UPDATE RedditPost p '
+                   'INNER JOIN SubAuthor a ON p.author = a.author_name AND p.subreddit_name == a.subreddit_name '
+                   'SET counted_status = :counted_status, reviewed = 1 '
+                   'WHERE p.reviewed = 0 AND p.counted_status <1 '
+                   'AND p.time_utc < a.next_eligible '
+                   'AND p.time_utc > utc_timestamp() - INTERVAL 24 HOUR',
+                   {"counted_status": CountedStatus.BLKLIST_NEED_REMOVE})
+    print(rs.rowcount)
+    """
+
 
 def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
-    print("excluding spam posts...")
-    # ignore spam exempt
-    rs = wd.s.execute("UPDATE RedditPost "
-                      "SET counted_status = :counted_status, reviewed = 1 "
-                      "WHERE reviewed = 0 and posted_status = :posted_status",
-                      {"counted_status": CountedStatus.SPAMMED_EXMPT.value,
-                       "posted_status": PostedStatus.SPAM_FLT.value})
 
-    print("excluding mod posts...")
-    # ignore moderators
-    rs = wd.s.execute('UPDATE RedditPost t '
-                      'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
-                      'SET counted_status = :counted_status, reviewed = 1 '
-                      'WHERE t.reviewed = 0 and s.mod_list like CONCAT("%", t.author, "%") ',
-                      {"counted_status": CountedStatus.MODPOST_EXEMPT.value})
-
-    print("excluding self posts...")
-    # ignore self posts
-    rs = wd.s.execute("UPDATE RedditPost t "
-                      "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
-                      "SET counted_status = :counted_status, reviewed = 1 "
-                      "WHERE t.reviewed = 0 and t.is_self is TRUE and s.exempt_self_posts is TRUE",
-                      {"counted_status": CountedStatus.SELF_EXEMPT.value,
-                       "banned_by": "AutoModerator"})
-    print(rs.rowcount)
-    print("excluding link posts...")
-    # ignore link posts
-    rs = wd.s.execute("UPDATE RedditPost t "
-                      "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
-                      "SET counted_status = :counted_status, reviewed = 1 "
-                      "WHERE t.reviewed = 0 and t.is_self is FALSE and s.exempt_link_posts is TRUE",
-                      {"counted_status": CountedStatus.LINK_EXEMPT.value})
-
-    print("excluding OC posts")
-    # ignore OC
-    rs = wd.s.execute("UPDATE RedditPost t "
-                      "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
-                      "SET counted_status = :counted_status, reviewed = 1 "
-                      "WHERE t.reviewed = 0 and t.is_oc is TRUE and s.exempt_oc is TRUE",
-                      {"counted_status": CountedStatus.OC_EXEMPT.value})
 
     # Handle soft blacklists
     tick = datetime.now()
-    try:
-        """
-        rs = wd.s.execute("UPDATE RedditPost t "
-                          "INNER JOIN SubAuthor s ON t.subreddit_name = s.subreddit_name "
-                          "SET counted_status = :counted_status, reviewed = 1 "
-                          "WHERE t.reviewed = 0 and t.is_self is FALSE and s.exempt_link_posts is TRUE",
-                          {"counted_status": CountedStatus.LINK_EXEMPT.value})
-        """
+    automated_reviews(wd.s)
 
-        logger.info(f"finding blacklist violations")
-        outstanding_posts = (wd.s.query(SubmittedPost)).select_from(SubmittedPost).join(SubAuthor, and_(
-                                                                                        SubAuthor.author_name == SubmittedPost.author,
-                                                                                        SubAuthor.subreddit_name == SubmittedPost.subreddit_name)). \
-            filter(SubmittedPost.reviewed.is_(False),
-                   SubmittedPost.time_utc < SubAuthor.next_eligible,
-                   SubmittedPost.time_utc > tick.replace(tzinfo=None) - timedelta(hours=24)
-                   ).all()
+    blacklist_violations = wd.s.query()
+    logger.info(f"removing blacklist violations")
+    tuples = (wd.s.query(SubmittedPost, SubAuthor)).select_from(SubmittedPost).join(SubAuthor, and_(
+        SubAuthor.author_name == SubmittedPost.author,
+        SubAuthor.subreddit_name == SubmittedPost.subreddit_name)). \
+        filter(SubmittedPost.reviewed.is_(False),
+               SubmittedPost.time_utc < SubAuthor.next_eligible,
+               SubmittedPost.time_utc > tick.replace(tzinfo=None) - timedelta(hours=24)
+               ).all()
 
+    for i, tuple1 in enumerate(tuples):
+        op, subreddit_author = tuple1
+        assert (isinstance(op, SubmittedPost))
+        assert (isinstance(subreddit_author, SubAuthor))
+        logger.info(f"checking post for softblacklist: {i}")
 
+        tr_sub: TrackedSubreddit = get_subreddit_by_name(wd, op.subreddit_name, update_if_due=False)
+        if not tr_sub:
+            continue
+        # subreddit_author = wd.s.query(SubAuthor).get((op.subreddit_name, op.author))
+        try:
+            success = wd.ri.mod_remove(op)  # no checking if it can't remove post
+            logger.warning(f'removing post 2/2 blacklist: {op.author} {op.title}')
+            if success and tr_sub.comment:
+                logger.warning(f'remove successful!: {op.author} {op.title}')
+                last_valid_post: SubmittedPost = wd.s.query(SubmittedPost).get(
+                    subreddit_author.last_valid_post) if subreddit_author.last_valid_post is not None else None
+                make_comment(tr_sub, op, [last_valid_post, ],
+                             tr_sub.comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve,
+                             lock_thread=tr_sub.lock_thread, stickied=tr_sub.comment_stickied,
+                             next_eligibility=subreddit_author.next_eligible, blacklist=True, wd=wd)
+                op.update_status(reviewed=True, flagged_duplicate=True, counted_status=CountedStatus.BLKLIST)
+                wd.s.add(op)
+        except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
+            logger.warning(f'something went wrong in removing post {str(e)}')
 
-        logger.info(f"removing blacklist violations")
-        for i, op in enumerate(outstanding_posts):
-            assert (isinstance(op, SubmittedPost))
-            logger.info(f"checking post for softblacklist: {i}")
-
-            tr_sub: TrackedSubreddit = get_subreddit_by_name(wd, op.subreddit_name, update_if_due=False)
-            if not tr_sub:
-                continue
-
-            subreddit_author = wd.s.query(SubAuthor).get((op.subreddit_name, op.author))
-            try:
-                success = wd.ri.mod_remove(op)  # no checking if it can't remove post
-                logger.warning(f'removed post 2/2 blacklist: {op.author} {op.title}')
-                if success and tr_sub.comment:
-                    last_valid_post: SubmittedPost = wd.s.query(SubmittedPost).get(
-                        subreddit_author.last_valid_post) if subreddit_author.last_valid_post is not None else None
-                    make_comment(tr_sub, op, [last_valid_post, ],
-                                 tr_sub.comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve,
-                                 lock_thread=tr_sub.lock_thread, stickied=tr_sub.comment_stickied,
-                                 next_eligibility=subreddit_author.next_eligible, blacklist=True, wd=wd)
-                    op.update_status(reviewed=True, flagged_duplicate=True, counted_status=CountedStatus.BLKLIST)
-                    wd.s.add(op)
-            except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
-                logger.warning(f'something went wrong in removing post {str(e)}')
-    except(exc.InvalidRequestError) as e:
-        logger.warning(f'something went wrong in sqlquery {str(e)}')
-    """
-    
-      # flair keyword - not currently in db
-    rs = wd.s.execute('UPDATE RedditPost t '
-                      'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
-                      'SET counted_status = :counted_status, reviewed = 1 '
-                      'WHERE s.author_exempt_flair_keyword is not null like CONCAT("%", t.author, "%") ',
-                      {"counted_status": CountedStatus.MODPOST_EXEMPT.value})
-
-
-
-    # Can't  use these until banned_by is accurate?
-    # ignore automoderator
-    rs = wd.s.execute("UPDATE RedditPost t"
-                      "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
-                      "SET counted_status = :counted_status, reviewed = 1 "
-                      "WHERE s.ignore_AutoModerator_removed is TRUE and "
-                      "t.banned_by = :banned_by",
-                      {"counted_status": CountedStatus.AM_RM_EXEMPT,
-                       "banned_by": "AutoModerator"})
-
-    rs = wd.s.execute("UPDATE RedditPost t"
-                      "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
-                      "SET counted_status = :counted_status, reviewed = 1 "
-                      "WHERE s.ignore_moderator_removed is TRUE and "
-                      "t.banned_by = :banned_by",
-                      {"counted_status": CountedStatus.AM_RM_EXEMPT,
-                       "banned_by": "FlairHelper"})
-    """
-
-    logger.debug("querying recent post(s)")
+    print(f"LRWT: querying recent post(s)")
     posting_groups = []
     most_recent_identified = None
-    left_over_posts = wd.s.query(SubmittedPost).filter(SubmittedPost.reviewed == 0,
+    posts_to_verify = wd.s.query(SubmittedPost).filter(SubmittedPost.reviewed == 0,
                                                        SubmittedPost.review_debug.like("ma:%"),
                                                        SubmittedPost.time_utc > datetime.now() - timedelta(hours=48)
                                                        ).order_by(SubmittedPost.added_time.desc()).all()
-    for post in left_over_posts:
+    for post in posts_to_verify:
         if not most_recent_identified:
             most_recent_identified = post
         assert isinstance(post, SubmittedPost)
@@ -313,7 +298,7 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
 
     more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status >3 and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND MAX(added_time) > :look_back AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
     # more_accurate_statement.replace("[date]")
-    search_back = 12
+    search_back = 24
     more_accurate_statement = more_accurate_statement.replace('72', str(search_back))
 
     tick = datetime.now()
@@ -381,15 +366,15 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
         subreddit_author: SubAuthor = wd.s.query(SubAuthor).get((pg.subreddit_name, pg.author_name))
 
         # Remove any posts that are prior to eligibility
-        left_over_posts = []
+        posts_to_verify = []
         print(f"---max_count: {max_count}, interval:{tr_sub.min_post_interval_txt} "
               f"grace_period:{tr_sub.grace_period}")
         for j, post in enumerate(pg.posts):
-
+            assert (isinstance(post, SubmittedPost))
             logger.info(
                 f"{i}-{j}Checking: r/{pg.subreddit_name}  "
-                f"{pg.author_name}  {post.time_utc}  {post.reviewed}  {post.counted_status}"
-                f"url:{post.get_url()}  title:{post.title[0:30]}")
+                f"{pg.author_name}  {post.time_utc}  reviewed:{post.reviewed}  counted:{post.counted_status}"
+                f"posted:{post.posted_status} url:{post.get_url()}  title:{post.title[0:30]}")
 
             if post.counted_status == CountedStatus.BLKLIST.value:  # May not need this later
                 logger.info(
@@ -426,7 +411,7 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
                 wd.s.add(post)
                 logger.info(f"\t\tpost status: {counted_status} {result}")
                 if counted_status == CountedStatus.COUNTS:
-                    left_over_posts.append(post)
+                    posts_to_verify.append(post)
                 if i % 25 == 0:
                     wd.s.commit()
 
@@ -466,12 +451,11 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
 
             logger.info("Nothing to do, moving on.")
             continue
-        # Look for exempted posts
-        for j, post in enumerate(back_posts):
-            logger.info(f"{i}-{j} Backpost: r/{pg.subreddit_name}  {pg.author_name}  {post.time_utc}  "
-                        f"url:{post.get_url()}  title:{post.title[0:30]}")
 
-            logger.info(f"\tpost_counted_status status: {post.counted_status} ")
+        # Check backposts
+        for j, post in enumerate(back_posts):
+            logger.info(f"{i}-{j} Backpost: {post.time_utc} url:{post.get_url()}  title:{post.title[0:30]}"
+                        f"\t counted_status: {post.counted_status} posted_status: {post.posted_status} ")
             if post.counted_status == CountedStatus.NOT_CHKD.value \
                     or post.counted_status == CountedStatus.PREV_EXEMPT.value \
                     or post.counted_status == CountedStatus.EXEMPTED.value:  # later remove?
@@ -488,13 +472,10 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
 
         # Go through left over posts
         grace_count = 0
-        for j, post in enumerate(left_over_posts):
+        for j, post in enumerate(posts_to_verify):
             logger.info(f"{i}-{j} Reviewing: r/{pg.subreddit_name}  {pg.author_name}  {post.time_utc}  "
-                        f"url:{post.get_url()}  title:{post.title[0:30]}")
-
-            if post.reviewed or post.counted_status == CountedStatus.BLKLIST.value:  # shouldn't get here??
-                print(f"\tAlready reviewed %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
-                continue
+                        f"url:{post.get_url()}  title:{post.title[0:30]}"
+                        f"\t counted_status: {post.counted_status} posted_status: {post.posted_status}")
 
             # Go through possible preposts for left over post
             associated_reposts = []
@@ -752,7 +733,7 @@ def look_for_rule_violations2(wd, intensity=0, subs_to_update=None):  # ri only 
                         f"url:{post.get_url()}  title:{post.title[0:30]}")
 
             counted_status = post.counted_status
-            logger.info(f"\tpost_counted_status status: {post.counted_status} ")
+            logger.info(f"\tpost_counted_status: {post.counted_status} ")
             if post.counted_status == CountedStatus.NOT_CHKD.value \
                     or post.counted_status == CountedStatus.PREV_EXEMPT.value \
                     or post.counted_status == CountedStatus.EXEMPTED.value:  # later remove?
@@ -1036,7 +1017,7 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
 
 def make_comment(subreddit: TrackedSubreddit, recent_post: SubmittedPost, most_recent_reposts, comment_template: String,
                  distinguish=False, approve=False, lock_thread=True, stickied=False, next_eligibility: datetime = None,
-                 blacklist=False, wd=None):
+                 blacklist=False, wd=None, do_actual_comment=True):
     prev_submission = most_recent_reposts[-1] if most_recent_reposts else None
     if not next_eligibility:
         next_eligibility = most_recent_reposts[0].time_utc + subreddit.min_post_interval
@@ -1055,6 +1036,9 @@ def make_comment(subreddit: TrackedSubreddit, recent_post: SubmittedPost, most_r
     comment = None
     response = subreddit.populate_tags2(f"{comment_template}{RESPONSE_TAIL}{ids}",
                                         recent_post=recent_post, prev_post=prev_submission, wd=wd)
+
+    if not do_actual_comment:
+        return response
     try:
         comment: praw.models.Comment | None = \
             wd.ri.reply(recent_post, response, distinguish=distinguish, approve=approve, lock_thread=lock_thread)
