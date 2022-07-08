@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from praw import exceptions
-import Queue
+
 from praw.models import Submission
 from static import *
 from datetime import datetime, timedelta, timezone
@@ -22,13 +22,15 @@ from enum import Enum  # has to be at the end?
 import queue
 """
 
-from utils import look_for_rule_violations2, look_for_rule_violations3, get_age, get_subreddit_by_name
+from utils import look_for_rule_violations2, look_for_rule_violations3, get_age, get_subreddit_by_name, automated_reviews
 from models.reddit_models.redditinterface import SubredditInfo
 # from modmail import handle_modmail_messages, handle_direct_messages
 from models.reddit_models import ActionedComments, CommonPost, Stats2, SubAuthor, SubmittedPost, TrackedAuthor, \
     TrackedSubreddit, RedditInterface
+from models.reddit_models.redditinterface import SubmissionInfo
 from logger import logger
 from core import dbobj
+import time
 
 
 dbobj.load_models()
@@ -44,13 +46,26 @@ add non-binary gender
 
 from workingdata import WorkingData
 
+
+def thread_automated_reviews():
+    s3 = dbobj.Session()
+    automated_reviews(s3)
+
+
+def thread_post_pull(wd):
+    s2 = dbobj.Session()
+    pull_posts(wd, s2)
+
 def main_loop():
+    print("started in main loop")
     wd = WorkingData()
+
     wd.s = dbobj.s
+
     wd.ri = RedditInterface()
     # load_settings(wd)
     sub_info = wd.ri.get_subreddit_info(subreddit_name=BOT_NAME)
-    wd.ri.bot_sub : TrackedSubreddit = wd.s.query(TrackedSubreddit).get(BOT_NAME)
+    wd.ri.bot_sub = wd.s.query(TrackedSubreddit).get(BOT_NAME)
     if not wd.ri.bot_sub:
         wd.ri.bot_sub = TrackedSubreddit(subreddit_name=BOT_NAME, sub_info=sub_info)
     if not wd.ri.bot_sub.mm_convo_id:
@@ -63,20 +78,13 @@ def main_loop():
     # update_sub_list(intensity=2)
     purge_old_records(wd)
 
+    # thread_automated_reviews()
+    # thread_post_pull(wd)
+
     while True:
-        i += 1
-        print('start_loop')
-
-        intensity = 1 if (i - 1) % 15 == 0 else 0
-
-        # First: Update sub list:
-        if wd.to_update_list or len(wd.sub_list) == 0 or i % 50 == 0:
-            print("updating list")
-            update_sub_list(wd, intensity=intensity)
-            wd.to_update_list = False
-
         try:
             # Gather posts
+            """
             chunk_size = 200 if intensity == 1 else 300
             chunked_list = [wd.sub_list[j:j + chunk_size] for j in range(0, len(wd.sub_list), chunk_size)]
 
@@ -94,9 +102,13 @@ def main_loop():
             start = datetime.now(pytz.utc)
             if i % 15 == 0:
                 intensity = 5
-            look_for_rule_violations3(wd)  # uses a lot of resource
+            """
+            # look_for_rule_violations3(wd, db_lock)  # uses a lot of resource
             # look_for_rule_violations2(wd, intensity=intensity, sub_list=sub_list)  # uses a lot of resource
-            print("$$$checking rule violations took this long", datetime.now(pytz.utc) - start)
+            # print("$$$checking rule violations took this long", datetime.now(pytz.utc) - start)
+
+            pull_posts(wd, wd.s)
+            automated_reviews(s3)
 
             if i % 75 == 0:
                 purge_old_records(wd)
@@ -148,6 +160,76 @@ def load_settings(wd: WorkingData):  # Not being used
     # load_subs(main_settings)
 """
 
+
+def pull_posts(wd, s2):
+    i = 0
+    while True:
+        i += 1
+        print('PP: start_loop')
+
+        intensity = 1 if (i - 1) % 15 == 0 else 0
+        # First: Update sub list:
+        if len(wd.sub_list) == 0 or i % 50 == 0:
+            print("updating list")
+            update_sub_list(wd, intensity=intensity)
+
+        chunk_size = 200
+        query_limit = 400
+
+        new_sub_infos = []
+        complete_subs = []
+        subs_updated = []
+
+        # Split list in chunks
+        print("RWT: chunking list")
+        #dict_keys = subreddit_dict.keys()
+        # chunked_list = [dict_keys[j:j + chunk_size] for j in range(0, len(subreddit_dict), chunk_size)]
+        chunked_list = [wd.sub_list[j:j + chunk_size] for j in range(0, len(wd.sub_list), chunk_size)]
+        print("RWT: going through chunks")
+        for sub_list in chunked_list:
+            sub_list_str = "+".join(sub_list)
+            print(len(sub_list_str), sub_list_str)
+            new_submissions = [a for a in wd.ri.reddit_client.subreddit(sub_list_str).new(limit=query_limit)]
+
+            # Pull posts
+            print("RWT: getting subs from database")
+            for subm_to_review in new_submissions:
+                assert (isinstance(subm_to_review, praw.models.Submission))
+                subreddit_name = str(subm_to_review.subreddit).lower()  # get subreddit name
+                # stop looking
+                if subreddit_name in complete_subs:  # skip if time to skip
+                    continue
+                subm_info = SubmissionInfo(subm_to_review)
+                # start skipping if this is as deep as we need to go
+                tr_sub = get_subreddit_by_name(wd, subreddit_name)
+                if subm_info.time_utc < tr_sub.last_pulled:
+                    complete_subs.append(subreddit_name)
+                    continue
+                tr_sub.last_pulled \
+                    = max(tr_sub.last_pulled, subm_info.time_utc)
+                subs_updated.append(tr_sub)
+                new_sub_infos.append(subm_info)
+        s2.add_all(subs_updated)
+        s2.commit()
+        time.sleep(10)
+
+        # Update new posts into database
+        print("RWT: updating posts into database")
+        # db_lock.acquire()
+        for subm_info in new_sub_infos:
+            existing_subm = s2.query(SubmittedPost).get(subm_info.id)
+            if not existing_subm:
+                subm_post = Submission(subm_info)
+                s2.add(subm_post)
+        s2.commit()
+        # db_lock.release()
+
+        # Get posts flagged for renewal
+        posts_to_remove = s2.query(SubmittedPost) \
+            .filter(SubmittedPost.counted_status == CountedStatus.BLKLIST_NEED_REMOVE) \
+            .all()
+
+
 def update_sub_list(wd: WorkingData, intensity=0):
     print('updating subs..', sep="")
     wd.sub_list = []
@@ -170,7 +252,7 @@ def update_sub_list(wd: WorkingData, intensity=0):
                     print(f"found convo id: {tr.mm_convo_id}")
                 wd.s.add(tr)
                 wd.s.commit()
-    trs = wd.s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status > 0).all()
+    trs = wd.s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status > 2).all()
     for tr in trs:
         # print(f'updating /r/{tr.subreddit_name}', end="")
         assert isinstance(tr, TrackedSubreddit)
@@ -180,7 +262,8 @@ def update_sub_list(wd: WorkingData, intensity=0):
         if tr.subreddit_name not in wd.sub_dict:
             worked, status = tr.reload_yaml_settings()
             wd.sub_dict[tr.subreddit_name] = tr
-            # print(f"---- {worked}, {status}")
+            # print(f"---- {
+            # worked}, {status}")
             if not tr.mod_list:
                 try:
                     tr.mod_list = str(wd.ri.get_mod_list(tr.subreddit_name))
@@ -189,25 +272,11 @@ def update_sub_list(wd: WorkingData, intensity=0):
 
                 # print(tr.mod_list)
                 wd.s.add(tr)
-
-
-
-
-        """
-        if tr.subreddit_name not in wd.sub_dict:
-            if tr.last_updated < datetime.now() - timedelta(days=7) and tr.active_status >= 0:
-                print(f'...rechecking...{tr.last_updated}')
-                sub_info = wd.ri.get_subreddit_info(tr.subreddit_name)
-                tr.update_from_subinfo(sub_info)
-                tr.reload_yaml_settings()
+            if BOT_NAME not in tr.mod_list:
+                tr.active_status = SubStatus.NO_MOD_PRIV
                 wd.s.add(tr)
-                wd.s.commit()
-            else:
-                tr.reload_yaml_settings()
-                print(f'')
+            # wd.s.add(tr)
 
-        wd.sub_dict[tr.subreddit_name] = tr
-        """
     wd.s.commit()
     return
 
@@ -278,6 +347,7 @@ def check_new_submissions(wd: WorkingData, query_limit=800, sub_list='mod', inte
     logger.debug("updating database...")
     wd.s.commit()
     return subreddit_names
+
 
 
 
@@ -678,7 +748,6 @@ def check_common_posts(wd: WorkingData, subreddit_names):
     sub_list = str(subreddit_names).replace("[", "(").replace("]", ")")
     statement = f"select c.title, c.id, r.id, r.subreddit_name from CommonPosts c left join RedditPost r on c.title = r.title where r.subreddit_name in {sub_list} and r.id !=c.id and r.time_utc> utc_timestamp() - Interval 1 day and r.counted_status != 30;"
     blurbs = {}
-    print(statement)
     rs = wd.s.execute(statement)
 
     for row in rs:
@@ -904,7 +973,7 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
 
     elif command == "update":  # $update
 
-        worked, status = tr_sub.reload_yaml_settings(force_update=True)
+        worked, status = tr_sub.reload_yaml_settings()
         help_text = ""
         if "404" in status:
             help_text = f"This error means the wiki config page needs to be created. " \
@@ -1002,7 +1071,7 @@ def handle_direct_messages(wd: WorkingData):
             tr_sub = get_subreddit_by_name(wd, subreddit_name)
             response, _ = handle_dm_command(wd, subreddit_name, requestor_name, command, body_parts[1:])
             if tr_sub and thread_id:
-                wd.ri.send_modmail(subreddit_name=tr_sub, body=response[:9999], thread_id=thread_id)
+                wd.ri.send_modmail(subreddit=tr_sub, body=response[:9999], thread_id=thread_id)
             else:
                 message.reply(body=response[:9999])
             bot_owner_message = f"subreddit: {subreddit_name}\n\n" \

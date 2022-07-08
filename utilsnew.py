@@ -1,5 +1,14 @@
 """ None of these are implemented yet """
 
+"""
+rs = wd.s.execute("UPDATE RedditPost t "
+                  "INNER JOIN SubAuthor s ON t.subreddit_name = s.subreddit_name "
+                  "SET counted_status = :counted_status, reviewed = 1 "
+                  "WHERE t.reviewed = 0 and t.is_self is FALSE and s.exempt_link_posts is TRUE 
+                  "AND s.active_status > 3",
+                  {"counted_status": CountedStatus.LINK_EXEMPT.value})
+"""
+
 
 def load_new_submissions_db():  #requires database:  memory -> db
     global NEW_SUBMISSION_Q

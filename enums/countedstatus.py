@@ -1,13 +1,14 @@
 from enum import Enum
 
 class CountedStatus(Enum):
+    NEEDS_UPDATE = -2  # may be exempt but don't have that information (is automoderator or mod-removed exempt?)
     NOT_CHKD = -1   # include in search
     PREV_EXEMPT = 0  # Previously the code for exemption, switched to 2
     COUNTS = 1  # include in search
     EXEMPTED = 2  # don't include in search  0 --> CHANGE to 2*****  no longer use, use more specific
     BLKLIST = 3  # don't include in search
     HALLPASS = 4  # don't include in search
-    FLAGGED = 5
+    FLAGGED = 5 # don't include?
     SPAMMED_EXMPT = 6
     AM_RM_EXEMPT = 7
     MOD_RM_EXEMPT = 8
