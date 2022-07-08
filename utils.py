@@ -225,7 +225,7 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
                                                                                         SubAuthor.author_name == SubmittedPost.author,
                                                                                         SubAuthor.subreddit_name == SubmittedPost.subreddit_name)). \
             filter(SubmittedPost.reviewed.is_(False),
-                   SubmittedPost.time_utc > SubAuthor.next_eligible,
+                   SubmittedPost.time_utc < SubAuthor.next_eligible,
                    SubmittedPost.time_utc > tick.replace(tzinfo=None) - timedelta(hours=24)
                    ).all()
 
