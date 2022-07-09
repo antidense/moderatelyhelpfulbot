@@ -15,7 +15,7 @@ from sqlalchemy import *
 from sqlalchemy.ext.declarative import declarative_base
 from praw.models.listing.generator import ListingGenerator
 import queue
-from models.reddit_models import  SubAuthor, SubmittedPost, \
+from models.reddit_models import SubAuthor, SubmittedPost, \
     TrackedAuthor, TrackedSubreddit, RedditInterface, PostingGroup
 from logger import logger
 from sqlalchemy import exc
@@ -45,27 +45,34 @@ def get_age(input_text):
 
 def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPost, wd=None):  # uses some reddit api
     # check if removed
+    if recent_post.counted_status > 2:
+        return CountedStatus(recent_post.counted_status)
 
-
-    status = wd.ri.get_posted_status(recent_post, get_removed_info=True)  # uses some reddit api
+    posted_status = recent_post.posted_status
+    if posted_status == PostedStatus.UNKNOWN.value \
+            or recent_post.last_checked < datetime.now(pytz.utc).replace(tzinfo=None) - timedelta(hours=2):
+        posted_status = wd.ri.get_posted_status(recent_post, get_removed_info=True)  # uses some reddit api
+        wd.s.add(recent_post)
+        wd.s.commit()
     # banned_by = recent_post.get_api_handle().banned_by
     # logger.debug(">>>>exemption status: {}".format(banned_by))
 
-    if status == PostedStatus.SPAM_FLT:
+    # These should already be identified - except for author/post flairs? May not know if they were recently updated
+    if posted_status == PostedStatus.SPAM_FLT:
         return CountedStatus.SPAMMED_EXMPT, ""
-    elif tr_sub.ignore_AutoModerator_removed and status == PostedStatus.AUTOMOD_RM:
+    elif tr_sub.ignore_AutoModerator_removed and posted_status == PostedStatus.AUTOMOD_RM:
         return CountedStatus.AM_RM_EXEMPT, ""
-    elif tr_sub.ignore_moderator_removed and status == PostedStatus.FH_RM:
+    elif tr_sub.ignore_moderator_removed and posted_status == PostedStatus.FH_RM:
         return CountedStatus.FLAIR_HELPER, ""
-    elif tr_sub.ignore_moderator_removed and status == PostedStatus.MOD_RM:
+    elif tr_sub.ignore_moderator_removed and posted_status == PostedStatus.MOD_RM:
         return CountedStatus.MOD_RM_EXEMPT, ""
-    elif tr_sub.exempt_oc and wd.ri.get_submission_api_handle(recent_post).is_original_content:
+    elif tr_sub.exempt_oc and recent_post.is_oc:  # won't change
         return CountedStatus.OC_EXEMPT, ""
-    elif tr_sub.exempt_self_posts and wd.ri.get_submission_api_handle(recent_post).is_self:
+    elif tr_sub.exempt_self_posts and recent_post.is_self:  # wont change
         return CountedStatus.SELF_EXEMPT, ""
-    elif tr_sub.exempt_link_posts and wd.ri.get_submission_api_handle(recent_post).is_self is not True:
+    elif tr_sub.exempt_link_posts and recent_post.is_self is not True: # won't change
         return CountedStatus.LINK_EXEMPT, ""
-    if tr_sub.exempt_moderator_posts and recent_post.author in tr_sub.subreddit_mods:
+    if tr_sub.exempt_moderator_posts and recent_post.author in tr_sub.subreddit_mods: # may change
         return CountedStatus.MODPOST_EXEMPT, "moderator exempt"
     # check if flair-exempt
     try:
@@ -231,11 +238,11 @@ def automated_reviews(s):
 
 def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
 
-
     # Handle soft blacklists
     tick = datetime.now()
     automated_reviews(wd.s)
 
+    """
     blacklist_violations = wd.s.query()
     logger.info(f"removing blacklist violations")
     tuples = (wd.s.query(SubmittedPost, SubAuthor)).select_from(SubmittedPost).join(SubAuthor, and_(
@@ -271,6 +278,7 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
                 wd.s.add(op)
         except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
             logger.warning(f'something went wrong in removing post {str(e)}')
+    """
 
     print(f"LRWT: querying recent post(s)")
     posting_groups = []

@@ -225,12 +225,14 @@ class SubmissionInfo:
         self.subreddit_name = str(submission.subreddit).lower()
         self.is_self = submission.is_self
         # self.is_nsfw = submission.over18
+        self.is_oc = submission.is_original_content
 
         # may change
         self.author = str(submission.author)  # don't change once deleted
         self.banned_by = submission.banned_by
         self.post_flair = submission.link_flair_text
         self.author_flair = submission.author_flair_text
+
 
     def update(self, submission):
         # self.author = str(submission.author)

@@ -9,7 +9,7 @@ from praw.models import Submission
 from sqlalchemy import Boolean, Column, DateTime, Integer, String
 from enums import CountedStatus, PostedStatus
 from settings import login_credentials
-from models.reddit_models.redditinterface import SubmissionInfo
+# from models.reddit_models.redditinterface import SubmissionInfo
 
 s = dbobj.s
 
@@ -78,6 +78,7 @@ class SubmittedPost(dbobj.Base):  # need posted_status
             self.nsfw_last_checked = self.time_utc
             self.nsfw_repliers_checked = False
             self.posted_status = PostedStatus.UNKNOWN.value
+            self.is_oc = submission.is_original_content
         else:
             subm_info = submission
             self.id = subm_info.id
@@ -99,6 +100,7 @@ class SubmittedPost(dbobj.Base):  # need posted_status
             self.nsfw_last_checked = self.time_utc
             self.nsfw_repliers_checked = False
             self.posted_status = PostedStatus.UNKNOWN.value
+            self.is_oc = subm_info.is_oc
 
     def get_url(self) -> str:
         return f"http://redd.it/{self.id}"
