@@ -1044,12 +1044,12 @@ def handle_direct_messages(wd: WorkingData):
 
 def mod_mail_invitation_to_moderate(wd: WorkingData, message):
     subreddit_name = message.subject.replace("invitation to moderate /r/", "")
-    tr_sub = wd.ri.get_subreddit_by_name(subreddit_name, create_if_not_exist=False)
+    tr_sub = get_subreddit_by_name(subreddit_name, create_if_not_exist=False)
 
     # accept invite if accepting invites or had been accepted previously
     if ACCEPTING_NEW_SUBS or tr_sub and 'karma' not in subreddit_name.lower():
         if not tr_sub:
-            tr_sub = wd.ri.get_subreddit_by_name(subreddit_name, create_if_not_exist=True)
+            tr_sub = get_subreddit_by_name(subreddit_name, create_if_not_exist=True)
         sub = wd.ri.get_subreddit_api_handle(tr_sub)
         try:
             sub.mod.accept_invite()

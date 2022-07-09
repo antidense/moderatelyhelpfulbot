@@ -50,7 +50,8 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
 
     posted_status = recent_post.posted_status
     if posted_status == PostedStatus.UNKNOWN.value \
-            or recent_post.last_checked < datetime.now(pytz.utc).replace(tzinfo=None) - timedelta(hours=2):
+            or (recent_post.last_checked
+                and recent_post.last_checked < datetime.now(pytz.utc).replace(tzinfo=None) - timedelta(hours=2)):
         posted_status = wd.ri.get_posted_status(recent_post, get_removed_info=True)  # uses some reddit api
         wd.s.add(recent_post)
         wd.s.commit()
@@ -124,20 +125,20 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
     return CountedStatus.COUNTS, "no exemptions"
 
 
-def automated_reviews(s):
+def automated_reviews(wd):
     print("AR: excluding mod posts...")
     # ignore moderators
-    rs = s.execute('UPDATE RedditPost t '
+    rs = wd.s.execute('UPDATE RedditPost t '
                    'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
                    'SET counted_status = :counted_status, reviewed = 1 '
                    'WHERE t.counted_status < 1 and t.reviewed = 0 and s.mod_list like CONCAT("%", t.author, "%") ',
                    {"counted_status": CountedStatus.MODPOST_EXEMPT.value})
     print(rs.rowcount)
-    s.close()
+
 
     print("AR: excluding self posts...")
     # ignore self posts
-    rs = s.execute("UPDATE RedditPost t "
+    rs = wd.s.execute("UPDATE RedditPost t "
                    "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
                    "SET counted_status = :counted_status, reviewed = 1 "
                    "WHERE t.counted_status < 1 "
@@ -145,27 +146,27 @@ def automated_reviews(s):
                    {"counted_status": CountedStatus.SELF_EXEMPT.value,
                     "banned_by": "AutoModerator"})
     print(rs.rowcount)
-    s.close()
+
     print("AR: excluding link posts...")
     # ignore link posts
-    rs = s.execute("UPDATE RedditPost t "
+    rs = wd.s.execute("UPDATE RedditPost t "
                    "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
                    "SET counted_status = :counted_status, reviewed = 1 "
                    "WHERE t.counted_status < 1 "
                    "AND t.reviewed = 0 and t.is_self is FALSE and s.exempt_link_posts is TRUE",
                    {"counted_status": CountedStatus.LINK_EXEMPT.value})
     print(rs.rowcount)
-    s.close()
+
     print("AR excluding OC posts")
     # ignore OC
-    rs = s.execute("UPDATE RedditPost t "
+    rs = wd.s.execute("UPDATE RedditPost t "
                    "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
                    "SET counted_status = :counted_status, reviewed = 1 "
                    "WHERE t.counted_status < 1 "
                    "AND  t.reviewed = 0 and t.is_oc is TRUE and s.exempt_oc is TRUE",
                    {"counted_status": CountedStatus.OC_EXEMPT.value})
     print("AR excluding autoremoved posts...")
-    rs = s.execute("UPDATE RedditPost t "
+    rs = wd.s.execute("UPDATE RedditPost t "
                    "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
                    "SET counted_status = :counted_status, reviewed = 1 "
                    "WHERE t.counted_status < 1 "
@@ -175,7 +176,7 @@ def automated_reviews(s):
     print(rs.rowcount)
     print("AR excluding moderator removed posts...DOES NOT INCLUDE Flair helper??")
     # ignore link posts
-    rs = s.execute("UPDATE RedditPost t "
+    rs = wd.s.execute("UPDATE RedditPost t "
                    "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
                    "SET counted_status = :counted_status, reviewed = 1 "
                    "WHERE t.counted_status < 1 "
@@ -185,7 +186,7 @@ def automated_reviews(s):
     print(rs.rowcount)
 
     print("AR: excluding author flair")
-    rs = s.execute('UPDATE RedditPost t '
+    rs = wd.s.execute('UPDATE RedditPost t '
                    'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
                    'SET counted_status = :counted_status, reviewed = 1 '
                    'WHERE t.reviewed = 0 AND t.counted_status <1 '
@@ -194,7 +195,7 @@ def automated_reviews(s):
                    {"counted_status": CountedStatus.FLAIR_EXEMPT})
     print(rs.rowcount)
     print("AR: author flair inclusion")
-    rs = s.execute('UPDATE RedditPost t '
+    rs = wd.s.execute('UPDATE RedditPost t '
                    'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
                    'SET counted_status = :counted_status, reviewed = 1 '
                    'WHERE t.reviewed = 0 AND t.counted_status <1 '
@@ -205,7 +206,7 @@ def automated_reviews(s):
                    {"counted_status": CountedStatus.FLAIR_EXEMPT})
     print(rs.rowcount)
     print("AR: excluding title/post_flair")
-    rs = s.execute('UPDATE RedditPost t '
+    rs = wd.s.execute('UPDATE RedditPost t '
                    'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
                    'SET counted_status = :counted_status, reviewed = 1 '
                    'WHERE t.reviewed = 0 AND t.counted_status <1 '
@@ -214,7 +215,7 @@ def automated_reviews(s):
                    {"counted_status": CountedStatus.TITLE_KW_EXEMPT})
     print(rs.rowcount)
     print("AR: inclusion title/post flair - reversed")
-    rs = s.execute('UPDATE RedditPost t '
+    rs = wd.s.execute('UPDATE RedditPost t '
                    'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
                    'SET counted_status = :counted_status, reviewed = 1 '
                    'WHERE t.reviewed = 0 AND t.counted_status <1 '
@@ -225,7 +226,7 @@ def automated_reviews(s):
 
     """
     logger.info(f"finding blacklist violations")
-    rs = s.execute('UPDATE RedditPost p '
+    rs = wd.s.execute('UPDATE RedditPost p '
                    'INNER JOIN SubAuthor a ON p.author = a.author_name AND p.subreddit_name == a.subreddit_name '
                    'SET counted_status = :counted_status, reviewed = 1 '
                    'WHERE p.reviewed = 0 AND p.counted_status <1 '
@@ -240,9 +241,9 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
 
     # Handle soft blacklists
     tick = datetime.now()
-    automated_reviews(wd.s)
+    automated_reviews(wd)
 
-    """
+
     blacklist_violations = wd.s.query()
     logger.info(f"removing blacklist violations")
     tuples = (wd.s.query(SubmittedPost, SubAuthor)).select_from(SubmittedPost).join(SubAuthor, and_(
@@ -278,7 +279,7 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
                 wd.s.add(op)
         except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
             logger.warning(f'something went wrong in removing post {str(e)}')
-    """
+
 
     print(f"LRWT: querying recent post(s)")
     posting_groups = []
