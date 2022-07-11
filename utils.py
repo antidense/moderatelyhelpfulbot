@@ -237,6 +237,13 @@ def automated_reviews(wd):
     """
 
 
+def do_reddit_actions(wd):
+    assert(isinstance(wd.todoq, queue.Queue))
+    assert(isinstance(wd.doneq, queue.Queue))
+
+
+
+
 def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
 
     # Handle soft blacklists
@@ -277,8 +284,11 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
                              next_eligibility=subreddit_author.next_eligible, blacklist=True, wd=wd)
                 op.update_status(reviewed=True, flagged_duplicate=True, counted_status=CountedStatus.BLKLIST)
                 wd.s.add(op)
+            else:
+                op.update_status(reviewed=True, flagged_duplicate=True, counted_status=CountedStatus.BLKLIST_REMOVED_FAILED)
         except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
             logger.warning(f'something went wrong in removing post {str(e)}')
+            op.update_status(reviewed=True, flagged_duplicate=True, counted_status=CountedStatus.BLKLIST_REMOVED_FAILED)
 
 
     print(f"LRWT: querying recent post(s)")
@@ -1102,7 +1112,7 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
 
     # If need to create, do so now
     if not tr_sub:
-        sub_info = wd.ri.get_subreddit_info(subreddit_name=tr_sub.subreddit_name)
+        sub_info = wd.ri.get_subreddit_info(subreddit_name=subreddit_name)
         if sub_info and sub_info.active_status > 2:
             tr_sub = TrackedSubreddit(subreddit_name=subreddit_name, sub_info=sub_info)
             wd.s.add(tr_sub)
