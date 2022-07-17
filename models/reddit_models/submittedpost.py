@@ -6,7 +6,7 @@ import pytz
 from core import dbobj
 from logger import logger
 from praw.models import Submission
-from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, UnicodeText
 from enums import CountedStatus, PostedStatus
 from settings import login_credentials
 # from models.reddit_models.redditinterface import SubmissionInfo
@@ -48,7 +48,7 @@ class SubmittedPost(dbobj.Base):  # need posted_status
     banned_by = Column(String(21), nullable=True)
     is_oc = Column(Boolean, nullable=False)
 
-    reply_comment = Column(String(191), nullable=True)
+    reply_comment = Column(UnicodeText, nullable=True)
 
     api_handle = None
 

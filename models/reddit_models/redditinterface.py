@@ -64,6 +64,7 @@ class RedditInterface:
 
 
     def get_posted_status(self, submission: SubmittedPost, get_removed_info=False) -> PostedStatus:
+        print('getting posted status...')
         # _ = submission.get_api_handle()  what was this for again?
         post_api_handle = self.get_submission_api_handle(submission)  # updates the api handle
         try:
@@ -117,9 +118,9 @@ class RedditInterface:
             if lock_thread:
                 submission.api_handle.mod.lock()
             comment = submission.api_handle.reply(body=response)
-            if distinguish:
+            if comment and distinguish:
                 comment.mod.distinguish()
-            if approve:
+            if comment and approve:
                 comment.mod.approve()
             return comment
         except praw.exceptions.APIException:

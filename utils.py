@@ -46,13 +46,19 @@ def get_age(input_text):
 def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPost, wd=None):  # uses some reddit api
     # check if removed
     if recent_post.counted_status > 2:
-        return CountedStatus(recent_post.counted_status)
+        return CountedStatus(recent_post.counted_status),\
+               f"previously exempted {CountedStatus(recent_post.counted_status)}"
 
     posted_status = recent_post.posted_status
     if posted_status == PostedStatus.UNKNOWN.value \
             or (recent_post.last_checked
-                and recent_post.last_checked < datetime.now(pytz.utc).replace(tzinfo=None) - timedelta(hours=2)):
+                and recent_post.last_checked < datetime.now(pytz.utc).replace(tzinfo=None) - timedelta(hours=3)):
         posted_status = wd.ri.get_posted_status(recent_post, get_removed_info=True)  # uses some reddit api
+        recent_post.posted_status = posted_status.value
+        recent_post.post_flair = recent_post.api_handle.link_flair_text
+        recent_post.author_flair = recent_post.api_handle.author_flair_text
+        recent_post.last_checked = datetime.now(pytz.utc)
+
         wd.s.add(recent_post)
         wd.s.commit()
     # banned_by = recent_post.get_api_handle().banned_by
@@ -250,9 +256,13 @@ def automated_reviews(wd):
         op, subreddit_author = tuple1
         assert (isinstance(op, SubmittedPost))
         assert (isinstance(subreddit_author, SubAuthor))
-        logger.info(f"checking post for softblacklist: {j}")
+        logger.info(f"checking post for softblacklist: {j} {op.author} {op.title}")
         tr_sub: TrackedSubreddit = get_subreddit_by_name(wd, op.subreddit_name, update_if_due=False)
         if not tr_sub:
+            logger.info(f"Could not find subreddit {op.subreddit_name}")
+            continue
+        if tr_sub.active_status < 4:
+            logger.info(f"active status not a pplicable {op.subreddit_name}")
             continue
         last_valid_post: SubmittedPost = wd.s.query(SubmittedPost).get(
             subreddit_author.last_valid_post) if subreddit_author.last_valid_post is not None else None
@@ -262,7 +272,11 @@ def automated_reviews(wd):
                                             lock_thread=tr_sub.lock_thread, stickied=tr_sub.comment_stickied,
                                             next_eligibility=subreddit_author.next_eligible, blacklist=True, wd=wd,
                                             do_actual_comment=False)
-        op.counted_status = CountedStatus.BLKLIST_NEED_REMOVE.value
+        else:
+            logger.info(f"Making comment is not set")
+        op.counted_status = 503
+        op.reviewed = True
+        logger.info(f"added to blacklist: {j} {op.author} {op.title} {op.counted_status}")
         wd.s.add(op)
     wd.s.commit()
 
@@ -270,17 +284,24 @@ def automated_reviews(wd):
 def do_reddit_actions(wd):
     # assert(isinstance(wd.todoq, queue.Queue))
     # assert(isinstance(wd.doneq, queue.Queue))
-    to_remove = wd.s.query(SubmittedPost).filter(or_(SubmittedPost.counted_status==CountedStatus.BLKLIST_NEED_REMOVE.value, SubmittedPost.counted_status==CountedStatus.NEED_REMOVE.value))
+    to_remove = wd.s.query(SubmittedPost)\
+        .filter(or_(SubmittedPost.counted_status == CountedStatus.BLKLIST_NEED_REMOVE.value,
+                    SubmittedPost.counted_status == CountedStatus.NEED_REMOVE.value))\
+        .filter(SubmittedPost.time_utc < datetime.now(pytz.utc).replace(tzinfo=None) - timedelta(hours=24))
+    # print(f"blacklist removals {to_remove.rowcount}")
     for op in to_remove:
         logger.warning(f'removing post {op.author} {op.title} {op.subreddit_name}')
         tr_sub = get_subreddit_by_name(wd, op.subreddit_name)
         try:
             success = wd.ri.mod_remove(op)
             logger.warning(f'remove successful!: {op.author} {op.title}')
+            new_counted_status = CountedStatus.REMOVED \
+                if op.counted_status == CountedStatus.NEED_REMOVE.value else CountedStatus.BLKLIST
             if success and op.reply_comment:
-                wd.ri.reply(op.reply_comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve,
+                wd.ri.reply(op, op.reply_comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve,
                             lock_thread=tr_sub.lock_thread)
-                op.update_status(reviewed=True, flagged_duplicate=True, counted_status=CountedStatus.BLKLIST)
+                op.update_status(reviewed=True, flagged_duplicate=True, counted_status=new_counted_status)
+                op.reply_comment = None
             else:
                 op.update_status(reviewed=True, flagged_duplicate=True,
                                  counted_status=CountedStatus.REMOVE_FAILED)
@@ -288,6 +309,7 @@ def do_reddit_actions(wd):
             logger.warning(f'something went wrong in removing post {op.author} {op.title} {op.subreddit_name} {str(e)}')
             op.update_status(reviewed=True, flagged_duplicate=True,
                              counted_status=CountedStatus.REMOVE_FAILED)
+
         wd.s.add(op)
     wd.s.commit()
 
@@ -295,8 +317,9 @@ def do_reddit_actions(wd):
 def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
 
     # Handle soft blacklists
-    do_reddit_actions(wd)
+
     automated_reviews(wd)
+    do_reddit_actions(wd)
 
 
     print(f"LRWT: querying recent post(s)")
@@ -373,8 +396,8 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
 
         # Break if taking too long
         tock = datetime.now(pytz.utc) - tick
-        if tock > timedelta(minutes=5):
-            logger.debug("Aborting, taking more than 5 min")
+        if tock > timedelta(minutes=10):
+            logger.debug("Aborting, taking more than 10 min")
             wd.s.commit()
             break
 
@@ -555,7 +578,7 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
             # Must take action on post
             else:
                 do_requested_action_for_valid_reposts(tr_sub, post, associated_reposts, wd=wd)
-                post.update_status(reviewed=True, flagged_duplicate=True)
+                # post.update_status(reviewed=True, flagged_duplicate=True)
                 wd.s.add(post)
                 # Keep preduplicate posts to keep track of later
                 for predupe_post in associated_reposts:
@@ -854,7 +877,7 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
                                           most_recent_reposts: List[SubmittedPost], wd=None):
     possible_repost = most_recent_reposts[-1]
     if tr_sub.comment:
-        recent_post.reply_comment = make_comment(tr_sub, recent_post, most_recent_reposts,
+        recent_post.reply_comment = recent_post.reply_comment = make_comment(tr_sub, recent_post, most_recent_reposts,
                      tr_sub.comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve,
                      lock_thread=tr_sub.lock_thread, stickied=tr_sub.comment_stickied, wd=wd, do_actual_comment=False)
     if tr_sub.modmail:
@@ -894,7 +917,6 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
         else:
             logger.debug("\tpost not up")
         """
-
     if tr_sub.action == "report":
         if tr_sub.report_reason:
             rp_reason = tr_sub.populate_tags(tr_sub.report_reason, recent_post=recent_post, prev_post=possible_repost)

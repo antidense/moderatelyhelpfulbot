@@ -75,6 +75,7 @@ def main_loop():
             wd.to_update_list = False
 
         try:
+            look_for_rule_violations3(wd)
             # Gather posts
             chunk_size = 200 if intensity == 1 else 300
             chunked_list = [wd.sub_list[j:j + chunk_size] for j in range(0, len(wd.sub_list), chunk_size)]
