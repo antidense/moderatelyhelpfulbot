@@ -7,3 +7,5 @@ pyyaml
 prawcore
 iso8601
 praw
+prawoauth2
+token

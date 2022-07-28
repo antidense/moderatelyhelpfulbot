@@ -904,7 +904,7 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
 
     elif command == "update":  # $update
 
-        worked, status = tr_sub.reload_yaml_settings(force_update=True)
+        worked, status = tr_sub.reload_yaml_settings()
         help_text = ""
         if "404" in status:
             help_text = f"This error means the wiki config page needs to be created. " \

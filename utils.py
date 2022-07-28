@@ -284,6 +284,8 @@ def automated_reviews(wd):
 def do_reddit_actions(wd):
     # assert(isinstance(wd.todoq, queue.Queue))
     # assert(isinstance(wd.doneq, queue.Queue))
+
+
     to_remove = wd.s.query(SubmittedPost)\
         .filter(or_(SubmittedPost.counted_status == CountedStatus.BLKLIST_NEED_REMOVE.value,
                     SubmittedPost.counted_status == CountedStatus.NEED_REMOVE.value))\
@@ -462,7 +464,7 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
                 post.update_status(counted_status=counted_status)
                 wd.s.add(post)
                 logger.info(f"\t\tpost status: {counted_status} {result}")
-                if counted_status == CountedStatus.COUNTS:
+                if counted_status in ( CountedStatus.COUNTS , CountedStatus.NEED_REMOVE):
                     posts_to_verify.append(post)
                 if i % 25 == 0:
                     wd.s.commit()
@@ -483,6 +485,7 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
         wd.s.commit()
 
         # Collect all relevant posts
+        print("finding back posts")
         back_posts = wd.s.query(SubmittedPost) \
             .filter(
             # SubmittedPost.flagged_duplicate.is_(False), # redundant with new flag
@@ -505,6 +508,7 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
             continue
 
         # Check backposts
+        print("reviwing back posts")
         for j, post in enumerate(back_posts):
             logger.info(f"{i}-{j} Backpost: {post.time_utc} url:{post.get_url()}  title:{post.title[0:30]}"
                         f"\t counted_status: {post.counted_status} posted_status: {post.posted_status} ")
