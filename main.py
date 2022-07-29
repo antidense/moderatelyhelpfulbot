@@ -21,7 +21,7 @@ from enum import Enum  # has to be at the end?
 import queue
 """
 
-from utils import look_for_rule_violations2, look_for_rule_violations3, get_age, get_subreddit_by_name
+from utils import look_for_rule_violations3, get_age, get_subreddit_by_name
 from models.reddit_models.redditinterface import SubredditInfo
 # from modmail import handle_modmail_messages, handle_direct_messages
 from models.reddit_models import ActionedComments, CommonPost, Stats2, SubAuthor, SubmittedPost, TrackedAuthor, \
