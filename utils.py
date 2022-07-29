@@ -287,11 +287,11 @@ def do_reddit_actions(wd):
     # assert(isinstance(wd.todoq, queue.Queue))
     # assert(isinstance(wd.doneq, queue.Queue))
 
-
+    print("do removals...")
     to_remove = wd.s.query(SubmittedPost)\
         .filter(or_(SubmittedPost.counted_status == CountedStatus.BLKLIST_NEED_REMOVE.value,
                     SubmittedPost.counted_status == CountedStatus.NEED_REMOVE.value))\
-        .filter(SubmittedPost.time_utc < datetime.now(pytz.utc).replace(tzinfo=None) - timedelta(hours=24))
+        .filter(SubmittedPost.time_utc > datetime.now(pytz.utc).replace(tzinfo=None) - timedelta(hours=24))
     # print(f"blacklist removals {to_remove.rowcount}")
     for op in to_remove:
         logger.warning(f'removing post {op.author} {op.title} {op.subreddit_name}')
