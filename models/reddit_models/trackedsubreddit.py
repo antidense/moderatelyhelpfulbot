@@ -48,8 +48,8 @@ class TrackedSubreddit(dbobj.Base):
     is_nsfw = Column(Boolean, nullable=False, default=0)
 
     mod_list = Column(UnicodeText, nullable=True)  # added 7/4/22
-    ignore_Automoderator_removed = Column(Boolean, nullable=True)
-    ignore_moderator_removed = Column(Boolean, nullable=True)
+    ignore_Automoderator_removed = Column(Boolean, nullable=True, default=1)
+    ignore_moderator_removed = Column(Boolean, nullable=True, default=1)
     exempt_self_posts = Column(Boolean, nullable=True)
     exempt_link_posts = Column(Boolean, nullable=True)
     exempt_oc = Column(Boolean, nullable=True)
@@ -113,6 +113,7 @@ class TrackedSubreddit(dbobj.Base):
     def __init__(self, subreddit_name: str, sub_info=None):
         self.subreddit_name = subreddit_name.lower()
         self.save_text = False
+        self.ignore_Automoderator_removed = True
         self.ignore_moderator_removed = True
         self.exempt_self_posts = False
         self.exempt_link_posts = False
@@ -122,6 +123,7 @@ class TrackedSubreddit(dbobj.Base):
         self.title_exempt_keyword = None
         self.title_not_exempt_keyword = None
         self.last_pulled = datetime.now(pytz.utc)-timedelta(hours=24)
+
 
         if not sub_info:
             self.active_status = SubStatus.NO_CONFIG.value
@@ -243,9 +245,11 @@ class TrackedSubreddit(dbobj.Base):
 
             if 'min_post_interval_mins' in pr_settings:
                 self.min_post_interval = timedelta(minutes=pr_settings['min_post_interval_mins'])
+                self.min_post_interval_mins = pr_settings['min_post_interval_mins']
                 self.min_post_interval_txt = f"{pr_settings['min_post_interval_mins']}m"
             if 'min_post_interval_hrs' in pr_settings:
                 self.min_post_interval = timedelta(hours=pr_settings['min_post_interval_hrs'])
+                self.min_post_interval_mins = pr_settings['min_post_interval_hrs']*60
                 if self.min_post_interval_hrs < 24:
                     self.min_post_interval_txt = f"{self.min_post_interval_hrs}h"
                 else:
