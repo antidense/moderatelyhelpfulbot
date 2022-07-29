@@ -306,6 +306,9 @@ def do_reddit_actions(wd):
                             lock_thread=tr_sub.lock_thread)
                 op.update_status(reviewed=True, flagged_duplicate=True, counted_status=new_counted_status)
                 op.reply_comment = None
+            elif success:
+                op.update_status(reviewed=True, flagged_duplicate=True, counted_status=new_counted_status)
+                op.reply_comment = None
             else:
                 op.update_status(reviewed=True, flagged_duplicate=True,
                                  counted_status=CountedStatus.REMOVE_FAILED)
