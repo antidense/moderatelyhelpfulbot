@@ -8,7 +8,7 @@ from logger import logger
 from praw.models import Submission
 from sqlalchemy import Boolean, Column, DateTime, Integer, String, UnicodeText
 from enums import CountedStatus, PostedStatus
-from settings import BOT_NAME
+
 # from models.reddit_models.redditinterface import SubmissionInfo
 
 s = dbobj.s
