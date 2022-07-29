@@ -86,7 +86,7 @@ def main_loop():
 
             for sub_list in chunked_list:
                 sub_list_str = "+".join(sub_list)
-                print(len(sub_list_str), sub_list_str)
+                print( sub_list_str)
                 updated_subs += check_new_submissions(wd, sub_list=sub_list_str, intensity=intensity)
                 check_spam_submissions(wd, sub_list=sub_list_str, intensity=intensity)
 
@@ -248,7 +248,7 @@ def purge_old_records_by_subreddit(wd: WorkingData, tr_sub: TrackedSubreddit):
 def check_new_submissions(wd: WorkingData, query_limit=800, sub_list='mod', intensity=0):
     subreddit_names = []
     subreddit_names_complete = []
-    logger.info(f"pulling new posts!  intensity: {intensity}")
+    logger.info(f"main/CNW: pulling new posts!  intensity: {intensity}")
 
     possible_new_posts = [a for a in wd.ri.reddit_client.subreddit(sub_list).new(limit=query_limit)]
 
@@ -272,8 +272,8 @@ def check_new_submissions(wd: WorkingData, query_limit=800, sub_list='mod', inte
 
             wd.s.add(post)
             count += 1
-    logger.info(f'found {count} posts')
-    logger.debug("updating database...")
+    logger.info(f'main/CNW: found {count} posts')
+    logger.debug("/mainCNW: updating database...")
     wd.s.commit()
     return subreddit_names
 
@@ -481,7 +481,7 @@ def nsfw_checking(wd: WorkingData):  # Does not expand comments
 
         tock = datetime.now()
         if tock - tick > timedelta(minutes=3):
-            print("Taking too long, will break for now")
+            print("NC: Taking too long, will break for now")
             break
 
         if op_age < 10:

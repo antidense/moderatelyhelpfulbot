@@ -253,7 +253,7 @@ class SubmissionInfo:
 
 class SubredditInfo:
     subreddit_api_handle = None
-    active_status = SubStatus.UNKNOWN
+    active_status = SubStatus.UNKNOWN.value
     subreddit_name = None
     mod_list = None
     settings_yaml_txt = None
@@ -268,7 +268,7 @@ class SubredditInfo:
         self.subreddit_name: str = subreddit_name.lower()
         self.subreddit_api_handle = ri.reddit_client.subreddit(subreddit_name)
         if not self.subreddit_api_handle:  # Subreddit doesn't exist
-            active_status = SubStatus.SUB_GONE
+            active_status = SubStatus.SUB_GONE.value
             return
         try:
             self.mod_list = ",".join(list(moderator.name for moderator in self.subreddit_api_handle.moderator()))
