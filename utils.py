@@ -61,6 +61,8 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
 
         wd.s.add(recent_post)
         wd.s.commit()
+    else:
+        print(f"recently updated, assuming no change to posted status {posted_status}")
     # banned_by = recent_post.get_api_handle().banned_by
     # logger.debug(">>>>exemption status: {}".format(banned_by))
 
@@ -1145,23 +1147,25 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
         tr_sub: TrackedSubreddit = wd.s.query(TrackedSubreddit).get(subreddit_name)
 
     # Give up as requested if not in db
-    if not tr_sub and create_if_not_exist:
+    if not tr_sub and not create_if_not_exist:
         print(f"doesn't exist and not supposed to create  {subreddit_name}")
         return None
 
     # If need to create, do so now
     if not tr_sub:
+        print("creating sub...")
         sub_info = wd.ri.get_subreddit_info(subreddit_name=subreddit_name)
-        if sub_info and sub_info.active_status > 2:
+        if sub_info and sub_info.active_status.value > 2:
             tr_sub = TrackedSubreddit(subreddit_name=subreddit_name, sub_info=sub_info)
             wd.s.add(tr_sub)
             wd.s.commit()
             wd.sub_dict[subreddit_name] = tr_sub
-            return tr_sub
+
         else:
             print(f"doesn't exist  {sub_info}")
             return None
 
+    """
     # Update from scratch if it has been a while
     if update_if_due and \
             tr_sub.last_updated < datetime.now() - timedelta(hours=SUBWIKI_CHECK_INTERVAL_HRS):
@@ -1173,6 +1177,7 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
     if not worked:
         print(f"doesn't exist  {worked}")
         return None
+    """
 
     wd.s.add(tr_sub)
     wd.s.commit()

@@ -47,7 +47,7 @@ class TrackedSubreddit(dbobj.Base):
     mm_convo_id = Column(String(10), nullable=True, default=None)
     is_nsfw = Column(Boolean, nullable=False, default=0)
 
-    mod_list = Column(String(191), nullable=True, primary_key=False)  # added 7/4/22
+    mod_list = Column(UnicodeText, nullable=True)  # added 7/4/22
     ignore_Automoderator_removed = Column(Boolean, nullable=True)
     ignore_moderator_removed = Column(Boolean, nullable=True)
     exempt_self_posts = Column(Boolean, nullable=True)

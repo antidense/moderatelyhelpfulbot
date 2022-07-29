@@ -1049,12 +1049,14 @@ def mod_mail_invitation_to_moderate(wd: WorkingData, message):
     tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=False)
 
     # accept invite if accepting invites or had been accepted previously
+    print("to make sub:", subreddit_name)
     if ACCEPTING_NEW_SUBS or tr_sub and 'karma' not in subreddit_name.lower():
         if not tr_sub:
             tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=True)
-        sub = wd.ri.get_subreddit_api_handle(tr_sub)
+
         try:
-            sub.mod.accept_invite()
+            sub_api_handle = wd.ri.get_subreddit_api_handle(tr_sub)
+            sub_api_handle.mod.accept_invite()
         except praw.exceptions.APIException:
             message.reply(body="Error: Invite message has been rescinded? or already accepted?")
             message.mark_read()
@@ -1065,7 +1067,8 @@ def mod_mail_invitation_to_moderate(wd: WorkingData, message):
                  f"You may need to create it. You can find examples at "
                  f"https://www.reddit.com/r/{BOT_NAME}/wiki/index . ")
         try:
-            if tr_sub.update_access() is SubStatus.NO_CONFIG:
+            access_status = wd.ri.check_access(tr_sub)
+            if access_status is SubStatus.NO_CONFIG:
                 logger.warning(f'no wiki page {tr_sub.subreddit_name}..will create')
                 wd.ri.reddit_client.subreddit(tr_sub.subreddit_name).wiki.create(
                     BOT_NAME, DEFAULT_CONFIG.replace("subredditname", tr_sub.subreddit_name),

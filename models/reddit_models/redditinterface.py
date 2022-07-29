@@ -158,6 +158,41 @@ class RedditInterface:
         print(f" si: {si}")
         return si
 
+    def check_access(self, subreddit: TrackedSubreddit) -> (SubStatus, str):
+        api_handle = self.get_subreddit_api_handle(subreddit)
+
+        if not subreddit.api_handle:  # Subreddit doesn't exist
+            return SubStatus.SUB_GONE, f"Reddit reports that there is no subreddit by the name of {self.subreddit_name}."
+        #self.api_handle = api_handle # Else keep the reference to the subreddit
+        subreddit.mod_list = self.get_mod_list(subreddit=subreddit)
+        if BOT_NAME not in subreddit.mod_list:
+            subreddit.active_status = SubStatus.NO_MOD_PRIV.value
+            return SubStatus.NO_MOD_PRIV, f"The bot does not have moderator privileges to /r/{self.subreddit_name}."
+        try:
+            logger.debug(f'accessing wiki config {subreddit.subreddit_name}')
+            wiki_page = subreddit.api_handle.wiki[BOT_NAME]
+            if wiki_page:
+                subreddit.settings_yaml_txt = wiki_page.content_md
+                subreddit.settings_revision_date = wiki_page.revision_date
+                if wiki_page.revision_by and wiki_page.revision_by.name != BOT_NAME:
+                    subreddit.bot_mod = wiki_page.revision_by.name
+                subreddit.settings_yaml = yaml.safe_load(subreddit.settings_yaml_txt)
+            else:
+                return SubStatus.NO_CONFIG, f"I only found an empty config for /r/{subreddit.subreddit_name}."
+        except prawcore.exceptions.NotFound:
+            return SubStatus.NO_CONFIG, f"I did not find a config for /r/{subreddit.subreddit_name} Please create one at" \
+                                        f"http://www.reddit.com/r/{subreddit.subreddit_name}/wiki/{BOT_NAME} ."
+        except prawcore.exceptions.Forbidden:
+            return SubStatus.CONFIG_ACCESS_ERROR, f"I do not have any access to /r/{subreddit.subreddit_name}."
+        except prawcore.exceptions.Redirect:
+            return SubStatus.SUB_GONE, f"Reddit reports that there is no subreddit by the name of {subreddit.subreddit_name}."
+        except (yaml.scanner.ScannerError, yaml.composer.ComposerError, yaml.parser.ParserError):
+            return SubStatus.YAML_SYNTAX_ERROR, f"There is a syntax error in your config: " \
+                                                f"http://www.reddit.com/r/{subreddit.subreddit_name}/wiki/{BOT_NAME} ."\
+                                                f"Please validate your config using http://www.yamllint.com/. "
+
+        return SubStatus.YAML_SYNTAX_OK, "Syntax is valid"
+
     def get_modmail_thread_id(self, subreddit_name=None):
         for convo in self.reddit_client.subreddit(subreddit_name).modmail.conversations(state="mod", sort='unread', limit=30):
             initiating_author_name = convo.authors[0].name  # praw query
@@ -280,7 +315,7 @@ class SubredditInfo:
             return SubStatus.NO_MOD_PRIV, f"The bot does not have moderator privileges to /r/{self.subreddit_name}."
         try:
             logger.debug(f'accessing wiki config {self.subreddit_name}')
-            wiki_page = self.subreddit_api_handle.wiki[BOT_NAME]
+            wiki_page = self.subreddit_api_handle.wiki["ModeratelyHelpfulBot"]
             if wiki_page:
                 self.settings_yaml_txt = wiki_page.content_md
                 self.settings_revision_date = wiki_page.revision_date

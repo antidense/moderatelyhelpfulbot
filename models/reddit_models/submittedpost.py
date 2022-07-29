@@ -32,8 +32,8 @@ class SubmittedPost(dbobj.Base):  # need posted_status
     bot_comment_id = Column(String(10), nullable=True)  # wasn't using before but using now
     is_self = Column(Boolean, nullable=True)  # Can delete this now----------
     # removed_status = Column(String(21), nullable=True)  # not used
-    post_flair = Column(String(21), nullable=True)
-    author_flair = Column(String(42), nullable=True)
+    post_flair = Column(String(191), nullable=True)
+    author_flair = Column(String(191), nullable=True)
     counted_status = Column(Integer)
     # newly added
     response_time = Column(DateTime, nullable=True)  # need to add everywhere
