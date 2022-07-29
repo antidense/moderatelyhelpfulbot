@@ -37,7 +37,7 @@ class SubmittedPost(dbobj.Base):  # need posted_status
     counted_status = Column(Integer)
     # newly added
     response_time = Column(DateTime, nullable=True)  # need to add everywhere
-    review_debug = Column(String(191), nullable=True)
+    review_debug = Column(UnicodeText, nullable=True)
     flushed_to_log = Column(Boolean, nullable=False)
     nsfw_repliers_checked = Column(Boolean, nullable=False)  # REMOVE!!
     nsfw_last_checked = Column(DateTime, nullable=True)

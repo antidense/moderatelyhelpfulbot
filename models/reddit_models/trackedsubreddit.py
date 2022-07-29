@@ -141,6 +141,8 @@ class TrackedSubreddit(dbobj.Base):
         if not sub_info:
             self.active_status = SubStatus.NO_CONFIG.value
             return False, f"no subinfo for {self.subreddit_name}"
+        self.ignore_Automoderator_removed = True
+        self.ignore_moderator_removed = True
         self.active_status = sub_info.active_status
         self.mod_list = sub_info.mod_list
         self.settings_yaml_txt = sub_info.settings_yaml_txt

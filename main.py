@@ -901,27 +901,28 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
         wd.s.commit()
 
     elif command == "update":  # $update
-
+        sub_info = wd.ri.get_subreddit_info(tr_sub.subreddit_name)
+        tr_sub.update_from_subinfo(sub_info)
         worked, status = tr_sub.reload_yaml_settings()
         help_text = ""
         if "404" in status:
             help_text = f"This error means the wiki config page needs to be created. " \
-                        f" See https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{BOT_NAME}. "
+                        f" See https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{MAIN_BOT_NAME}. "
         elif "403" in status:
             help_text = f"This error means the bot doesn't have enough permissions to view the wiki page. " \
                         f"Please make sure that you invited the bot to moderate and that the bot has " \
                         f"accepted the moderator invitation and give the bot wiki " \
                         f"privileges here: https://www.reddit.com/r/{tr_sub.subreddit_name}/about/moderators/ . " \
                         f"It is possible that the bot has not accepted the invitation due to current load.  " \
-                        f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{BOT_NAME}. "
+                        f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{MAIN_BOT_NAME}. "
         elif "yaml" in status:
             help_text = "Looks like there is an error in your yaml code. " \
                         "Please make sure to validate your syntax at https://yamlvalidator.com/.  " \
-                        f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{BOT_NAME}. "
+                        f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{MAIN_BOT_NAME}. "
         elif "single document in the stream" in status:
             help_text = "Looks like there is an extra double hyphen in your code at the end, e.g. '--'. " \
                         "Please remove it.  " \
-                        f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{BOT_NAME}. "
+                        f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{MAIN_BOT_NAME}. "
 
         sub_status_code = tr_sub.active_status
         sub_status_enum = str(SubStatus(sub_status_code))

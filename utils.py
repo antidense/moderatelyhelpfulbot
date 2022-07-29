@@ -358,7 +358,7 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
             .filter(SubmittedPost.review_debug.like("ma:%")) \
             .order_by(SubmittedPost.added_time).first()
 
-    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status >3 and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND MAX(added_time) > :look_back AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) AND MIN(t.reviewed)<1 ORDER BY most_recent desc ;"
+    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, GROUP_CONCAT(t.counted_status ORDER BY t.id), COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status >3 and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND MAX(added_time) > :look_back AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) AND MIN(t.reviewed)<1 ORDER BY most_recent desc ;"
     # more_accurate_statement.replace("[date]")
     search_back = 24
     more_accurate_statement = more_accurate_statement.replace('72', str(search_back))
@@ -371,7 +371,7 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
     print(f"query took this long {datetime.now() - tick}")
 
     for row in rs:
-        print(row[0], row[1], row[2], row[3], row[4])
+        print(row[0], row[1], row[2], row[3], row[4], row[5])
         post_ids = row[1].replace("ma:", "").split(',')
         posts = []
         for post_id in post_ids:
@@ -385,13 +385,12 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
         last_post = posts[-1]
         assert isinstance(last_post, SubmittedPost)
         if not last_post.review_debug:
-            posting_groups.append(
-                PostingGroup(last_post.id, author_name=row[3], subreddit_name=row[4].lower(), posts=posts))
+
             last_post.review_debug = f"ma:{row[1]}"
 
             wd.s.add(last_post)
-        else:
-            print(f"skipped {last_post.id}--already need to check")
+        posting_groups.append(
+                PostingGroup(last_post.id, author_name=row[3], subreddit_name=row[4].lower(), posts=posts))
 
     wd.s.commit()
 
@@ -511,9 +510,10 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
         possible_pre_posts = []
         logger.info(f"Found {len(back_posts)} backposts")
         if len(back_posts) == 0:
-            if pg.posts[-1].counted_status != CountedStatus.EXEMPTED.value:
-                pg.posts[-1].reviewed = True
-                wd.s.add(pg.posts[-1])
+            if pg.posts[-1].counted_status <2:
+                pg.posts[-1].counted_status==2
+            pg.posts[-1].reviewed = True
+            wd.s.add(pg.posts[-1])
 
             logger.info("Nothing to do, moving on.")
             continue
@@ -524,8 +524,7 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
             logger.info(f"{i}-{j} Backpost: {post.time_utc} url:{post.get_url()}  title:{post.title[0:30]}"
                         f"\t counted_status: {post.counted_status} posted_status: {post.posted_status} ")
             if post.counted_status == CountedStatus.NOT_CHKD.value \
-                    or post.counted_status == CountedStatus.PREV_EXEMPT.value \
-                    or post.counted_status == CountedStatus.EXEMPTED.value:  # later remove?
+                    or post.counted_status == CountedStatus.PREV_EXEMPT.value:
                 counted_status, result = check_for_post_exemptions(tr_sub, post, wd=wd)
                 post.counted_status=counted_status.value
                 #post.update_status(counted_status=counted_status)
@@ -889,7 +888,7 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
     if not tr_sub:
         print("GSBN: creating sub...")
         sub_info = wd.ri.get_subreddit_info(subreddit_name=subreddit_name)
-        if subreddit_name==MAIN_BOT_NAME or (sub_info and sub_info.active_status >= 0):
+        if subreddit_name == MAIN_BOT_NAME or (sub_info and sub_info.active_status >= 0):
             tr_sub = TrackedSubreddit(subreddit_name=subreddit_name, sub_info=sub_info)
             wd.s.add(tr_sub)
             wd.s.commit()
