@@ -10,7 +10,7 @@ import praw
 import prawcore
 import pytz
 import yaml
-from settings import BOT_NAME
+from settings import  MAIN_BOT_NAME, ACCEPTING_NEW_SUBS
 """
 from sqlalchemy import *
 from sqlalchemy.ext.declarative import declarative_base
@@ -48,13 +48,14 @@ def main_loop():
     wd.ri = RedditInterface()
 
     print(f"My name is {wd.ri.reddit_client.user.me()}, {BOT_NAME}")
+    BOT_NAME  = wd.ri.reddit_client.user.me()
     # load_settings(wd)
-    sub_info = wd.ri.get_subreddit_info(subreddit_name=BOT_NAME)
-    wd.ri.bot_sub : TrackedSubreddit = wd.s.query(TrackedSubreddit).get(BOT_NAME)
+    sub_info = wd.ri.get_subreddit_info(subreddit_name=MAIN_BOT_NAME)
+    wd.ri.bot_sub : TrackedSubreddit = wd.s.query(TrackedSubreddit).get(MAIN_BOT_NAME)
     if not wd.ri.bot_sub:
-        wd.ri.bot_sub = TrackedSubreddit(subreddit_name=BOT_NAME, sub_info=sub_info)
+        wd.ri.bot_sub = TrackedSubreddit(subreddit_name=MAIN_BOT_NAME, sub_info=sub_info)
     if not wd.ri.bot_sub.mm_convo_id:
-        wd.ri.bot_sub.mm_convo_id = wd.ri.get_modmail_thread_id(subreddit_name=BOT_NAME)
+        wd.ri.bot_sub.mm_convo_id = wd.ri.get_modmail_thread_id(subreddit_name=MAIN_BOT_NAME)
     wd.s.add(wd.ri.bot_sub)
     wd.s.commit()
 
