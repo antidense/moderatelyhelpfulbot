@@ -10,7 +10,7 @@ import praw
 import prawcore
 import pytz
 import yaml
-from settings import  MAIN_BOT_NAME, ACCEPTING_NEW_SUBS
+from settings import  MAIN_BOT_NAME, ACCEPTING_NEW_SUBS, BOT_OWNER
 """
 from sqlalchemy import *
 from sqlalchemy.ext.declarative import declarative_base
@@ -39,16 +39,16 @@ incorporate toolbox? https://www.reddit.com/r/nostalgia/wiki/edit/toolbox check 
 active status to an ENUM
 add non-binary gender
 """
-
+BOT_NAME = None
 from workingdata import WorkingData
 
 def main_loop():
     wd = WorkingData()
     wd.s = dbobj.s
     wd.ri = RedditInterface()
-
+    global BOT_NAME
+    BOT_NAME  = wd.ri.reddit_client.user.me().name
     print(f"My name is {wd.ri.reddit_client.user.me()}, {BOT_NAME}")
-    BOT_NAME  = wd.ri.reddit_client.user.me()
     # load_settings(wd)
     sub_info = wd.ri.get_subreddit_info(subreddit_name=MAIN_BOT_NAME)
     wd.ri.bot_sub : TrackedSubreddit = wd.s.query(TrackedSubreddit).get(MAIN_BOT_NAME)
@@ -187,15 +187,11 @@ def update_sub_list(wd: WorkingData, intensity=0):
                 try:
                     tr.mod_list = str(wd.ri.get_mod_list(tr.subreddit_name))
                 except prawcore.exceptions.Forbidden:
-                    tr.active_status = SubStatus.SUB_GONE
+                    tr.active_status = SubStatus.SUB_GONE.value
 
                 # print(tr.mod_list)
                 wd.s.add(tr)
 
-
-
-
-        """
         if tr.subreddit_name not in wd.sub_dict:
             if tr.last_updated < datetime.now() - timedelta(days=7) and tr.active_status >= 0:
                 print(f'...rechecking...{tr.last_updated}')
@@ -209,7 +205,7 @@ def update_sub_list(wd: WorkingData, intensity=0):
                 print(f'')
 
         wd.sub_dict[tr.subreddit_name] = tr
-        """
+
     wd.s.commit()
     return
 
@@ -732,7 +728,7 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
     print("asking for permission: {}, mod list: {}".format(requestor_name, ",".join(moderators)))
     if requestor_name is not None and requestor_name not in moderators and requestor_name != BOT_OWNER \
             and requestor_name != "[modmail]":
-        if subreddit_name is "subredditname" or subreddit_name is "yoursubredditname":
+        if subreddit_name == "subredditname" or subreddit_name == "yoursubredditname":
             return "Please change 'subredditname' to the name of your subreddit so I know what subreddit you mean!", \
                    True
         return f"You do not have permission to do this. Are you sure you are a moderator of {subreddit_name}?\n\n " \
@@ -1068,11 +1064,11 @@ def mod_mail_invitation_to_moderate(wd: WorkingData, message):
                  f"You may need to create it. You can find examples at "
                  f"https://www.reddit.com/r/{BOT_NAME}/wiki/index . ")
         try:
-            access_status = wd.ri.check_access(tr_sub)
-            if access_status is SubStatus.NO_CONFIG:
+            access_status = wd.ri.check_access(tr_sub, ignore_no_mod_access=True)
+            if access_status == SubStatus.NO_CONFIG:
                 logger.warning(f'no wiki page {tr_sub.subreddit_name}..will create')
                 wd.ri.reddit_client.subreddit(tr_sub.subreddit_name).wiki.create(
-                    BOT_NAME, DEFAULT_CONFIG.replace("subredditname", tr_sub.subreddit_name),
+                    MAIN_BOT_NAME, DEFAULT_CONFIG.replace("subredditname", tr_sub.subreddit_name),
                     reason="default_config"
                 )
 

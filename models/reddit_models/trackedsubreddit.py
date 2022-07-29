@@ -21,7 +21,7 @@ from sqlalchemy import (
     func
 )
 
-from settings import BOT_NAME
+from settings import MAIN_BOT_NAME
 
 
 s = dbobj.s
@@ -127,7 +127,7 @@ class TrackedSubreddit(dbobj.Base):
             self.active_status = SubStatus.NO_CONFIG.value
         self.active_status = sub_info.active_status
         self.mod_list = sub_info.mod_list
-        self.settings_yaml_text = sub_info.settings_yaml_text
+        self.settings_yaml_txt = sub_info.settings_yaml_txt
         self.settings_revision_date = sub_info.settings_revision_date
         self.settings_yaml = sub_info.settings_yaml
         self.bot_mod = sub_info.bot_mod
@@ -141,7 +141,7 @@ class TrackedSubreddit(dbobj.Base):
             return False, f"no subinfo for {self.subreddit_name}"
         self.active_status = sub_info.active_status
         self.mod_list = sub_info.mod_list
-        self.settings_yaml_text = sub_info.settings_yaml_text
+        self.settings_yaml_txt = sub_info.settings_yaml_txt
         self.settings_revision_date = sub_info.settings_revision_date
         self.settings_yaml = sub_info.settings_yaml
         self.bot_mod = sub_info.bot_mod
@@ -162,7 +162,7 @@ class TrackedSubreddit(dbobj.Base):
         except (yaml.scanner.ScannerError, yaml.composer.ComposerError, yaml.parser.ParserError):
             self.active_status = SubStatus.YAML_SYNTAX_ERROR.value
             return False, f"There is a syntax error in your config: " \
-                                                f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{BOT_NAME} ."\
+                                                f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{MAIN_BOT_NAME} ."\
                                                 f"Please validate your config using http://www.yamllint.com/. "
         if not self.settings_yaml:
             self.active_status = SubStatus.YAML_SYNTAX_OK.value

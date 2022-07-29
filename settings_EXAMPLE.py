@@ -1,1 +1,4 @@
 DB_ENGINE = 'mysql+pymysql://username:password@host:3306/yourdatabase?charset=utf8mb4'
+MAIN_BOT_NAME = "YOUR PRIMARY BOT NAME (IF YOU HAVE MULTIPLE BOTS, WHICH ONE IS THE PRIMARY FOR REPORTING)"
+ACCEPTING_NEW_SUBS = True
+BOT_OWNER = 'YOUR username'

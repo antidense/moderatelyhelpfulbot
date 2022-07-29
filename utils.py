@@ -19,7 +19,7 @@ from models.reddit_models import SubAuthor, SubmittedPost, \
     TrackedAuthor, TrackedSubreddit, RedditInterface, PostingGroup
 from logger import logger
 from sqlalchemy import exc
-
+from settings import MAIN_BOT_NAME
 
 def get_age(input_text):
     matches = re.search(ASL_REGEX, input_text)
@@ -330,6 +330,7 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
     posting_groups = []
     most_recent_identified = None
     posts_to_verify = wd.s.query(SubmittedPost).filter(SubmittedPost.reviewed == 0,
+                                                       SubmittedPost.counted_status < 1,
                                                        SubmittedPost.review_debug.like("ma:%"),
                                                        SubmittedPost.time_utc > datetime.now() - timedelta(hours=48)
                                                        ).order_by(SubmittedPost.added_time.desc()).all()
@@ -1148,36 +1149,45 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
 
     # Give up as requested if not in db
     if not tr_sub and not create_if_not_exist:
-        print(f"doesn't exist and not supposed to create  {subreddit_name}")
+        print(f"GSBN: doesn't exist and not supposed to create  {subreddit_name}")
         return None
 
     # If need to create, do so now
     if not tr_sub:
-        print("creating sub...")
+        print("GSBN: creating sub...")
         sub_info = wd.ri.get_subreddit_info(subreddit_name=subreddit_name)
-        if sub_info and sub_info.active_status.value > 2:
+        if subreddit_name==MAIN_BOT_NAME or (sub_info and sub_info.active_status >= 0):
             tr_sub = TrackedSubreddit(subreddit_name=subreddit_name, sub_info=sub_info)
             wd.s.add(tr_sub)
             wd.s.commit()
             wd.sub_dict[subreddit_name] = tr_sub
 
         else:
-            print(f"doesn't exist  {sub_info}")
+            print(f"GSBN: subreddit doesn't exist  {sub_info}")
             return None
 
-    """
     # Update from scratch if it has been a while
-    if update_if_due and \
-            tr_sub.last_updated < datetime.now() - timedelta(hours=SUBWIKI_CHECK_INTERVAL_HRS):
+    if tr_sub.last_updated < datetime.now() - timedelta(hours=SUBWIKI_CHECK_INTERVAL_HRS):
+        print(f"GSBN: needs update {tr_sub.subreddit_name}")
         sub_info = wd.ri.get_subreddit_info(subreddit_name=tr_sub.subreddit_name)
+
         worked, status = tr_sub.update_from_subinfo(sub_info)
     else:  # or just load from database
         worked, status = tr_sub.reload_yaml_settings()
+        if not worked:
+            print(f"GSBN: couldn't load from stored info {tr_sub.subreddit_name} because {status}")
+            sub_info = wd.ri.get_subreddit_info(subreddit_name=tr_sub.subreddit_name)
+
+            if hasattr(sub_info, 'yaml_settings_text'):
+                print(f"GSBN: settings: {sub_info.yaml_settings_text}")
+            else:
+                print("GSBN: no luck in getting yaml text")
+            worked, status = tr_sub.update_from_subinfo(sub_info)
+            worked, status = tr_sub.reload_yaml_settings()
 
     if not worked:
-        print(f"doesn't exist  {worked}")
+        print(f"GSBN: didn't exist? {worked} {status}")
         return None
-    """
 
     wd.s.add(tr_sub)
     wd.s.commit()
