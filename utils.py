@@ -198,7 +198,7 @@ def automated_reviews(wd):
                    'WHERE t.reviewed = 0 AND t.counted_status <1 '
                    'AND s.author_exempt_flair_keyword is not NULL and t.author_flair is not NULL '
                    'AND t.author_flair REGEXP s.author_exempt_flair_keyword ',
-                   {"counted_status": CountedStatus.FLAIR_EXEMPT})
+                   {"counted_status": CountedStatus.FLAIR_EXEMPT.value})
     print(rs.rowcount)
     print("AR: author flair inclusion")
     rs = wd.s.execute('UPDATE RedditPost t '
@@ -209,7 +209,7 @@ def automated_reviews(wd):
                    'AND (t.author_flair is NULL '
                    'OR NOT (t.author_flair REGEXP s.author_not_exempt_flair_keyword)'
                    ')',
-                   {"counted_status": CountedStatus.FLAIR_EXEMPT})
+                   {"counted_status": CountedStatus.FLAIR_EXEMPT.value})
     print(rs.rowcount)
     print("AR: excluding title/post_flair")
     rs = wd.s.execute('UPDATE RedditPost t '
@@ -218,7 +218,7 @@ def automated_reviews(wd):
                    'WHERE t.reviewed = 0 AND t.counted_status <1 '
                    'AND s.title_exempt_keyword is not NULL '
                    'AND CONCAT(t.title, COALESCE(t.post_flair)) REGEXP s.author_exempt_flair_keyword ',
-                   {"counted_status": CountedStatus.TITLE_KW_EXEMPT})
+                   {"counted_status": CountedStatus.TITLE_KW_EXEMPT.value})
     print(rs.rowcount)
     print("AR: inclusion title/post flair - reversed")
     rs = wd.s.execute('UPDATE RedditPost t '
@@ -227,7 +227,7 @@ def automated_reviews(wd):
                    'WHERE t.reviewed = 0 AND t.counted_status <1 '
                    'AND s.title_not_exempt_keyword  is NOT NULL '
                    'AND NOT (CONCAT(t.title, COALESCE(t.post_flair)) REGEXP s.title_not_exempt_keyword)',
-                   {"counted_status": CountedStatus.TITLE_KW_EXEMPT})
+                   {"counted_status": CountedStatus.TITLE_KW_EXEMPT.value})
     print(rs.rowcount)
 
     """

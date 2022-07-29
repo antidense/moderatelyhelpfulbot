@@ -8,9 +8,10 @@ import prawcore
 from logger import logger
 from enums import SubStatus, PostedStatus, CountedStatus
 
+
 from models.reddit_models import SubmittedPost, TrackedSubreddit, TrackedAuthor
 
-from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET
+from settings import BOT_NAME
 from typing import List
 from datetime import datetime
 import pytz
@@ -21,8 +22,8 @@ class RedditInterface:
     reddit_client = None
 
     def __init__(self):
-        self.reddit_client = praw.Reddit(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, password=BOT_PW,
-                                    user_agent="ModeratelyHelpfulBot v0.4", username=BOT_NAME)
+        self.reddit_client = praw.Reddit(
+                                    )
 
     '''SUBMISSION STUFF'''
     def get_submission_api_handle(self, submission: SubmittedPost) -> praw.models.Submission:
@@ -64,7 +65,7 @@ class RedditInterface:
 
 
     def get_posted_status(self, submission: SubmittedPost, get_removed_info=False) -> PostedStatus:
-        print('getting posted status...')
+        print(f'getting posted status...  current status:{submission.posted_status}')
         # _ = submission.get_api_handle()  what was this for again?
         post_api_handle = self.get_submission_api_handle(submission)  # updates the api handle
         try:

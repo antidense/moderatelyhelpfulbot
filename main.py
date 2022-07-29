@@ -10,7 +10,7 @@ import praw
 import prawcore
 import pytz
 import yaml
-
+from settings import BOT_NAME
 """
 from sqlalchemy import *
 from sqlalchemy.ext.declarative import declarative_base
@@ -40,13 +40,14 @@ active status to an ENUM
 add non-binary gender
 """
 
-
 from workingdata import WorkingData
 
 def main_loop():
     wd = WorkingData()
     wd.s = dbobj.s
     wd.ri = RedditInterface()
+
+    print(f"My name is {wd.ri.reddit_client.user.me()}, {BOT_NAME}")
     # load_settings(wd)
     sub_info = wd.ri.get_subreddit_info(subreddit_name=BOT_NAME)
     wd.ri.bot_sub : TrackedSubreddit = wd.s.query(TrackedSubreddit).get(BOT_NAME)
@@ -294,7 +295,7 @@ def check_spam_submissions(wd: WorkingData, sub_list='mod', intensity=0):
             break
         if not previous_post:
             post = SubmittedPost(post_to_review)
-            post.posted_status=PostedStatus.SPAM_FLT
+            post.posted_status=PostedStatus.SPAM_FLT.value
             post.reviewed = True
             sub_list = post.subreddit_name.lower()
             # logger.info("found spam post: '{0}...' http://redd.it/{1} ({2})".format(post.title[0:20], post.id,

@@ -17,7 +17,7 @@ from praw.models.listing.mixins.redditor import SubListing
 from sqlalchemy.orm import sessionmaker
 from enum import Enum  # has to be at the end?
 import queue
-from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET, BOT_OWNER, DB_ENGINE
+from settings import DB_ENGINE
 from enums import *
 from static import *
 # from database import Database

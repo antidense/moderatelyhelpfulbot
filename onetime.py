@@ -38,12 +38,12 @@ def main():
     scopes = [scope.strip() for scope in scope_input.strip().split(",")]
 
     reddit = praw.Reddit(
-        redirect_uri="http://localhost:8080",
+        redirect_uri="http://localhost:8082",
         user_agent="obtain_refresh_token/v0 by u/bboe",
     )
     state = str(random.randint(0, 65000))
     url = reddit.auth.url(duration="permanent", scopes=scopes, state=state)
-    print(f"Now open this url in your browser: {url}")
+    print(f"Now open this url in your browser: {url}".replace("%22",""))
 
     client = receive_connection()
     data = client.recv(1024).decode("utf-8")
@@ -75,7 +75,7 @@ def receive_connection():
     """
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(("localhost", 8080))
+    server.bind(("localhost", 8082))
     server.listen(1)
     client = server.accept()[0]
     server.close()

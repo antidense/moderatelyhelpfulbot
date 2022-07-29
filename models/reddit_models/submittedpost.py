@@ -8,12 +8,11 @@ from logger import logger
 from praw.models import Submission
 from sqlalchemy import Boolean, Column, DateTime, Integer, String, UnicodeText
 from enums import CountedStatus, PostedStatus
-from settings import login_credentials
+from settings import BOT_NAME
 # from models.reddit_models.redditinterface import SubmissionInfo
 
 s = dbobj.s
 
-BOT_NAME = login_credentials["bot_name"]
 
 
 class SubmittedPost(dbobj.Base):  # need posted_status
@@ -53,7 +52,9 @@ class SubmittedPost(dbobj.Base):  # need posted_status
     api_handle = None
 
     def __init__(self, submission, save_text: bool = False):
-
+        self.nsfw_last_checked = datetime.now(pytz.utc)
+        self.last_checked = datetime.now(pytz.utc)
+        self.flushed_to_log = False
         if isinstance(submission, Submission):
 
             self.id = submission.id
