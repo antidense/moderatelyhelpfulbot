@@ -5,7 +5,8 @@ class CountedStatus(Enum):
     NOT_CHKD = -1   # include in search
     PREV_EXEMPT = 0  # Previously the code for exemption, switched to 2
     COUNTS = 1  # include in search
-    EXEMPTED = 2  # don't include in search  0 --> CHANGE to 2*****  no longer use, use more specific
+    # EXEMPTED = 2  # don't include in search  0 --> CHANGE to 2*****  no longer use, use more specific
+    REVIEWED = 2 # include in search
     BLKLIST = 3  # don't include in search
     HALLPASS = 4  # don't include in search
     FLAGGED = 5 # don't include?
