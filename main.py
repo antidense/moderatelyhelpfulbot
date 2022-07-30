@@ -348,9 +348,13 @@ def calculate_stats(wd: WorkingData):
             sub_stat = Stats2(subreddit_name, date, 'flagged')
             sub_stat.value_int = flagged_count
             wd.s.add(sub_stat)
+        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'blacklisted'))
+        if not sub_stat:
             sub_stat = Stats2(subreddit_name, date, 'blacklisted')
             sub_stat.value_int = blacklisted_count
             wd.s.add(sub_stat)
+        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'removed'))
+        if not sub_stat:
             sub_stat = Stats2(subreddit_name, date, 'removed')
             sub_stat.value_int = removed_count
             wd.s.add(sub_stat)
