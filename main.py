@@ -1044,20 +1044,23 @@ def handle_direct_messages(wd: WorkingData):
 
 def mod_mail_invitation_to_moderate(wd: WorkingData, message):
     subreddit_name = message.subject.replace("invitation to moderate /r/", "")
-    tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=False)
+
 
     # accept invite if accepting invites or had been accepted previously
     print("to make sub:", subreddit_name)
-    if ACCEPTING_NEW_SUBS or tr_sub and 'karma' not in subreddit_name.lower():
-        if not tr_sub:
-            tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=True)
-
+    if ACCEPTING_NEW_SUBS and 'karma' not in subreddit_name.lower():
         try:
-            sub_api_handle = wd.ri.get_subreddit_api_handle(tr_sub)
-            sub_api_handle.mod.accept_invite()
+            wd.ri.subreddit(subreddit_name).mod.accept_invite()
         except praw.exceptions.APIException:
             message.reply(body="Error: Invite message has been rescinded? or already accepted?")
             message.mark_read()
+
+        tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=False)
+
+        if not tr_sub:
+            tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=True)
+
+
 
         message.reply(
             body=f"Hi, thank you for inviting me!  I will start working now. Please make sure I have a config. "
