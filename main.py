@@ -1049,22 +1049,18 @@ def handle_direct_messages(wd: WorkingData):
 def mod_mail_invitation_to_moderate(wd: WorkingData, message):
     subreddit_name = message.subject.replace("invitation to moderate /r/", "")
 
-
+    tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=False)
     # accept invite if accepting invites or had been accepted previously
     print("to make sub:", subreddit_name)
-    if ACCEPTING_NEW_SUBS and 'karma' not in subreddit_name.lower():
+    if tr_sub or (ACCEPTING_NEW_SUBS and 'karma' not in subreddit_name.lower()):
         try:
-            wd.ri.subreddit(subreddit_name).mod.accept_invite()
+            wd.ri.reddit_client.subreddit(subreddit_name).mod.accept_invite()
         except praw.exceptions.APIException:
             message.reply(body="Error: Invite message has been rescinded? or already accepted?")
             message.mark_read()
 
-        tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=False)
-
         if not tr_sub:
             tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=True)
-
-
 
         message.reply(
             body=f"Hi, thank you for inviting me!  I will start working now. Please make sure I have a config. "
@@ -1072,7 +1068,8 @@ def mod_mail_invitation_to_moderate(wd: WorkingData, message):
                  f"You may need to create it. You can find examples at "
                  f"https://www.reddit.com/r/{BOT_NAME}/wiki/index . ")
         try:
-            access_status = wd.ri.check_access(tr_sub, ignore_no_mod_access=True)
+            sub_info = wd.ri.get_subreddit_info(tr_sub.subreddit_name)
+            access_status = sub_info.check_sub_access(wd.ri, ignore_no_mod_access=True)
             if access_status == SubStatus.NO_CONFIG:
                 logger.warning(f'no wiki page {tr_sub.subreddit_name}..will create')
                 wd.ri.reddit_client.subreddit(tr_sub.subreddit_name).wiki.create(

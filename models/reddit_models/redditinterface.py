@@ -287,7 +287,7 @@ class SubredditInfo:
         if not mod_list:
             self.active_status = SubStatus.SUB_FORBIDDEN.value
             return SubStatus.SUB_FORBIDDEN, f"Subreddit is banned."
-        if ignore_no_mod_access and self.bot_name not in subreddit.mod_list:
+        if ignore_no_mod_access and ri.bot_name not in subreddit.mod_list:
             self.active_status = SubStatus.NO_MOD_PRIV.value
 
             return SubStatus.NO_MOD_PRIV, f"The bot does not have moderator privileges to /r/{self.subreddit_name}."
