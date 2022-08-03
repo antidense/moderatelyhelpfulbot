@@ -429,19 +429,21 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
 
         # Remove any posts that are prior to eligibility
         posts_to_verify = []
-        print(f"---max_count: {max_count}, interval:{tr_sub.min_post_interval_txt} "
-              f"grace_period:{tr_sub.grace_period}")
+        print(f"/r/{pg.subreddit_name}---max_count: {max_count}, interval: {tr_sub.min_post_interval_txt} "
+              f"grace_period: {tr_sub.grace_period}")
         for j, post in enumerate(pg.posts):
             assert (isinstance(post, SubmittedPost))
             logger.info(
-                f"{i}-{j}Checking: r/{pg.subreddit_name}  "
-                f"{pg.author_name}  {post.time_utc}  reviewed:{post.reviewed}  counted:{post.counted_status}"
-                f"posted:{post.posted_status} url:{post.get_url()}  title:{post.title[0:30]}")
+                f"{i}-{j}Checking: "
+                f"{pg.author_name} {post.time_utc} url:{post.get_url()} reviewed:{post.reviewed}  "
+                f"counted:{post.counted_status} "
+                f"posted:{post.posted_status}  title:{post.title[0:30]}")
 
             if post.counted_status == CountedStatus.BLKLIST.value:  # May not need this later
                 logger.info(
                     f"{i}-{j}\t\tAlready handled")
                 continue
+
             # Check for soft blacklist
             """
             if subreddit_author and subreddit_author.next_eligible and post.time_utc \

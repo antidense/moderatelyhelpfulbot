@@ -10,7 +10,8 @@ import praw
 import prawcore
 import pytz
 import yaml
-from settings import  MAIN_BOT_NAME, ACCEPTING_NEW_SUBS, BOT_OWNER
+
+from settings import MAIN_BOT_NAME, ACCEPTING_NEW_SUBS, BOT_OWNER
 """
 from sqlalchemy import *
 from sqlalchemy.ext.declarative import declarative_base
@@ -253,11 +254,12 @@ def check_new_submissions(wd: WorkingData, query_limit=800, sub_list='mod', inte
     possible_new_posts = [a for a in wd.ri.reddit_client.subreddit(sub_list).new(limit=query_limit)]
 
     count = 0
+    total = 0
     for post_to_review in possible_new_posts:
-
+        total+=1
         subreddit_name = str(post_to_review.subreddit).lower()
         if intensity == 0 and subreddit_name in subreddit_names_complete:
-            # print(f'done w/ {subreddit_name}')
+            #print(f'done w/ {subreddit_name} @ {total}')
             continue
         previous_post: SubmittedPost = wd.s.query(SubmittedPost).get(post_to_review.id)
         if previous_post:
@@ -272,7 +274,7 @@ def check_new_submissions(wd: WorkingData, query_limit=800, sub_list='mod', inte
 
             wd.s.add(post)
             count += 1
-    logger.info(f'main/CNW: found {count} posts')
+    logger.info(f'main/CNW: found {count} posts out of {total}')
     logger.debug("/mainCNW: updating database...")
     wd.s.commit()
     return subreddit_names
@@ -955,7 +957,7 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
 
 
 def handle_direct_messages(wd: WorkingData):
-
+    print("checking direct messages")
     for message in wd.ri.reddit_client.inbox.unread(limit=None):
         logger.info("got this email author:{} subj:{}  body:{} ".format(message.author, message.subject, message.body))
 
@@ -996,25 +998,35 @@ def handle_direct_messages(wd: WorkingData):
         elif message.subject.startswith('invitation to moderate'):
             mod_mail_invitation_to_moderate(wd, message)
         elif command in ("summary", "update", "stats") or command.startswith("$"):
-            if requestor_name is None:
+            subreddit_name = None
+            thread_id = None
+            is_modmail_message = hasattr(message, 'distinguished') and message.distinguished=='moderator'
+            if requestor_name is None and not is_modmail_message:
                 print("requestor name is none?")
                 continue
-            subject_parts = message.subject.replace("re: ", "").split(":")
-            thread_id = subject_parts[1] if len(subject_parts) > 1 else None
-            subreddit_name = subject_parts[0].lower().replace("re: ", "").replace("/r/", "").replace("r/", "")
+            if is_modmail_message:
+                subreddit_name = message.subject
+                thread_id = None
+                requestor_name = "[modmail]"
+            if not subreddit_name:
+                subject_parts = message.subject.replace("re: ", "").split(":")
+                thread_id = subject_parts[1] if len(subject_parts) > 1 else None
+                subreddit_name = subject_parts[0].lower().replace("re: ", "").replace("/r/", "").replace("r/", "")
             tr_sub = get_subreddit_by_name(wd, subreddit_name)
             response, _ = handle_dm_command(wd, subreddit_name, requestor_name, command, body_parts[1:])
+            print("response---", response)
             if tr_sub and thread_id:
                 wd.ri.send_modmail(subreddit_name=tr_sub, body=response[:9999], thread_id=thread_id)
             else:
+
                 message.reply(body=response[:9999])
             bot_owner_message = f"subreddit: {subreddit_name}\n\n" \
                                 f"requestor: {requestor_name}\n\n" \
                                 f"command: {command}\n\n" \
                                 f"response: {response}\n\n" \
-                                f"wiki: https://www.reddit.com/r/{subreddit_name}/wiki/{BOT_NAME}\n\n"
-            if requestor_name.lower() != BOT_OWNER.lower():
-                wd.ri.send_modmail(subreddit_name=BOT_NAME, subject="[Notification]  Command processed",
+                                f"wiki: https://www.reddit.com/r/{subreddit_name}/wiki/{MAIN_BOT_NAME}\n\n"
+            if requestor_name is not None and requestor_name.lower() != BOT_OWNER.lower():
+                wd.ri.send_modmail(subreddit_name=MAIN_BOT_NAME, subject="[Notification]  Command processed",
                                    body=bot_owner_message, use_same_thread=True)
             # wd.ri.reddit_client.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
 
