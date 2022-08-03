@@ -833,6 +833,7 @@ def make_comment(subreddit: TrackedSubreddit, recent_post: SubmittedPost, most_r
     response = subreddit.populate_tags2(f"{comment_template}{RESPONSE_TAIL}{ids}",
                                         recent_post=recent_post, prev_post=prev_submission, wd=wd)
 
+
     if not do_actual_comment:
         return response
     try:

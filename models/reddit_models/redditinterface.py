@@ -293,10 +293,15 @@ class SubredditInfo:
             return SubStatus.NO_MOD_PRIV, f"The bot does not have moderator privileges to /r/{self.subreddit_name}."
         try:
             logger.debug(f'si/csa accessing wiki config {self.subreddit_name}, {MAIN_BOT_NAME}')
-            wiki_page = self.subreddit_api_handle.wiki[ri.bot_name]
+
             # logger.debug(f'si/csa wiki_page {wiki_page.content_md}')
-            if not wiki_page:
+            wiki_page = None
+            wiki_pages = [x.name for x in self.subreddit_api_handle.wiki]
+            if MAIN_BOT_NAME.lower() in wiki_pages:
                 wiki_page = self.subreddit_api_handle.wiki[MAIN_BOT_NAME]
+            if ri.bot_name.lower() in wiki_pages:
+                wiki_page = self.subreddit_api_handle.wiki[ri.bot_name]
+
             if wiki_page:
                 self.settings_yaml_txt = wiki_page.content_md
                 #logger.debug(f'si/csa wiki_page {wiki_page.content_md}')

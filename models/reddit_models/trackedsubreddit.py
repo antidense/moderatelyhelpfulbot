@@ -451,5 +451,6 @@ class TrackedSubreddit(dbobj.Base):
                            })
 
         input_text = re.sub(r'{(.+?)}', lambda m: mydict.get(m.group(), m.group()), input_text)
+        input_text = input_text.replace("\\n","\n")
         return input_text
 
