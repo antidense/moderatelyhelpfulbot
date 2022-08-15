@@ -47,12 +47,13 @@ def main_loop():
     wd = WorkingData()
     wd.s = dbobj.s
     wd.ri = RedditInterface()
+
     global BOT_NAME
     BOT_NAME  = wd.ri.reddit_client.user.me().name
     print(f"My name is {wd.ri.reddit_client.user.me()}, {BOT_NAME}")
     # load_settings(wd)
     sub_info = wd.ri.get_subreddit_info(subreddit_name=MAIN_BOT_NAME)
-    wd.ri.bot_sub : TrackedSubreddit = wd.s.query(TrackedSubreddit).get(MAIN_BOT_NAME)
+    wd.ri.bot_sub: TrackedSubreddit = wd.s.query(TrackedSubreddit).get(MAIN_BOT_NAME)
     if not wd.ri.bot_sub:
         wd.ri.bot_sub = TrackedSubreddit(subreddit_name=MAIN_BOT_NAME, sub_info=sub_info)
     if not wd.ri.bot_sub.mm_convo_id:
@@ -64,6 +65,7 @@ def main_loop():
     i = 0
     # update_sub_list(intensity=2)
     purge_old_records(wd)
+
 
     while True:
         i += 1
@@ -78,6 +80,8 @@ def main_loop():
             wd.to_update_list = False
 
         try:
+            handle_direct_messages(wd)
+            handle_modmail_messages(wd)
             look_for_rule_violations3(wd)
             # Gather posts
             chunk_size = 200 if intensity == 1 else 300
@@ -154,6 +158,7 @@ def load_settings(wd: WorkingData):  # Not being used
 def update_sub_list(wd: WorkingData, intensity=0):
     print('updating subs..', sep="")
     wd.sub_list = []
+    wd.nsfw_monitoring_subs = []
 
     if intensity > 4:
         trs = wd.s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status > 0).all()  # sql query
@@ -204,6 +209,8 @@ def update_sub_list(wd: WorkingData, intensity=0):
             else:
                 tr.reload_yaml_settings()
                 print(f'')
+        if tr.nsfw_pct_moderation:
+            wd.nsfw_monitoring_subs.append(tr.subreddit_name)
 
         wd.sub_dict[tr.subreddit_name] = tr
 
@@ -267,7 +274,7 @@ def check_new_submissions(wd: WorkingData, query_limit=800, sub_list='mod', inte
             continue
         if not previous_post:
             post = SubmittedPost(post_to_review)
-            if post.subreddit_name in ("needafriend", "makenewfriendshere"):
+            if post.subreddit_name in wd.nsfw_monitoring_subs:
                 check_post_nsfw_eligibility(wd, post)
             if subreddit_name not in subreddit_names:
                 subreddit_names.append(subreddit_name)
@@ -1016,7 +1023,7 @@ def handle_direct_messages(wd: WorkingData):
             response, _ = handle_dm_command(wd, subreddit_name, requestor_name, command, body_parts[1:])
             print("response---", response)
             if tr_sub and thread_id:
-                wd.ri.send_modmail(subreddit_name=tr_sub, body=response[:9999], thread_id=thread_id)
+                wd.ri.send_modmail(subreddit=tr_sub, body=response[:9999], thread_id=thread_id)
             else:
 
                 message.reply(body=response[:9999])
