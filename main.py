@@ -54,6 +54,7 @@ def main_loop():
     wd.s.commit()
 
     i = 0
+    #calculate_stats(wd)
     purge_old_records(wd)
 
     while True:
@@ -219,8 +220,9 @@ def calculate_stats(wd: WorkingData):
             sub_stat = Stats2(subreddit_name, date, stat_name)
             sub_stat.value_int = count
             wd.s.add(sub_stat)
-        else:
-            break
+        elif sub_stat.value_int < count:
+            sub_stat.value_int = count
+        wd.s.add(sub_stat)
     wd.s.commit()
 
     statement = 'select count(*), sum(if(counted_status=5, 1, 0)) as flagged, sum(if(counted_status=3, 1, 0)) as blacklisted, sum(if(counted_status=20, 1, 0)) as removed,  subreddit_name, date(time_utc) as date from RedditPost  where  time_utc > utc_timestamp() - INTERVAL  60*24*14 MINUTE and time_utc < date(utc_timestamp)  group by  subreddit_name, date  order by date'
@@ -237,19 +239,19 @@ def calculate_stats(wd: WorkingData):
             sub_stat = Stats2(subreddit_name, date, 'collected')
             sub_stat.value_int = count
             wd.s.add(sub_stat)
-        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'flagged'))
+        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'flagged_'))
         if not sub_stat:
-            sub_stat = Stats2(subreddit_name, date, 'flagged')
+            sub_stat = Stats2(subreddit_name, date, 'flagged_')
             sub_stat.value_int = flagged_count
             wd.s.add(sub_stat)
-        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'blacklisted'))
+        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'blacklisted_'))
         if not sub_stat:
-            sub_stat = Stats2(subreddit_name, date, 'blacklisted')
+            sub_stat = Stats2(subreddit_name, date, 'blacklisted_')
             sub_stat.value_int = blacklisted_count
             wd.s.add(sub_stat)
-        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'removed'))
+        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'removed_'))
         if not sub_stat:
-            sub_stat = Stats2(subreddit_name, date, 'removed')
+            sub_stat = Stats2(subreddit_name, date, 'removed_')
             sub_stat.value_int = removed_count
             wd.s.add(sub_stat)
         sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'flagged_total'))
@@ -280,7 +282,7 @@ def calculate_stats(wd: WorkingData):
     wd.s.commit()
     wd.s.execute(statement)
 
-    # SELECT date, sum(value_int) FROM `Stats2` WHERE stat_name = "removed" group by date;
+    # SELECT date, sum(value_int) FROM `Stats2` WHERE stat_name = "flagged_total" group by date;
 
 def update_common_posts(wd: WorkingData, subreddit_name, limit=1000):
     top_posts = [a for a in wd.ri.reddit_client.subreddit(subreddit_name).top(limit=limit)]
