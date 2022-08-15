@@ -20,27 +20,71 @@ from models.reddit_models import SubAuthor, SubmittedPost, \
 from logger import logger
 from sqlalchemy import exc
 from settings import MAIN_BOT_NAME
+from nsfw_monitoring import check_post_nsfw_eligibility
 
-def get_age(input_text):
-    matches = re.search(ASL_REGEX, input_text)
-    age = -1
-    if matches:
-        if matches.group('age'):
-            age = int(matches.group('age'))
-        if matches.group('age2'):
-            age = int(matches.group('age2'))
-    else:
-        matches = re.match(r'(?P<age>[0-9]{2})', input_text[0:2])
-        if matches:
-            if matches.group('age'):
-                age = int(matches.group('age'))
-        else:
-            matches = re.match(r"[iI]((')|( a))?m (?P<age>\d{2})", input_text)
-            if matches:
-                if matches.group('age'):
-                    age = int(matches.group('age'))
-    # print(f"age: {age}  text:{input_text} ")
-    return age
+
+
+
+def check_new_submissions(wd: WorkingData, query_limit=800, sub_list='mod', intensity=0):
+    subreddit_names = []
+    subreddit_names_complete = []
+    logger.info(f"main/CNW: pulling new posts!  intensity: {intensity}")
+
+    possible_new_posts = [a for a in wd.ri.reddit_client.subreddit(sub_list).new(limit=query_limit)]
+
+    count = 0
+    total = 0
+    for post_to_review in possible_new_posts:
+        total += 1
+        subreddit_name = str(post_to_review.subreddit).lower()
+        if intensity == 0 and subreddit_name in subreddit_names_complete:
+            # print(f'done w/ {subreddit_name} @ {total}')
+            continue
+        previous_post: SubmittedPost = wd.s.query(SubmittedPost).get(post_to_review.id)
+        if previous_post:
+            subreddit_names_complete.append(subreddit_name)
+            continue
+        if not previous_post:
+            post = SubmittedPost(post_to_review)
+            if post.subreddit_name in wd.nsfw_monitoring_subs:
+                check_post_nsfw_eligibility(wd, post)
+            if subreddit_name not in subreddit_names:
+                subreddit_names.append(subreddit_name)
+
+            wd.s.add(post)
+            count += 1
+    logger.info(f'main/CNW: found {count} posts out of {total}')
+    logger.debug("/mainCNW: updating database...")
+    wd.s.commit()
+    return subreddit_names
+
+
+def check_spam_submissions(wd: WorkingData, sub_list='mod', intensity=0):
+    possible_spam_posts = []
+    try:
+        possible_spam_posts = [a for a in wd.ri.reddit_client.subreddit(sub_list).mod.spam(only='submissions')]
+    except prawcore.exceptions.Forbidden:
+        pass
+    for post_to_review in possible_spam_posts:
+        previous_post: SubmittedPost = wd.s.query(SubmittedPost).get(post_to_review.id)
+        if previous_post and intensity == 0:
+            break
+        if not previous_post:
+            post = SubmittedPost(post_to_review)
+            post.posted_status = PostedStatus.SPAM_FLT.value
+            post.reviewed = True
+            sub_list = post.subreddit_name.lower()
+            # logger.info("found spam post: '{0}...' http://redd.it/{1} ({2})".format(post.title[0:20], post.id,
+            #                                                                         subreddit_name))
+
+            # post.reviewed = True
+            wd.s.add(post)
+            subreddit_author: SubAuthor = wd.s.query(SubAuthor).get((sub_list, post.author))
+            if subreddit_author and subreddit_author.hall_pass >= 1:
+                subreddit_author.hall_pass -= 1
+                post.api_handle.mod.approve()
+                wd.s.add(subreddit_author)
+    wd.s.commit()
 
 
 def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPost, wd=None):  # uses some reddit api
@@ -79,7 +123,7 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
         return CountedStatus.OC_EXEMPT, ""
     elif tr_sub.exempt_self_posts and recent_post.is_self:  # wont change
         return CountedStatus.SELF_EXEMPT, ""
-    elif tr_sub.exempt_link_posts and recent_post.is_self is not True: # won't change
+    elif tr_sub.exempt_link_posts and recent_post.is_self is not True:  # won't change
         return CountedStatus.LINK_EXEMPT, ""
     if tr_sub.exempt_moderator_posts and recent_post.author in tr_sub.subreddit_mods: # may change
         return CountedStatus.MODPOST_EXEMPT, "moderator exempt"
