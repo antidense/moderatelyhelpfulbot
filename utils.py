@@ -73,7 +73,7 @@ def check_spam_submissions(wd: WorkingData, sub_list='mod', intensity=0):
             post = SubmittedPost(post_to_review)
             if post.banned_by is True:
                 post.posted_status = PostedStatus.AUTOMOD_RM
-            elif post.posted_status.banned_by == "AutoModerator":
+            elif post.banned_by == "AutoModerator":
                 post.posted_status = PostedStatus.SPAM_FLT.value
             post.reviewed = True
             sub_list = post.subreddit_name.lower()
