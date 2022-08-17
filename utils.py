@@ -197,7 +197,7 @@ def automated_reviews(wd):
     # ignore self posts
     rs = wd.s.execute("UPDATE RedditPost t "
                    "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
-                   "SET counted_status = :counted_status, reviewed = 1 "
+                   "SET counted_status = :counted_status, reviewed = 1, last_reviewed = :last_reviewed "
                    "WHERE t.counted_status < 1 "
                    "AND t.reviewed = 0 and t.is_self is TRUE and s.exempt_self_posts is TRUE",
                    {"counted_status": CountedStatus.SELF_EXEMPT.value,
@@ -210,7 +210,7 @@ def automated_reviews(wd):
     # ignore link posts
     rs = wd.s.execute("UPDATE RedditPost t "
                    "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
-                   "SET counted_status = :counted_status, reviewed = 1 "
+                   "SET counted_status = :counted_status, reviewed = 1, last_reviewed = :last_reviewed "
                    "WHERE t.counted_status < 1 "
                    "AND t.reviewed = 0 and t.is_self is FALSE and s.exempt_link_posts is TRUE",
                    {"counted_status": CountedStatus.LINK_EXEMPT.value})
@@ -221,7 +221,7 @@ def automated_reviews(wd):
     # ignore OC
     rs = wd.s.execute("UPDATE RedditPost t "
                    "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
-                   "SET counted_status = :counted_status, reviewed = 1 "
+                   "SET counted_status = :counted_status, reviewed = 1, last_reviewed = :last_reviewed "
                    "WHERE t.counted_status < 1 "
                    "AND  t.reviewed = 0 and t.is_oc is TRUE and s.exempt_oc is TRUE",
                    {"counted_status": CountedStatus.OC_EXEMPT.value,
@@ -231,11 +231,12 @@ def automated_reviews(wd):
     print("AR excluding autoremoved posts...")
     rs = wd.s.execute("UPDATE RedditPost t "
                    "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
-                   "SET counted_status = :counted_status, reviewed = 1 "
+                   "SET counted_status = :counted_status, reviewed = 1, last_reviewed = :last_reviewed "
                    "WHERE t.counted_status < 1 "
                    "AND  s.ignore_Automoderator_removed = 1 AND t.posted_status like :posted_status",
                    {"counted_status": CountedStatus.AM_RM_EXEMPT.value,
-                    "posted_status": PostedStatus.AUTOMOD_RM.value})
+                    "posted_status": PostedStatus.AUTOMOD_RM.value,
+                    "last_reviewed": now_date})
     print(rs.rowcount)
     print("AR excluding moderator removed posts...DOES NOT INCLUDE Flair helper??")
     # ignore link posts
@@ -344,7 +345,8 @@ def do_reddit_actions(wd):
 
     print("do status updates")
     to_update = wd.s.query(SubmittedPost)\
-        .filter(SubmittedPost.counted_status == CountedStatus.NEEDS_UPDATE.value)
+        .filter(SubmittedPost.counted_status == CountedStatus.NEEDS_UPDATE.value)\
+        .filter(SubmittedPost.time_utc > datetime.now(pytz.utc).replace(tzinfo=None) - timedelta(hours=48))
     for op in to_update:
         assert(isinstance(op, SubmittedPost))
         op.posted_status = wd.ri.get_posted_status(op).value
