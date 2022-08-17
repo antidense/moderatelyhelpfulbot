@@ -182,12 +182,14 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
 
 def automated_reviews(wd):
     print("AR: excluding mod posts...")
+    now_date = datetime.now(pytz.utc)
     # ignore moderators
     rs = wd.s.execute('UPDATE RedditPost t '
                    'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
                    'SET counted_status = :counted_status, reviewed = 1 '
                    'WHERE t.counted_status < 1 and t.reviewed = 0 and s.mod_list like CONCAT("%", t.author, "%") ',
-                   {"counted_status": CountedStatus.MODPOST_EXEMPT.value})
+                   {"counted_status": CountedStatus.MODPOST_EXEMPT.value,
+                    "last_reviewed": now_date})
     print(rs.rowcount)
 
 
@@ -199,7 +201,8 @@ def automated_reviews(wd):
                    "WHERE t.counted_status < 1 "
                    "AND t.reviewed = 0 and t.is_self is TRUE and s.exempt_self_posts is TRUE",
                    {"counted_status": CountedStatus.SELF_EXEMPT.value,
-                    "banned_by": "AutoModerator"})
+                    "banned_by": "AutoModerator",
+                    "last_reviewed": now_date})
     print(rs.rowcount)
 
     """  No one has excluded link posts...
@@ -221,7 +224,8 @@ def automated_reviews(wd):
                    "SET counted_status = :counted_status, reviewed = 1 "
                    "WHERE t.counted_status < 1 "
                    "AND  t.reviewed = 0 and t.is_oc is TRUE and s.exempt_oc is TRUE",
-                   {"counted_status": CountedStatus.OC_EXEMPT.value})
+                   {"counted_status": CountedStatus.OC_EXEMPT.value,
+                    "last_reviewed": now_date})
 
     #ignore autoremoved
     print("AR excluding autoremoved posts...")
@@ -342,7 +346,7 @@ def do_reddit_actions(wd):
     to_update = wd.s.query(SubmittedPost)\
         .filter(SubmittedPost.counted_status == CountedStatus.NEEDS_UPDATE.value)
     for op in to_update:
-        assert(isinstance(op, PostedStatus))
+        assert(isinstance(op, SubmittedPost))
         op.posted_status = wd.ri.get_posted_status(op).value
         op.last_checked = datetime.now(pytz.utc)
         wd.s.add(op)
@@ -386,13 +390,16 @@ def do_reddit_actions(wd):
     wd.s.commit()
 
 
-def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
+def look_for_rule_violations4(wd):
+    automated_reviews(wd)
+    last_reviews = datetime.now(pytz.utc)
+    do_reddit_actions(wd)
 
-    # Handle soft blacklists
+
+def look_for_rule_violations3(wd):
 
     automated_reviews(wd)
     do_reddit_actions(wd)
-
 
     print(f"LRWT: querying recent post(s)")
     posting_groups = []
@@ -448,13 +455,10 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
         last_post = posts[-1]
         assert isinstance(last_post, SubmittedPost)
         if not last_post.review_debug:
-
             last_post.review_debug = f"ma:{row[1]}"
-
             wd.s.add(last_post)
         posting_groups.append(
                 PostingGroup(last_post.id, author_name=row[3], subreddit_name=row[4].lower(), posts=posts))
-
     wd.s.commit()
 
     print(f"Total groups found: {len(posting_groups)}")
