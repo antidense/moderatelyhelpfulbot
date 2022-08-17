@@ -71,7 +71,10 @@ def check_spam_submissions(wd: WorkingData, sub_list='mod', intensity=0):
             break
         if not previous_post:
             post = SubmittedPost(post_to_review)
-            post.posted_status = PostedStatus.SPAM_FLT.value
+            if post.banned_by is True:
+                post.posted_status = PostedStatus.AUTOMOD_RM
+            elif post.posted_status.banned_by == "AutoModerator":
+                post.posted_status = PostedStatus.SPAM_FLT.value
             post.reviewed = True
             sub_list = post.subreddit_name.lower()
             # logger.info("found spam post: '{0}...' http://redd.it/{1} ({2})".format(post.title[0:20], post.id,
@@ -199,6 +202,7 @@ def automated_reviews(wd):
                     "banned_by": "AutoModerator"})
     print(rs.rowcount)
 
+    """  No one has excluded link posts...
     print("AR: excluding link posts...")
     # ignore link posts
     rs = wd.s.execute("UPDATE RedditPost t "
@@ -208,6 +212,7 @@ def automated_reviews(wd):
                    "AND t.reviewed = 0 and t.is_self is FALSE and s.exempt_link_posts is TRUE",
                    {"counted_status": CountedStatus.LINK_EXEMPT.value})
     print(rs.rowcount)
+    """
 
     print("AR excluding OC posts")
     # ignore OC
@@ -217,6 +222,8 @@ def automated_reviews(wd):
                    "WHERE t.counted_status < 1 "
                    "AND  t.reviewed = 0 and t.is_oc is TRUE and s.exempt_oc is TRUE",
                    {"counted_status": CountedStatus.OC_EXEMPT.value})
+
+    #ignore autoremoved
     print("AR excluding autoremoved posts...")
     rs = wd.s.execute("UPDATE RedditPost t "
                    "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
@@ -331,6 +338,16 @@ def do_reddit_actions(wd):
     # assert(isinstance(wd.todoq, queue.Queue))
     # assert(isinstance(wd.doneq, queue.Queue))
 
+    print("do status updates")
+    to_update = wd.s.query(SubmittedPost)\
+        .filter(SubmittedPost.counted_status == CountedStatus.NEEDS_UPDATE.value)
+    for op in to_update:
+        assert(isinstance(op, PostedStatus))
+        op.posted_status = wd.ri.get_posted_status(op).value
+        op.last_checked = datetime.now(pytz.utc)
+        wd.s.add(op)
+    wd.s.commit()
+
     print("do removals...")
     to_remove = wd.s.query(SubmittedPost)\
         .filter(or_(SubmittedPost.counted_status == CountedStatus.BLKLIST_NEED_REMOVE.value,
@@ -402,7 +419,8 @@ def look_for_rule_violations3(wd):  # ri only used for reporting hall passes
             .filter(SubmittedPost.review_debug.like("ma:%")) \
             .order_by(SubmittedPost.added_time).first()
 
-    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, GROUP_CONCAT(t.counted_status ORDER BY t.id), COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status >3 and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND MAX(added_time) > :look_back AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL) ORDER BY most_recent desc ;"
+    # AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL)
+    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, GROUP_CONCAT(t.counted_status ORDER BY t.id), COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status >3 and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND MAX(added_time) > :look_back  ORDER BY most_recent desc ;"
     # more_accurate_statement.replace("[date]")
     search_back = 48
     more_accurate_statement = more_accurate_statement.replace('72', str(search_back))

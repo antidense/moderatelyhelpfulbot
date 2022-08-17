@@ -48,7 +48,7 @@ class TrackedSubreddit(dbobj.Base):
     is_nsfw = Column(Boolean, nullable=False, default=0)
 
     mod_list = Column(UnicodeText, nullable=True)  # added 7/4/22
-    ignore_Automoderator_removed = Column(Boolean, nullable=True, default=1)
+    ignore_AutoModerator_removed = Column(Boolean, nullable=True, default=1)
     ignore_moderator_removed = Column(Boolean, nullable=True, default=1)
     exempt_self_posts = Column(Boolean, nullable=True)
     exempt_link_posts = Column(Boolean, nullable=True)
@@ -123,7 +123,6 @@ class TrackedSubreddit(dbobj.Base):
         self.title_exempt_keyword = None
         self.title_not_exempt_keyword = None
         self.last_pulled = datetime.now(pytz.utc)-timedelta(hours=24)
-
 
         if not sub_info:
             self.active_status = SubStatus.NO_CONFIG.value

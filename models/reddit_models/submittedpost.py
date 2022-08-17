@@ -25,7 +25,7 @@ class SubmittedPost(dbobj.Base):  # need posted_status
     subreddit_name = Column(String(21), nullable=True)
     # banned_by = Column(String(21), nullable=True)  # Can delete this now ---------
     flagged_duplicate = Column(Boolean, nullable=True)
-    pre_duplicate = Column(Boolean, nullable=True)
+    pre_duplicate = Column(Boolean, nullable=True)  # Redundant with "CountedStatus.COUNTS
     # self_deleted = Column(Boolean, nullable=True)  # Can delete this now -------
     reviewed = Column(Boolean, nullable=True)   # could be combined into an Enum: reviewed,  pre_duplicate
     last_checked = Column(DateTime, nullable=False)  # redundant with reviewed?  can't use as inited with old date
@@ -48,6 +48,7 @@ class SubmittedPost(dbobj.Base):  # need posted_status
     is_oc = Column(Boolean, nullable=False)
 
     reply_comment = Column(UnicodeText, nullable=True)
+    last_reviewed = Column(DateTime, nullable=False)
 
     api_handle = None
 
@@ -65,6 +66,7 @@ class SubmittedPost(dbobj.Base):  # need posted_status
             self.time_utc = datetime.utcfromtimestamp(submission.created_utc)
             self.subreddit_name = str(submission.subreddit).lower()
             self.added_time = datetime.now(pytz.utc)
+            self.last_reviewed = datetime.now(pytz.utc)
             self.flagged_duplicate = False
             self.reviewed = False
             self.banned_by = None
@@ -87,6 +89,7 @@ class SubmittedPost(dbobj.Base):  # need posted_status
             self.submission_text = None
             self.subreddit_name = subm_info.subreddit_name
             self.added_time = datetime.now(pytz.utc)
+            self.last_reviewed = datetime.now(pytz.utc)
             self.flagged_duplicate = False
             self.reviewed = False
             self.banned_by = subm_info.banned_by

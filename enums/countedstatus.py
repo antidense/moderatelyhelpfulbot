@@ -10,7 +10,7 @@ class CountedStatus(Enum):
     BLKLIST = 3  # don't include in search
     HALLPASS = 4  # don't include in search
     FLAGGED = 5 # don't include?
-    SPAMMED_EXMPT = 6
+    SPAMMED_EXMPT = 6  #<<< doesn't exist???
     AM_RM_EXEMPT = 7
     MOD_RM_EXEMPT = 8
     OC_EXEMPT = 9
@@ -32,3 +32,10 @@ class CountedStatus(Enum):
     NEED_REMOVE = 520
     BLKLIST_REMOVED_FAILED = 603
 
+    @staticmethod
+    def is_permanent(cs):
+        if cs in (CountedStatus.COUNTS, CountedStatus.BLKLIST, CountedStatus.HALLPASS, CountedStatus.FLAGGED,
+                  CountedStatus.AM_RM_EXEMPT,):  # need to finish
+            return True
+        else:
+            return False
