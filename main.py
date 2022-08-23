@@ -36,6 +36,7 @@ def main_loop():
     wd = WorkingData()
     wd.s = dbobj.s
     wd.ri = RedditInterface()
+    wd.most_recent_review = None
 
 
     # Find out what my name is
@@ -214,7 +215,7 @@ def calculate_stats(wd: WorkingData):
         counted_status = row[1]
         subreddit_name = row[2]
         date = row[3]
-        stat_name = str(CountedStatus(counted_status)).replace("CountedStatus.", "").lower()
+        stat_name = str(CountedStatus(counted_status)).replace("CountedStatus.", "").lower()[0:21]
         sub_stat = wd.s.query(Stats2).get((subreddit_name, date, stat_name))
         if not sub_stat:
             sub_stat = Stats2(subreddit_name, date, stat_name)
