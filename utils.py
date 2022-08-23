@@ -180,9 +180,10 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
     return CountedStatus.COUNTS, "no exemptions"
 
 
+
 def automated_reviews(wd):
     print("AR: excluding mod posts...")
-    now_date = datetime.now(pytz.utc).replace(tzinfo=None)
+    now_date = datetime.now(pytz.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M%S")
     # ignore moderators
     rs = wd.s.execute('UPDATE RedditPost t '
                    'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
