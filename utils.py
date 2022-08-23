@@ -254,7 +254,7 @@ def automated_reviews(wd):
 
     print("AR: excluding author flair")
     rs = wd.s.execute('UPDATE RedditPost t '
-                   'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name,'
+                   'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name, '
                    'SET counted_status = :counted_status, reviewed = 1, last_reviewed = :last_reviewed '
                    'WHERE t.reviewed = 0 AND t.counted_status <1 '
                    'AND s.author_exempt_flair_keyword is not NULL and t.author_flair is not NULL '
