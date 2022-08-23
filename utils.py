@@ -185,14 +185,18 @@ def automated_reviews(wd):
     print("AR: excluding mod posts...")
     now_date = datetime.now(pytz.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
     print(f"now date {now_date}")
+
     # ignore moderators
-    rs = wd.s.execute('UPDATE RedditPost t '
-                   'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
-                   'SET counted_status = :counted_status, reviewed = 1 '
-                   'WHERE t.counted_status < 1 and t.reviewed = 0 and s.mod_list like CONCAT("%", t.author, "%") ',
-                   {"counted_status": CountedStatus.MODPOST_EXEMPT.value,
-                    "last_reviewed": now_date})
-    print(rs.rowcount)
+    """
+    rs = wd.s.update(SubmittedPost)\
+        .join(TrackedSubreddit, SubmittedPost.subreddit_name == TrackedSubreddit.subreddit_name)\
+        .where(SubmittedPost.counted_status < 1,
+                SubmittedPost.reviewed == 0,
+                TrackedSubreddit.mod_list.like(func.concat("%", SubmittedPost.author, "%")))\
+        .values({SubmittedPost.counted_status: CountedStatus.MODPOST_EXEMPT.value,
+                 SubmittedPost.last_reviewed: datetime.now(pytz.utc)})
+    """
+
 
 
     print("AR: excluding self posts...")
@@ -254,7 +258,7 @@ def automated_reviews(wd):
 
     print("AR: excluding author flair")
     rs = wd.s.execute('UPDATE RedditPost t '
-                   'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name, '
+                   'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
                    'SET counted_status = :counted_status, reviewed = 1, last_reviewed = :last_reviewed '
                    'WHERE t.reviewed = 0 AND t.counted_status <1 '
                    'AND s.author_exempt_flair_keyword is not NULL and t.author_flair is not NULL '
