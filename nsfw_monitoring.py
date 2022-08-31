@@ -270,7 +270,7 @@ def nsfw_checking(wd: WorkingData):  # Does not expand comments
                             wd.ri.get_subreddit_api_handle(tr_sub).banned.add(
                                 author.author_name, note="activity on banned subs", ban_message=NAFBS,
                                 duration=tr_sub.nsfw_pct_ban_duration_days)
-                            wd.ri.send_modmail(body=ban_note, subreddit=tr_sub, use_same_thread=True)
+                            wd.ri.send_modmail(body=ban_note, subreddit=tr_sub, use_same_thread=False)
 
                         else:
                             ban_mc_link = f"{smart_link}$ban {author_name} 999 {NAFMC}".replace(" ", "%20")

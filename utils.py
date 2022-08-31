@@ -440,7 +440,7 @@ def look_for_rule_violations4(wd):
     INNER JOIN (SELECT MIN(IFNULL(table1.views,0)) counted
     FROM table1
     GROUP BY table1.id
-    HAVING counted>0
+    HAVING counted>0  ,
     ) x ON x.id = table2.id
     SET table2.number = x.counted"""
 
