@@ -89,7 +89,7 @@ def check_post_nsfw_eligibility(wd: WorkingData, submitted_post):
                               " https://www.reddit.com/r/Needafriend/about/rules/. \n\n" \
                               f"Your activity: {post_author.sub_counts}. \n\n" \
                               "To keep this sub as family-friendly as possible, we temporarily restrict accounts " \
-                              "that have activity on certain NSFW subs. " \
+                              "that have activity on certain NSFW and dating subs. " \
                               "If this ban is in error, please contact the moderators."
                 ban_note = f"Banned subs activity"
                 wd.ri.reddit_client.subreddit(tr_sub.subreddit_name).banned.add(
