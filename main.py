@@ -28,6 +28,7 @@ asyncio
 incorporate toolbox? https://www.reddit.com/r/nostalgia/wiki/edit/toolbox check user notes?
 active status to an ENUM
 add non-binary gender
+
 """
 BOT_NAME = None
 
@@ -129,8 +130,8 @@ def main_loop():
             import traceback
             trace = traceback.format_exc()
             print(trace)
-            wd.ri.send_modmail(subreddit_name=BOT_NAME, subject="[Notification] MHB Exception", body=trace,
-                               use_same_thread=True)
+            # wd.ri.send_modmail(subreddit_name=BOT_NAME, subject="[Notification] MHB Exception", body=trace,
+            #                    use_same_thread=True)
             wd.s.add(wd.ri.bot_sub)
             wd.s.commit()
 
