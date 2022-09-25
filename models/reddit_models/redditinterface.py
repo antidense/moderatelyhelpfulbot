@@ -167,9 +167,10 @@ class RedditInterface:
 
     def get_modmail_thread_id(self, subreddit_name=None):
         for convo in self.reddit_client.subreddit(subreddit_name).modmail.conversations(state="mod", sort='unread', limit=30):
+
             initiating_author_name = convo.authors[0].name  # praw query
             #subreddit_name = convo.owner.display_name  # praw query
-            if initiating_author_name == self.bot_name:
+            if initiating_author_name == self.bot_name and convo.id !="11ejht":
                 return convo.id
 
     def send_modmail(self, subreddit=None, subreddit_name=None, subject=None, body = "Unspecified text",
@@ -272,8 +273,8 @@ class SubredditInfo:
             return
         try:
             self.mod_list = ",".join(list(moderator.name for moderator in self.subreddit_api_handle.moderator()))
-        except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden):
-            pass
+        except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden, prawcore.exceptions.Redirect):
+            return None
         active_status, response = self.check_sub_access(ri)
 
         print(f"ri/csa: sub {subreddit_name} has this issue: {response}")

@@ -122,9 +122,11 @@ def main_loop():
             if (i - 1) % 15 == 0:
                 calculate_stats(wd)
 
-        except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException):
+        except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException) as e:
             import time
             print("sleeping due to server error")
+            import traceback
+            print(traceback.format_exc())
             time.sleep(60 * 5)  # sleep for a bit server errors
         except Exception as e:
             import traceback
@@ -172,7 +174,7 @@ def update_sub_list(wd: WorkingData, intensity=0):
             if not tr.mod_list:
                 try:
                     tr.mod_list = str(wd.ri.get_mod_list(tr.subreddit_name))
-                except prawcore.exceptions.Forbidden:
+                except (prawcore.exceptions.Forbidden, prawcore.exceptions.Redirect):
                     tr.active_status = SubStatus.SUB_GONE.value
 
                 # print(tr.mod_list)

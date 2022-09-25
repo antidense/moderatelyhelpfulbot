@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import List
+
+import prawcore.exceptions
 from praw import exceptions
 
 from logger import logger
@@ -18,13 +20,19 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
     subreddit_name: str = subreddit_name[2:] if subreddit_name.startswith('r/') else subreddit_name
     subreddit_name: str = subreddit_name[3:] if subreddit_name.startswith('/r/') else subreddit_name
     subreddit_names = subreddit_name.split('+') if '+' in subreddit_name else [subreddit_name]  # allow
+    if subreddit_name == MAIN_BOT_NAME or subreddit_name == wd.bot_name:
+        return "this command doesn't make sense", True
 
     command: str = command[1:] if command.startswith("$") else command
 
     tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=True)
     if not tr_sub:
         return "Error retrieving information for /r/{}".format(subreddit_name), True
-    moderators: List[str] = wd.ri.get_mod_list(subreddit=tr_sub)
+    try:
+
+        moderators: List[str] = wd.ri.get_mod_list(subreddit=tr_sub)
+    except (prawcore.exceptions.Redirect, prawcore.exceptions.Forbidden, prawcore.exceptions.NotFound):
+        return f"Subreddit {subreddit_name} doesn't exist?", True
     print("asking for permission: {}, mod list: {}".format(requestor_name, ",".join(moderators)))
     if requestor_name is not None and requestor_name not in moderators and requestor_name != BOT_OWNER \
             and requestor_name != "[modmail]":
