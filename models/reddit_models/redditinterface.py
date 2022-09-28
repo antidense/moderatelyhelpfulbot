@@ -299,9 +299,9 @@ class SubredditInfo:
             wiki_page = None
             wiki_pages = [x.name for x in self.subreddit_api_handle.wiki]
             if MAIN_BOT_NAME.lower() in wiki_pages:
-                wiki_page = self.subreddit_api_handle.wiki[MAIN_BOT_NAME]
+                wiki_page = self.subreddit_api_handle.wiki[MAIN_BOT_NAME.lower()]
             if ri.bot_name.lower() in wiki_pages:
-                wiki_page = self.subreddit_api_handle.wiki[ri.bot_name]
+                wiki_page = self.subreddit_api_handle.wiki[ri.bot_name.lower()]
 
             if wiki_page:
                 self.settings_yaml_txt = wiki_page.content_md
