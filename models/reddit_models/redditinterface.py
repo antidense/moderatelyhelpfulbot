@@ -311,7 +311,9 @@ class SubredditInfo:
                     self.bot_mod = wiki_page.revision_by.name
                 self.settings_yaml = yaml.safe_load(self.settings_yaml_txt)
             else:
-                return SubStatus.NO_CONFIG, f"I only found an empty config for /r/{self.subreddit_name}."
+                wiki_page = self.subreddit_api_handle.wiki[ri.bot_name]
+                if not wiki_page:
+                    return SubStatus.NO_CONFIG, f"I only found an empty config for /r/{self.subreddit_name}."
         except prawcore.exceptions.NotFound:
             return SubStatus.NO_CONFIG, f"I did not find a config for /r/{self.subreddit_name} Please create one at" \
                                         f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{ri.bot_name} ."
