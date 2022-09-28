@@ -299,10 +299,9 @@ class SubredditInfo:
             wiki_page = None
             wiki_pages = [x.name for x in self.subreddit_api_handle.wiki]
             for wiki_page_name in wiki_pages:
-                if wiki_page_name.lower() == MAIN_BOT_NAME.lower() or wiki_page_name.lower() == ri.bot_name.lower():
-                    wiki_page=wiki_page_name
+                if wiki_page_name.lower() == MAIN_BOT_NAME.lower() or wiki_page_name.lower() == ri.bot_name.lower()
+                    wiki_page=self.subreddit_api_handle.wiki[wiki_page_name]
                     break
-
             if wiki_page:
                 self.settings_yaml_txt = wiki_page.content_md
                 #logger.debug(f'si/csa wiki_page {wiki_page.content_md}')
