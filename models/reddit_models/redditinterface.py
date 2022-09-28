@@ -303,6 +303,8 @@ class SubredditInfo:
                 if wiki_page_name.lower() == MAIN_BOT_NAME.lower() or wiki_page_name.lower() == ri.bot_name.lower():
                     wiki_page=self.subreddit_api_handle.wiki[wiki_page_name]
                     break
+            if not wiki_page:  #weird workaround when the wikipage doesn't show up in the listing
+                wiki_page = self.subreddit_api_handle.wiki[ri.bot_name]
             if wiki_page:
                 self.settings_yaml_txt = wiki_page.content_md
                 #logger.debug(f'si/csa wiki_page {wiki_page.content_md}')
@@ -311,9 +313,7 @@ class SubredditInfo:
                     self.bot_mod = wiki_page.revision_by.name
                 self.settings_yaml = yaml.safe_load(self.settings_yaml_txt)
             else:
-                wiki_page = self.subreddit_api_handle.wiki[ri.bot_name]
-                if not wiki_page:
-                    return SubStatus.NO_CONFIG, f"I only found an empty config for /r/{self.subreddit_name}."
+                return SubStatus.NO_CONFIG, f"I only found an empty config for /r/{self.subreddit_name}."
         except prawcore.exceptions.NotFound:
             return SubStatus.NO_CONFIG, f"I did not find a config for /r/{self.subreddit_name} Please create one at" \
                                         f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{ri.bot_name} ."
