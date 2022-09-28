@@ -299,7 +299,7 @@ class SubredditInfo:
             wiki_page = None
             wiki_pages = [x.name for x in self.subreddit_api_handle.wiki]
             for wiki_page_name in wiki_pages:
-                if wiki_page_name.lower() == MAIN_BOT_NAME.lower() or wiki_page_name.lower() == ri.bot_name.lower()
+                if wiki_page_name.lower() == MAIN_BOT_NAME.lower() or wiki_page_name.lower() == ri.bot_name.lower():
                     wiki_page=wiki_page_name
                     break
 
