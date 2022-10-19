@@ -189,9 +189,20 @@ class RedditInterface:
 
         if not subreddit_name and subreddit:
             subreddit_name = subreddit.subreddit_name
+        already_done = False
         if thread_id:
-            conversation = self.reddit_client.subreddit(subreddit_name).modmail(thread_id).reply(body, internal=True)
-        else:
+            try:
+                conversation = self.reddit_client.subreddit(subreddit_name).modmail(thread_id).reply(body, internal=True)
+                already_done = True
+            except(praw.exceptions.RedditAPIException):
+                subreddit.mm_convo_id = None
+            except (praw.exceptions.APIException, prawcore.exceptions.Forbidden, AttributeError):
+                logger.warning('something went wrong in sending modmail')
+                already_done = True
+
+
+
+        if not already_done:
             try:
                 conversation = self.reddit_client.subreddit(subreddit_name).message(subject=subject, message=body)
                 if subreddit:
