@@ -33,7 +33,7 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
         moderators: List[str] = wd.ri.get_mod_list(subreddit=tr_sub)
     except (prawcore.exceptions.Redirect, prawcore.exceptions.Forbidden, prawcore.exceptions.NotFound):
         return f"Subreddit {subreddit_name} doesn't exist?", True
-    print("asking for permission: {}, mod list: {}".format(requestor_name, ",".join(moderators)))
+    print(f"asking for permission: {requestor_name}, mod list: {moderators}")
     if requestor_name is not None and requestor_name not in moderators and requestor_name != BOT_OWNER \
             and requestor_name != "[modmail]":
         if subreddit_name == "subredditname" or subreddit_name == "yoursubredditname":
