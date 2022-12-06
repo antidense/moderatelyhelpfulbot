@@ -104,6 +104,7 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
         recent_post.posted_status = posted_status.value
         recent_post.post_flair = recent_post.api_handle.link_flair_text
         recent_post.author_flair = recent_post.api_handle.author_flair_text
+        recent_post.author_css = recent_post.api_handle.author_css_text
         recent_post.last_checked = datetime.now(pytz.utc)
 
         wd.s.add(recent_post)
@@ -133,16 +134,18 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
     # check if flair-exempt
     try:
         author_flair = wd.ri.get_submission_api_handle(recent_post).author_flair_text  # Reddit API
+        author_css = wd.ri.get_submission_api_handle(recent_post).author_flair_css_class  # Reddit API
     except prawcore.exceptions.Forbidden:
         print("can't access flair")
         author_flair = None
     # add CSS class to author_flair
-    if author_flair and wd.ri.get_submission_api_handle(recent_post).author_flair_css_class:  # Reddit API
-        author_flair = author_flair + wd.ri.get_submission_api_handle(recent_post).author_flair_css_class  # Reddit API
+    #if author_flair and wd.ri.get_submission_api_handle(recent_post).author_flair_css_class:  # Reddit API
+    #     author_flair = author_flair + wd.ri.get_submission_api_handle(recent_post).author_flair_css_class  # Reddit API
 
     # Flair keyword exempt
     if tr_sub.author_exempt_flair_keyword and isinstance(tr_sub.author_exempt_flair_keyword, str) \
-            and author_flair and tr_sub.author_exempt_flair_keyword in author_flair:
+            and ((author_flair and tr_sub.author_exempt_flair_keyword in author_flair)
+            or (author_css and tr_sub.author_not_exempt_flair_keyword in author_css)):
         logger.debug(">>>flair exempt")
         return CountedStatus.FLAIR_EXEMPT, "flair exempt {}".format(author_flair)
 
