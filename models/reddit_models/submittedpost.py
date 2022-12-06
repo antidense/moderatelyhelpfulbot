@@ -34,7 +34,7 @@ class SubmittedPost(dbobj.Base):  # need posted_status
     # removed_status = Column(String(21), nullable=True)  # not used
     post_flair = Column(String(191), nullable=True)
     author_flair = Column(String(191), nullable=True)
-    author_css = Column(String(191), nullable=True)
+    # author_css = Column(String(191), nullable=True)
     counted_status = Column(Integer)
     # newly added
     response_time = Column(DateTime, nullable=True)  # need to add everywhere
@@ -78,7 +78,7 @@ class SubmittedPost(dbobj.Base):  # need posted_status
             self.counted_status = CountedStatus.NOT_CHKD.value
             self.post_flair = submission.link_flair_text
             self.author_flair = submission.author_flair_text
-            self.author_css = submission.author_flair_css_class
+            # self.author_css = submission.author_flair_css_class
             self.response_time = None
             self.nsfw_last_checked = self.time_utc
             self.nsfw_repliers_checked = False
@@ -103,7 +103,7 @@ class SubmittedPost(dbobj.Base):  # need posted_status
             self.counted_status = -1  # CountedStatus.NOT_CHKD.value
             self.post_flair = subm_info.post_flair
             self.author_flair = subm_info.author_flair
-            self.author_css = subm_info.author_css
+            # self.author_css = subm_info.author_css
             self.response_time = None
             self.nsfw_last_checked = self.time_utc
             self.nsfw_repliers_checked = False

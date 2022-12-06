@@ -104,7 +104,7 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
         recent_post.posted_status = posted_status.value
         recent_post.post_flair = recent_post.api_handle.link_flair_text
         recent_post.author_flair = recent_post.api_handle.author_flair_text
-        recent_post.author_css = recent_post.api_handle.author_css_text
+        # recent_post.author_css = recent_post.api_handle.author_css_text
         recent_post.last_checked = datetime.now(pytz.utc)
 
         wd.s.add(recent_post)
@@ -134,7 +134,8 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
     # check if flair-exempt
     try:
         author_flair = wd.ri.get_submission_api_handle(recent_post).author_flair_text  # Reddit API
-        author_css = wd.ri.get_submission_api_handle(recent_post).author_flair_css_class  # Reddit API
+        author_css = None
+        #author_css = wd.ri.get_submission_api_handle(recent_post).auth  # Reddit API
     except prawcore.exceptions.Forbidden:
         print("can't access flair")
         author_flair = None

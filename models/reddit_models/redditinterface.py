@@ -64,7 +64,7 @@ class RedditInterface:
             submission.posted_status =   PostedStatus.UNKNOWN.value
         submission.post_flair = post_api_handle.link_flair_text
         submission.author_flair = post_api_handle.author_flair_text
-        submission.author_css = post_api_handle.author_flair_css_class  ## there was big typo here!!
+        # submission.author_css = post_api_handle.author_flair_css_class  ## there was big typo here!!
         if submission.counted_status == 1:
             submission.counted_status = CountedStatus.NEEDS_UPDATE.value
         submission.last_checked = datetime.now(pytz.utc)
@@ -256,7 +256,7 @@ class SubmissionInfo:
         self.banned_by = submission.banned_by
         self.post_flair = submission.link_flair_text
         self.author_flair = submission.author_flair_text
-        self.author_css = submission.author_flair_css_class
+        # self.author_css = submission.author_flair_css_class
 
 
     def update(self, submission):
@@ -264,7 +264,7 @@ class SubmissionInfo:
         self.banned_by = submission.banned_by
         self.post_flair = submission.link_flair_text
         self.author_flair = submission.author_flair_text
-        self.author_css = submission.author_flair_css_class
+        # self.author_css = submission.author_flair_css_class
 
 class SubredditInfo:
     subreddit_api_handle = None
