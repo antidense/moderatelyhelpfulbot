@@ -454,7 +454,8 @@ def handle_modmail_message(wd: WorkingData, convo):
     # Does not respond if already responded to by a mod
     if convo.num_messages == 1 \
             and initiating_author_name not in tr_sub.subreddit_mods \
-            and initiating_author_name not in ("AutoModerator", "Sub_Mentions", "mod_mailer"):
+            and initiating_author_name not in ("AutoModerator", "Sub_Mentions", "mod_mailer")\
+            and initiating_author_name.lower() !=wd.bot_name.lower():
         # Join request
         if "ADD USER" in convo.messages[0].body:
             record_actioned(wd, "mm{}-{}".format(convo.id, convo.num_messages))

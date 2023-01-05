@@ -1361,7 +1361,7 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
             if hasattr(sub_info, 'yaml_settings_text'):
                 print(f"GSBN: settings: {sub_info.yaml_settings_text}")
             else:
-                print("GSBN: no luck in getting yaml text")
+                print(f"GSBN: no luck in getting yaml text  {tr_sub.subreddit_name}")
             worked, status = tr_sub.update_from_subinfo(sub_info)
             worked, status = tr_sub.reload_yaml_settings()
 
