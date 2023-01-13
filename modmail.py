@@ -369,8 +369,10 @@ def mod_mail_invitation_to_moderate(wd: WorkingData, message):
     if tr_sub or (ACCEPTING_NEW_SUBS and 'karma' not in subreddit_name.lower()):
         try:
             wd.ri.reddit_client.subreddit(subreddit_name).mod.accept_invite()
-        except praw.exceptions.APIException:
-            message.reply(body="Error: Invite message has been rescinded? or already accepted?")
+        except praw.exceptions.RedditAPIException as ex:  # Changed from praw.exceptions.APIException
+            reply= f"Message from reddit: {ex.message}"
+            print(f"error reply {reply}")
+            message.reply(body=reply)
             message.mark_read()
 
         if not tr_sub:
