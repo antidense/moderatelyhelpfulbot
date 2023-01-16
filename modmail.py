@@ -261,6 +261,7 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
 def handle_direct_messages(wd: WorkingData):
     print("checking direct messages")
     for message in wd.ri.reddit_client.inbox.unread(limit=None):
+
         logger.info("got this email author:{} subj:{}  body:{} ".format(message.author, message.subject, message.body))
 
         # Get author name, message_id if available
@@ -308,7 +309,7 @@ def handle_direct_messages(wd: WorkingData):
                 print("requestor name is none?")
                 continue
             if is_modmail_message:
-                subreddit_name = message.subject
+                subreddit_name = message_subject
                 thread_id = None
                 requestor_name = "[modmail]"
             if not subreddit_name:
