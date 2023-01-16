@@ -270,22 +270,23 @@ def handle_direct_messages(wd: WorkingData):
         body_parts = message.body.split(' ')
         command = body_parts[0].lower() if len(body_parts) > 0 else None
         # subreddit_name = message.subject.replace("re: ", "") if command else None
+        message_subject = message.subject.replace("re: ", "") if message.subject else None
         # First check if already actioned
         if check_actioned(wd, message_id):
             message.mark_read()  # should have already been "read"
             continue
         # Check if this a user mention (just ignore this)
-        elif message.subject.startswith('username mention'):
+        elif message_subject.startswith('username mention'):
             message.mark_read()
             continue
         # Check if this a user mention (just ignore this)
-        elif message.subject.startswith('moderator added'):
+        elif message_subject.startswith('moderator added'):
             message.mark_read()
             continue
         # Check if this is a ban notice (not new modmail)
-        elif message.subject.startswith("re: You've been temporarily banned from participating"):
+        elif message_subject.startswith("re: You've been temporarily banned from participating"):
             message.mark_read()
-            subreddit_name = message.subject.replace("re: You've been temporarily banned from participating in r/", "")
+            subreddit_name  = message_subject.replace("re: You've been temporarily banned from participating in r/", "")
             if not check_actioned(wd, "ban_note: {0}".format(requestor_name)):
                 # record actioned first out of safety in case of error
                 record_actioned(wd, "ban_note: {0}".format(message.author))
@@ -297,7 +298,7 @@ def handle_direct_messages(wd: WorkingData):
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
         # Respond to an invitation to moderate
-        elif 'invitation to moderate' in message.subject:
+        elif message_subject.startswith('invitation to moderate'):
             mod_mail_invitation_to_moderate(wd, message)
         elif command in ("summary", "update", "stats") or command.startswith("$"):
             subreddit_name = None
@@ -361,6 +362,7 @@ def handle_direct_messages(wd: WorkingData):
 
 
 def mod_mail_invitation_to_moderate(wd: WorkingData, message):
+    subreddit_name = message.subject.replace("re: invitation to moderate /r/", "")
     subreddit_name = message.subject.replace("invitation to moderate /r/", "")
 
     tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=False)
