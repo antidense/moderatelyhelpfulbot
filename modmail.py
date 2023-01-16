@@ -364,7 +364,7 @@ def handle_direct_messages(wd: WorkingData):
 
 def mod_mail_invitation_to_moderate(wd: WorkingData, message):
     subreddit_name = message.subject.replace("re: invitation to moderate /r/", "")
-    subreddit_name = message.subject.replace("invitation to moderate /r/", "")
+    subreddit_name = subreddit_name.replace("invitation to moderate /r/", "")
 
     tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=False)
     # accept invite if accepting invites or had been accepted previously
