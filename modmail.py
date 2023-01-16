@@ -297,7 +297,7 @@ def handle_direct_messages(wd: WorkingData):
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
         # Respond to an invitation to moderate
-        elif message.subject.startswith('invitation to moderate'):
+        elif 'invitation to moderate' in message.subject:
             mod_mail_invitation_to_moderate(wd, message)
         elif command in ("summary", "update", "stats") or command.startswith("$"):
             subreddit_name = None
