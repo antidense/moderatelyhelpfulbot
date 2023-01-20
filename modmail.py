@@ -76,7 +76,7 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
                 subreddit_author = SubAuthor(tr_sub.subreddit_name, author_handle.name)
 
             if command == "unban":
-                if subreddit_author.next_eligible.replace(tzinfo=timezone.utc) > datetime.now(pytz.utc):
+                if subreddit_author.next_eligible and subreddit_author.next_eligible.replace(tzinfo=timezone.utc) > datetime.now(pytz.utc):
                     subreddit_author.next_eligible = datetime(2019, 1, 1, 0, 0)
                     return_text = "User was removed from blacklist"
                 else:
