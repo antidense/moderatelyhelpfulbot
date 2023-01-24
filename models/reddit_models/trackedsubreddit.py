@@ -30,11 +30,11 @@ s = dbobj.s
 class TrackedSubreddit(dbobj.Base):
     __tablename__ = 'TrackedSubs'
     subreddit_name = Column(String(21), nullable=False, primary_key=True)
-    checking_mail_enabled = Column(Boolean, nullable=True)  #don't need this?
+    # checking_mail_enabled = Column(Boolean, nullable=True)  #don't need this?
     settings_yaml_txt = Column(UnicodeText, nullable=True)
     settings_yaml = None
     last_updated = Column(DateTime, nullable=True)
-    last_error_msg = Column(DateTime, nullable=True)  # not used
+    # last_error_msg = Column(DateTime, nullable=True)  # not used
     save_text = Column(Boolean, nullable=True)
     max_count_per_interval = Column(Integer, nullable=False, default=1)
     min_post_interval_mins = Column(Integer, nullable=False, default=60 * 72)
@@ -60,6 +60,7 @@ class TrackedSubreddit(dbobj.Base):
     title_not_exempt_keyword = Column(String(191), nullable=True, primary_key=False)
 
     last_pulled = Column(DateTime, nullable=True)
+    config_last_checked = Column(DateTime, nullable=True)
 
     subreddit_mods = []
     rate_limiting_enabled = False

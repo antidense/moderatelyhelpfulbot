@@ -181,10 +181,12 @@ def update_sub_list(wd: WorkingData, intensity=0):
                 wd.s.add(tr)
 
         if tr.subreddit_name not in wd.sub_dict:
-            if tr.last_updated < datetime.now() - timedelta(days=7) and tr.active_status >= 0:
+            if tr.last_updated < datetime.now() - timedelta(days=7) and tr.active_status >= 0 \
+                    and tr.config_last_checked < datetime.now() - timedelta(days=1):
                 print(f'...rechecking...{tr.last_updated}')
                 sub_info = wd.ri.get_subreddit_info(tr.subreddit_name)
                 tr.update_from_subinfo(sub_info)
+                tr.config_last_checked = datetime.now()
                 tr.reload_yaml_settings()
                 wd.s.add(tr)
                 wd.s.commit()
