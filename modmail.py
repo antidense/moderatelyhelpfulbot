@@ -225,7 +225,7 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
                         f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{MAIN_BOT_NAME}. "
         elif "yaml" in status:
             help_text = "Looks like there is an error in your yaml code. " \
-                        "Please make sure to validate your syntax at https://yamlvalidator.com/.  " \
+                        "Please make sure to validate your syntax.  " \
                         f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{MAIN_BOT_NAME}. "
         elif "single document in the stream" in status:
             help_text = "Looks like there is an extra double hyphen in your code at the end, e.g. '--'. " \
@@ -316,6 +316,10 @@ def handle_direct_messages(wd: WorkingData):
                 subject_parts = message.subject.replace("re: ", "").split(":")
                 thread_id = subject_parts[1] if len(subject_parts) > 1 else None
                 subreddit_name = subject_parts[0].lower().replace("re: ", "").replace("/r/", "").replace("r/", "")
+            if not subreddit_name or not subreddit_name.replace('_','').isalnum():
+                message.mark_read()
+                message.reply(body=f"Sorry, I don't think {subreddit_name} is a valid subreddit?")
+                continue
             tr_sub = get_subreddit_by_name(wd, subreddit_name)
             response, _ = handle_dm_command(wd, subreddit_name, requestor_name, command, body_parts[1:])
             print("response---", response)

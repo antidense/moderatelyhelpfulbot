@@ -1347,11 +1347,12 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
             return None
 
     # Update from scratch if it has been a while
-    if tr_sub.last_updated < datetime.now() - timedelta(hours=SUBWIKI_CHECK_INTERVAL_HRS):
+    if tr_sub.config_last_checked < datetime.now() - timedelta(hours=SUBWIKI_CHECK_INTERVAL_HRS):
         print(f"GSBN: needs update {tr_sub.subreddit_name}")
         sub_info = wd.ri.get_subreddit_info(subreddit_name=tr_sub.subreddit_name)
 
         worked, status = tr_sub.update_from_subinfo(sub_info)
+
     else:  # or just load from database
         worked, status = tr_sub.reload_yaml_settings()
         if not worked:

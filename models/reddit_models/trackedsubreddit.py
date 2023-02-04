@@ -58,6 +58,7 @@ class TrackedSubreddit(dbobj.Base):
     author_not_exempt_flair_keyword = Column(String(191), nullable=True, primary_key=False)
     title_exempt_keyword = Column(String(191), nullable=True, primary_key=False)
     title_not_exempt_keyword = Column(String(191), nullable=True, primary_key=False)
+    #self.last_updated = datetime.now() - timedelta(days=10)
 
     last_pulled = Column(DateTime, nullable=True)
     config_last_checked = Column(DateTime, nullable=True)
