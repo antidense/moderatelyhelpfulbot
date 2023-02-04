@@ -313,19 +313,22 @@ def handle_direct_messages(wd: WorkingData):
                 thread_id = None
                 requestor_name = "[modmail]"
             message_subject = message.subject
-
+            thread_id = None
             if not subreddit_name:
-                matches = re.match(r'^(re:)((r/)|(/r/))(?P<sub_name>[a-zA-Z0-9_]{1,21}$)', message_subject)
+                matches = \
+                    re.match(r'^(re:)?(/?r/)?(?P<sub_name>[a-zA-Z0-9_]{1,21})(:(?P<thread_id>[a-z0-9]+))?$',
+                             message_subject)
                 if matches and matches.group("sub_name"):
                     subreddit_name = matches.group("sub_name")
                 # subject_parts = message.subject.replace("re: ", "").split(":")
-                # thread_id = subject_parts[1] if len(subject_parts) > 1 else None
+                if matches.group("thread_id"):
+                    thread_id = matches.group("thread_id")
                 # subreddit_name = subject_parts[0].lower().replace("re: ", "").replace("/r/", "").replace("r/", "")
             print(f"Subreddit name = {subreddit_name}")
             if not subreddit_name or not subreddit_name.replace('_','').isalnum()  \
                     or '/' in subreddit_name or len(subreddit_name) > 21 or subreddit_name == "yoursubredditname":
                 message.mark_read()
-                message.reply(body=f"Sorry, I don't think {subreddit_name} is a valid subreddit?")
+                message.reply(body=f"Sorry, I don't think {message_subject} contains a valid subreddit?")
                 continue
             tr_sub = get_subreddit_by_name(wd, subreddit_name)
             response, _ = handle_dm_command(wd, subreddit_name, requestor_name, command, body_parts[1:])
