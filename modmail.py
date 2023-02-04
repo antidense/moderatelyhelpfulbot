@@ -316,7 +316,8 @@ def handle_direct_messages(wd: WorkingData):
                 subject_parts = message.subject.replace("re: ", "").split(":")
                 thread_id = subject_parts[1] if len(subject_parts) > 1 else None
                 subreddit_name = subject_parts[0].lower().replace("re: ", "").replace("/r/", "").replace("r/", "")
-            if not subreddit_name or not subreddit_name.replace('_','').isalnum():
+            if not subreddit_name or not subreddit_name.replace('_','').isalnum() \
+                    or '/' in subreddit_name or len(subreddit_name) > 21:
                 message.mark_read()
                 message.reply(body=f"Sorry, I don't think {subreddit_name} is a valid subreddit?")
                 continue
