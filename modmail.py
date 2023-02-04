@@ -309,16 +309,21 @@ def handle_direct_messages(wd: WorkingData):
                 print("requestor name is none?")
                 continue
             if is_modmail_message:
-                subreddit_name = message_subject
+                #subreddit_name = message_subject
                 thread_id = None
                 requestor_name = "[modmail]"
+            message_subject = message.subject
+
             if not subreddit_name:
-                subject_parts = message.subject.replace("re: ", "").split(":")
-                thread_id = subject_parts[1] if len(subject_parts) > 1 else None
-                subreddit_name = subject_parts[0].lower().replace("re: ", "").replace("/r/", "").replace("r/", "")
+                matches = re.match(r'^(re:)((r/)|(/r/))(?P<sub_name>[a-zA-Z0-9_]{1,21}$)', message_subject)
+                if matches and matches.group("sub_name"):
+                    subreddit_name = matches.group("sub_name")
+                # subject_parts = message.subject.replace("re: ", "").split(":")
+                # thread_id = subject_parts[1] if len(subject_parts) > 1 else None
+                # subreddit_name = subject_parts[0].lower().replace("re: ", "").replace("/r/", "").replace("r/", "")
             print(f"Subreddit name = {subreddit_name}")
-            if not subreddit_name or not subreddit_name.replace('_','').isalnum() \
-                    or '/' in subreddit_name or len(subreddit_name) > 21:
+            if not subreddit_name or not subreddit_name.replace('_','').isalnum()  \
+                    or '/' in subreddit_name or len(subreddit_name) > 21 or subreddit_name == "yoursubredditname":
                 message.mark_read()
                 message.reply(body=f"Sorry, I don't think {subreddit_name} is a valid subreddit?")
                 continue
