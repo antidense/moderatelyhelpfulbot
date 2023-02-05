@@ -62,7 +62,7 @@ class Task:
                 logging.debug(f"Running task: {self.target_function}")
                 globals()[self.target_function](self.wd)
                 end_time = datetime.now()
-                last_run = start_time
+                self.last_run_dt = start_time
                 logging.debug(f"Task complete {self.target_function} {end_time-start_time}")
                 self.task_durations.append((end_time-start_time).seconds)
             except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException) as e:
@@ -95,6 +95,7 @@ def check_submissions(wd):
     chunked_list = [wd.sub_list[j:j + chunk_size] for j in range(0, len(wd.sub_list), chunk_size)]
 
     updated_subs = []
+    intensity=0
 
     for sub_list in chunked_list:
         sub_list_str = "+".join(sub_list)
@@ -301,8 +302,8 @@ def update_common_posts(wd: WorkingData, subreddit_name, limit=1000):
             post = CommonPost(post_to_review)
             wd.s.add(post)
             count += 1
-    logger.info(f'found {count} top posts')
-    logger.debug("updating database...")
+    logging.debug(f'found {count} top posts')
+    logging.debug("updating database...")
     wd.s.commit()
 
 
@@ -342,8 +343,8 @@ def check_common_posts(wd: WorkingData, subreddit_names):
     for subreddit_name in blurbs:
         wd.ri.send_modmail(subject=f"[Notification] Post by possible karma hackers:",
                            body="".join(blurbs[subreddit_name]), subreddit=subreddit_name, use_same_thread=True)
-        wd.ri.send_modmail(subject=f"[Notification] botspam notification {subreddit_name}",
-                           body="".join(blurbs[subreddit_name]), subreddit_name=wd.bot_name, use_same_thread=True)
+        # wd.ri.send_modmail(subject=f"[Notification] botspam notification {subreddit_name}",
+        #                   body="".join(blurbs[subreddit_name]), subreddit_name=wd.bot_name, use_same_thread=True)
 
     wd.s.commit()
 
