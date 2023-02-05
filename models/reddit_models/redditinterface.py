@@ -278,8 +278,6 @@ class SubredditInfo:
     is_nsfw = False
 
     def __init__(self, ri, subreddit_name):
-        if subreddit_name.startswith("/r/"):
-            subreddit_name = subreddit_name.replace('/r/', '')
         self.subreddit_name: str = subreddit_name.lower()
         self.subreddit_api_handle = ri.reddit_client.subreddit(subreddit_name)
         if not self.subreddit_api_handle:  # Subreddit doesn't exist
@@ -321,6 +319,8 @@ class SubredditInfo:
                     break
             if not wiki_page:  #weird workaround when the wikipage doesn't show up in the listing
                 wiki_page = self.subreddit_api_handle.wiki[ri.bot_name]
+                if not wiki_page:
+                    wiki_page = self.subreddit_api_handle.wiki[MAIN_BOT_NAME]
             if wiki_page:
                 self.settings_yaml_txt = wiki_page.content_md
                 #logger.debug(f'si/csa wiki_page {wiki_page.content_md}')
