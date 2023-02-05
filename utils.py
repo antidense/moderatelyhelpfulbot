@@ -1355,19 +1355,19 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
         tr_sub.config_last_checked = datetime.now()  #this should be UTC... need to fix
         wd.s.add(tr_sub)
 
-
     else:  # or just load from database
         worked, status = tr_sub.reload_yaml_settings()
         if not worked:
-            print(f"GSBN: couldn't load from stored info {tr_sub.subreddit_name} because {status}")
-            sub_info = wd.ri.get_subreddit_info(subreddit_name=tr_sub.subreddit_name)
 
-            if hasattr(sub_info, 'yaml_settings_text'):
-                print(f"GSBN: settings: {sub_info.yaml_settings_text}")
-            else:
-                print(f"GSBN: no luck in getting yaml text  {tr_sub.subreddit_name}")
-            worked, status = tr_sub.update_from_subinfo(sub_info)
-            worked, status = tr_sub.reload_yaml_settings()
+            print(f"GSBN: couldn't load from stored info {tr_sub.subreddit_name} because {status} ACTIVE STATUS {tr_sub.active_status}")
+            # sub_info = wd.ri.get_subreddit_info(subreddit_name=tr_sub.subreddit_name)
+
+            # if hasattr(sub_info, 'yaml_settings_text'):
+            #     print(f"GSBN: settings: {sub_info.yaml_settings_text}")
+            # else:
+            #     print(f"GSBN: no luck in getting yaml text  {tr_sub.subreddit_name}")
+            # worked, status = tr_sub.update_from_subinfo(sub_info)
+            # worked, status = tr_sub.reload_yaml_settings()
 
     if not worked:
         print(f"GSBN: didn't exist? {worked} {status}")

@@ -1,18 +1,21 @@
 #!/usr/bin/env python3.7
 from __future__ import annotations
-from praw import exceptions
-from praw.models import Submission
+
+import logging
+
+# from praw import exceptions
+# from praw.models import Submission
 from static import *
 from datetime import datetime, timedelta, timezone
-from typing import List
-import praw
+# from typing import List
+# import praw
 import prawcore
 import pytz
 from settings import MAIN_BOT_NAME, ACCEPTING_NEW_SUBS, BOT_OWNER
 from utils import look_for_rule_violations3
 from models.reddit_models import ActionedComments, CommonPost, Stats2, SubAuthor, SubmittedPost, TrackedAuthor, \
     TrackedSubreddit, RedditInterface
-from logger import logger
+# from logger import logger
 from core import dbobj
 from workingdata import WorkingData
 from nsfw_monitoring import check_post_nsfw_eligibility, nsfw_checking
@@ -22,6 +25,8 @@ from utils import check_spam_submissions, check_new_submissions
 if __name__ == '__main__':
     dbobj.load_models()
 
+FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(funcName)s - %(message)s"
+logging.basicConfig(format=FORMAT, level=logging.DEBUG)
 """
 To do list:
 asyncio 
@@ -30,112 +35,109 @@ active status to an ENUM
 add non-binary gender
 
 """
-BOT_NAME = None
 
 
-def main_loop():
-    wd = WorkingData()
-    wd.s = dbobj.s
-    wd.ri = RedditInterface()
-    wd.most_recent_review = None
+class Task:
+    wd = None
+    target_function = None
+    last_run_dt = None
+    frequency = timedelta(minutes=5)
+    task_durations = []
+    error_count = 0
 
+    def __init__(self, wd, target_function, frequency):
+        self.wd = wd
+        self.target_function = target_function
+        self.frequency = frequency
 
-    # Find out what my name is
-    global BOT_NAME
-    BOT_NAME = wd.ri.reddit_client.user.me().name
-    print(f"My name is {wd.ri.reddit_client.user.me()}, {BOT_NAME}")
-    wd.bot_name = BOT_NAME
-    # Get the bot controlling sub
-    sub_info = wd.ri.get_subreddit_info(subreddit_name=MAIN_BOT_NAME)
-    wd.ri.bot_sub: TrackedSubreddit = wd.s.query(TrackedSubreddit).get(MAIN_BOT_NAME)
-    if not wd.ri.bot_sub:
-        wd.ri.bot_sub = TrackedSubreddit(subreddit_name=MAIN_BOT_NAME, sub_info=sub_info)
-    if not wd.ri.bot_sub.mm_convo_id:
-        wd.ri.bot_sub.mm_convo_id = wd.ri.get_modmail_thread_id(subreddit_name=MAIN_BOT_NAME)
-    wd.s.add(wd.ri.bot_sub)
-    wd.s.commit()
+    def run_task(self):
 
-    i = 0
-    #calculate_stats(wd)
-    purge_old_records(wd)
-
-    while True:
-        i += 1
-        print('start_loop')
-
-        intensity = 1 if (i - 1) % 15 == 0 else 0
-
-        # First: Update sub list:
-        if wd.to_update_list or len(wd.sub_list) == 0 or i % 50 == 0:
-            print("updating list")
-            update_sub_list(wd, intensity=intensity)
-            wd.to_update_list = False
-
-        try:
-            handle_direct_messages(wd)
-            handle_modmail_messages(wd)
-            look_for_rule_violations3(wd)
-            # Gather posts
-            chunk_size = 200 if intensity == 1 else 300
-            chunked_list = [wd.sub_list[j:j + chunk_size] for j in range(0, len(wd.sub_list), chunk_size)]
-
-            updated_subs = []
-
-            for sub_list in chunked_list:
-                sub_list_str = "+".join(sub_list)
-                print( sub_list_str)
-                updated_subs += check_new_submissions(wd, sub_list=sub_list_str, intensity=intensity)
-                check_spam_submissions(wd, sub_list=sub_list_str, intensity=intensity)
-
-            if intensity == 1:
-                updated_subs = None
-
-            start = datetime.now(pytz.utc)
-            if i % 15 == 0:
-                intensity = 5
-            look_for_rule_violations3(wd)  # uses a lot of resource
-            # look_for_rule_violations2(wd, intensity=intensity, sub_list=sub_list)  # uses a lot of resource
-            print("$$$checking rule violations took this long", datetime.now(pytz.utc) - start)
-
-            if i % 75 == 0:
-                purge_old_records(wd)
-
-            if (i - 1) % 300 == 0:
-                print("$updating top posts", datetime.now(pytz.utc) - start)
-                # update_common_posts('nostalgia')
-                # update_common_posts('homeimprovement')
-
-            if i % 300 == 0:
-                print("$updating top posts", datetime.now(pytz.utc) - start)
-                # update_common_posts('nostalgia')
-
-            # if i % 70 == 0:
-            #    print("$Looking for bot spam posts", datetime.now(pytz.utc) - start)
-            #    check_common_posts(['nostalgia'])
-
-            # update_TMBR_submissions(look_back=timedelta(days=7))
-            #  do_automated_replies()  This is currently disabled!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            handle_direct_messages(wd)
-            handle_modmail_messages(wd)
-
-            nsfw_checking(wd)
-            if (i - 1) % 15 == 0:
-                calculate_stats(wd)
-
+        if self.last_run_dt and self.last_run_dt + self.frequency > datetime.now():
+            pass
+        elif self.error_count > 5:
+            logging.debug(f"Skipping task due to previous errors: {self.target_function}")
+        else:
+            start_time = datetime.now()
+            try:
+                logging.debug(f"Running task: {self.target_function}")
+                globals()[self.target_function](self.wd)
+                end_time = datetime.now()
+                last_run = start_time
+                logging.debug(f"Task complete {self.target_function} {end_time-start_time}")
+                self.task_durations.append((end_time-start_time).seconds)
+            except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException) as e:
+                self.error_count += 1
+                return -1
+            except Exception as e:
+                import traceback
+                trace = traceback.format_exc()
+                print(trace)
+        """
         except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException) as e:
             import time
             print("sleeping due to server error")
             import traceback
             print(traceback.format_exc())
             time.sleep(60 * 5)  # sleep for a bit server errors
-        except Exception as e:
+        
             import traceback
             trace = traceback.format_exc()
             print(trace)
             # wd.ri.send_modmail(subreddit_name=BOT_NAME, subject="[Notification] MHB Exception", body=trace,
             #                    use_same_thread=True)
-            wd.s.add(wd.ri.bot_sub)
-            wd.s.commit()
+            #wd.s.add(wd.ri.bot_sub)
+            #wd.s.commit()
+        """
+
+
+def check_submissions(wd):
+    chunk_size = 300
+    chunked_list = [wd.sub_list[j:j + chunk_size] for j in range(0, len(wd.sub_list), chunk_size)]
+
+    updated_subs = []
+
+    for sub_list in chunked_list:
+        sub_list_str = "+".join(sub_list)
+        print(sub_list_str)
+        updated_subs += check_new_submissions(wd, sub_list=sub_list_str, intensity=intensity)
+        check_spam_submissions(wd, sub_list=sub_list_str, intensity=intensity)
+
+def main_loop():
+    wd: WorkingData = WorkingData()
+    wd.s = dbobj.s  # Database Session object
+    wd.ri = RedditInterface()  # Reddit API instance
+    wd.most_recent_review = None  # not used?
+    wd.bot_name = wd.ri.reddit_client.user.me().name  # what is my name?
+    logging.debug(f"My name is {wd.bot_name}")
+
+    tasks = [Task(wd, 'purge_old_records', timedelta(hours=12)),
+             Task(wd, 'update_sub_list', timedelta(hours=2)),
+             Task(wd, 'handle_direct_messages', timedelta(minutes=1)),
+             Task(wd, 'handle_modmail_messages', timedelta(minutes=1)),
+             Task(wd, 'look_for_rule_violations3', timedelta(minutes=1)),
+             Task(wd, 'check_submissions', timedelta(minutes=1)),
+             Task(wd, 'calculate_stats', timedelta(hours=10)),
+             Task(wd, 'nsfw_checking', timedelta(minutes=20)),
+             ]
+
+            # currently disabled:
+            # update_common_posts('nostalgia')
+            # update_common_posts('homeimprovement')
+            # update_TMBR_submissions(look_back=timedelta(days=7))
+            #  do_automated_replies()  This is currently disabled!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            # handle_direct_messages(wd)
+            # handle_modmail_messages(wd)
+            # nsfw_checking(wd)
+    rate_limiting_errors = 0
+    for task in tasks:
+        return_val = task.run_task()
+        if return_val == -1:
+            rate_limiting_errors+=1
+            if rate_limiting_errors > 2:
+                import time
+                time.sleep(60 * 5)
+                rate_limiting_errors = 0
+
 
 def update_sub_list(wd: WorkingData, intensity=0):
     print('updating subs..', sep="")
@@ -341,7 +343,7 @@ def check_common_posts(wd: WorkingData, subreddit_names):
         wd.ri.send_modmail(subject=f"[Notification] Post by possible karma hackers:",
                            body="".join(blurbs[subreddit_name]), subreddit=subreddit_name, use_same_thread=True)
         wd.ri.send_modmail(subject=f"[Notification] botspam notification {subreddit_name}",
-                           body="".join(blurbs[subreddit_name]), subreddit_name=BOT_NAME, use_same_thread=True)
+                           body="".join(blurbs[subreddit_name]), subreddit_name=wd.bot_name, use_same_thread=True)
 
     wd.s.commit()
 
