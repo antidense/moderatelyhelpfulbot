@@ -316,7 +316,7 @@ def handle_direct_messages(wd: WorkingData):
             thread_id = None
             if not subreddit_name:
                 matches = \
-                    re.match(r'^(re:)?(/?r/)?(?P<sub_name>[a-zA-Z0-9_]{1,21})(:(?P<thread_id>[a-z0-9]+))?$',
+                    re.match(r'^(re: )?(/?r/)?(?P<sub_name>[a-zA-Z0-9_]{1,21})(:(?P<thread_id>[a-z0-9]+))?$',
                              message_subject)
                 if matches and matches.group("sub_name"):
                     subreddit_name = matches.group("sub_name")
