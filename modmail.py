@@ -320,10 +320,10 @@ def handle_direct_messages(wd: WorkingData):
                              message_subject)
                 if matches and matches.group("sub_name"):
                     subreddit_name = matches.group("sub_name")
-                # subject_parts = message.subject.replace("re: ", "").split(":")
-                if matches.group("thread_id"):
-                    thread_id = matches.group("thread_id")
-                # subreddit_name = subject_parts[0].lower().replace("re: ", "").replace("/r/", "").replace("r/", "")
+                    # subject_parts = message.subject.replace("re: ", "").split(":")
+                    if matches.group("thread_id"):
+                        thread_id = matches.group("thread_id")
+                    # subreddit_name = subject_parts[0].lower().replace("re: ", "").replace("/r/", "").replace("r/", "")
             print(f"Subreddit name = {subreddit_name}")
             if not subreddit_name or not subreddit_name.replace('_','').isalnum()  \
                     or '/' in subreddit_name or len(subreddit_name) > 21 or subreddit_name == "yoursubredditname":
