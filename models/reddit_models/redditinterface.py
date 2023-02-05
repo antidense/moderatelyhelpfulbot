@@ -320,7 +320,7 @@ class SubredditInfo:
             if not wiki_page:  #weird workaround when the wikipage doesn't show up in the listing
                 wiki_page = self.subreddit_api_handle.wiki[ri.bot_name]
                 if not wiki_page:
-                    wiki_page = self.subreddit_api_handle.wiki[MAIN_BOT_NAME]
+                    wiki_page = self.subreddit_api_handle.wiki[MAIN_BOT_NAME.lower()]
             if wiki_page:
                 self.settings_yaml_txt = wiki_page.content_md
                 #logger.debug(f'si/csa wiki_page {wiki_page.content_md}')
