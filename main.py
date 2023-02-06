@@ -120,15 +120,19 @@ def main_loop():
              Task(wd, 'calculate_stats', timedelta(hours=10)),
              Task(wd, 'nsfw_checking', timedelta(minutes=20)),
              ]
+    if False:
+        purge_old_records(wd)
+        update_sub_list(wd)
+        handle_direct_messages(wd)
+        handle_modmail_messages(wd)
 
-            # currently disabled:
-            # update_common_posts('nostalgia')
-            # update_common_posts('homeimprovement')
-            # update_TMBR_submissions(look_back=timedelta(days=7))
-            #  do_automated_replies()  This is currently disabled!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            # handle_direct_messages(wd)
-            # handle_modmail_messages(wd)
-            # nsfw_checking(wd)
+        # currently disabled:
+        # update_common_posts('nostalgia')
+        # update_common_posts('homeimprovement')
+        # update_TMBR_submissions(look_back=timedelta(days=7))
+        #  do_automated_replies()  This is currently disabled!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+        # nsfw_checking(wd)
     rate_limiting_errors = 0
     for task in tasks:
         return_val = task.run_task()

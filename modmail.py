@@ -443,13 +443,14 @@ def handle_modmail_message(wd: WorkingData, convo):
         tr_sub.mm_convo_id = convo.id
         wd.s.add(tr_sub)
         wd.s.commit()
+        convo.read()
 
 
     # Ignore if already actioned (at this many message #s)
     if check_actioned(wd, "mm{}-{}".format(convo.id, convo.num_messages)):  # sql query
         try:
             convo.read()  # praw query
-            convo.read()  # praw query24
+            # convo.read()  # praw query24
         except prawcore.exceptions.Forbidden:
             pass
 

@@ -180,9 +180,11 @@ class RedditInterface:
         if subject is None:
             subject = f"[Notification] Message from {self.bot_name}"
         # assert isinstance(subreddit, TrackedSubreddit)
+        #if not hasattr(subreddit_name, mm_convo_id):
+
         if subreddit_name in (self.bot_name, MAIN_BOT_NAME):
             subreddit = self.bot_sub
-            thread_id = subreddit.mm_convo_id
+            #thread_id = subreddit.mm_convo_id
 
         if subreddit and not thread_id and use_same_thread:
             thread_id = subreddit.mm_convo_id
