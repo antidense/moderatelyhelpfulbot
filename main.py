@@ -183,18 +183,18 @@ def update_sub_list(wd: WorkingData, intensity=0):
             sub_info = wd.ri.get_subreddit_info(tr.subreddit_name)
             tr.update_from_subinfo(sub_info)  # repopulate db with new values/settings from sub
             tr.config_last_checked = datetime.now()  # record this is updated
+            wd.s.add(tr)
 
         # skip adding  if config is NOT okay
         if tr.active_status < 4:
             print(f" active status for {tr.subreddit_name} is {tr.active_status},  skipping")
-            wd.s.add(tr)  # update db
             continue  # don't bother with this
 
         # Attempt to load config assuming it's okay
         if tr.subreddit_name not in wd.sub_dict:
             worked, status = tr.reload_yaml_settings()
+            wd.s.add(tr)
             if not worked:
-                wd.s.add(tr)
                 print(f" active status for {tr.subreddit_name} is {tr.active_status},  skipping")
                 continue
 
