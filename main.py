@@ -53,13 +53,14 @@ class Task:
     def run_task(self):
 
         if self.last_run_dt and self.last_run_dt + self.frequency > datetime.now():
+            logging.debug(f"Skipping task as not due for task: {self.target_function}")
             pass
         elif self.error_count > 5:
             logging.debug(f"Skipping task due to previous errors: {self.target_function}")
         else:
             start_time = datetime.now()
             try:
-                logging.debug(f"Running task: {self.target_function}")
+                logging.debug(f"Running task: {self.target_function}, last ran:{self.last_run_dt}")
                 globals()[self.target_function](self.wd)
                 end_time = datetime.now()
                 self.last_run_dt = start_time
@@ -92,16 +93,15 @@ class Task:
 
 def check_submissions(wd):
     chunk_size = 300
+    assert isinstance(wd.sub_dict, dict)
+    wd.sub_list = wd.sub_dict.keys
     chunked_list = [wd.sub_list[j:j + chunk_size] for j in range(0, len(wd.sub_list), chunk_size)]
-
-    updated_subs = []
-    intensity=0
 
     for sub_list in chunked_list:
         sub_list_str = "+".join(sub_list)
         print(sub_list_str)
-        updated_subs += check_new_submissions(wd, sub_list=sub_list_str, intensity=intensity)
-        check_spam_submissions(wd, sub_list=sub_list_str, intensity=intensity)
+        check_new_submissions(wd, sub_list=sub_list_str, intensity=0)
+        check_spam_submissions(wd, sub_list=sub_list_str, intensity=0)
 
 def main_loop():
     wd: WorkingData = WorkingData()
@@ -168,44 +168,43 @@ def update_sub_list(wd: WorkingData, intensity=0):
                 wd.s.add(tr)
                 wd.s.commit()
     trs = wd.s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status > 0).all()
+
+    # go through all subs in database
     for tr in trs:
-        # print(f'updating /r/{tr.subreddit_name}', end="")
         assert isinstance(tr, TrackedSubreddit)
 
-        wd.sub_list.append(tr.subreddit_name)
+        # See if due for complete re-pull from subreddit wiki (do periodically)
+        if (tr.active_status.value >= 0 and tr.config_last_checked < datetime.now() - timedelta(days=1))\
+                or not tr.mod_list:
+            print(f'...rechecking...{tr.subreddit_name},'
+                  f' last updated:{tr.last_updated} last config check:{tr.config_last_checked}')
 
+            sub_info = wd.ri.get_subreddit_info(tr.subreddit_name)
+            tr.update_from_subinfo(sub_info)  # repopulate db with new values/settings from sub
+            tr.config_last_checked = datetime.now()  # record this is updated
+
+        # skip adding  if config is NOT okay
+        if tr.active_status.value < 4:
+            print(f" active status for {tr.subreddit_name} is {tr.active_status},  skipping")
+            wd.s.add(tr)  # update db
+            continue  # don't bother with this
+
+        # Attempt to load config assuming it's okay
         if tr.subreddit_name not in wd.sub_dict:
             worked, status = tr.reload_yaml_settings()
-            wd.sub_dict[tr.subreddit_name] = tr
-            # print(f"---- {worked}, {status}")
-            if not tr.mod_list:
-                try:
-                    tr.mod_list = str(wd.ri.get_mod_list(tr.subreddit_name))
-                except (prawcore.exceptions.Forbidden, prawcore.exceptions.Redirect):
-                    tr.active_status = SubStatus.SUB_GONE.value
-
-                # print(tr.mod_list)
+            if not worked:
                 wd.s.add(tr)
+                print(f" active status for {tr.subreddit_name} is {tr.active_status},  skipping")
+                continue
 
-        if tr.subreddit_name not in wd.sub_dict:
-            if tr.last_updated < datetime.now() - timedelta(days=7) and tr.active_status >= 0 \
-                    and tr.config_last_checked < datetime.now() - timedelta(days=1):
-                print(f'...rechecking...{tr.last_updated}')
-                sub_info = wd.ri.get_subreddit_info(tr.subreddit_name)
-                tr.update_from_subinfo(sub_info)
-                tr.config_last_checked = datetime.now()
-                tr.reload_yaml_settings()
-                wd.s.add(tr)
-                wd.s.commit()
-            else:
-                tr.reload_yaml_settings()
-                print(f'')
-        if tr.nsfw_pct_moderation:
-            wd.nsfw_monitoring_subs[tr.subreddit_name]=tr
-
+        # Add sub to dict to check
         wd.sub_dict[tr.subreddit_name] = tr
 
-    wd.s.commit()
+        # Add nsfw moderation if applicable:
+        if tr.nsfw_pct_moderation:
+            wd.nsfw_monitoring_subs[tr.subreddit_name] = tr
+
+        wd.s.commit()
     return
 
 

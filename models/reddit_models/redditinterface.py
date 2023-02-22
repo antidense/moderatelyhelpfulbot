@@ -282,24 +282,20 @@ class SubredditInfo:
     def __init__(self, ri, subreddit_name):
         self.subreddit_name: str = subreddit_name.lower()
         self.subreddit_api_handle = ri.reddit_client.subreddit(subreddit_name)
+
         if not self.subreddit_api_handle:  # Subreddit doesn't exist
             active_status = SubStatus.SUB_GONE.value
             return
-        try:
-            self.mod_list = ",".join(list(moderator.name for moderator in self.subreddit_api_handle.moderator()))
-        except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden, prawcore.exceptions.Redirect):
-            return None
-        active_status, response = self.check_sub_access(ri)
 
-        print(f"ri/csa: sub {subreddit_name} has this issue: {response}")
-        # print(f"yaml: {self.settings_yaml_txt}")
-        if active_status.value > 0:
+        self.active_status, response = self.check_sub_access(ri)
+
+        if self.active_status.value > 0:
             self.is_nsfw = self.subreddit_api_handle.over18
-
+        else:
+            print(f"ri/csa: sub {subreddit_name} has this issue: {response}")
 
     def check_sub_access(self, ri, ignore_no_mod_access=False) -> (SubStatus, str):
         mod_list = ri.get_mod_list(subreddit_name=self.subreddit_name)
-
 
         if not mod_list:
             self.active_status = SubStatus.SUB_FORBIDDEN.value

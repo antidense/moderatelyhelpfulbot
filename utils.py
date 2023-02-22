@@ -24,7 +24,6 @@ from nsfw_monitoring import check_post_nsfw_eligibility
 
 
 
-
 def check_new_submissions(wd: WorkingData, query_limit=800, sub_list='mod', intensity=0):
     subreddit_names = []
     subreddit_names_complete = []
@@ -37,26 +36,26 @@ def check_new_submissions(wd: WorkingData, query_limit=800, sub_list='mod', inte
     for post_to_review in possible_new_posts:
         total += 1
         subreddit_name = str(post_to_review.subreddit).lower()
+
+        # If we have seen this post for this subreddit, stop going any further
         if intensity == 0 and subreddit_name in subreddit_names_complete:
             # print(f'done w/ {subreddit_name} @ {total}')
             continue
+
+        # check if we know this post
         previous_post: SubmittedPost = wd.s.query(SubmittedPost).get(post_to_review.id)
-        if previous_post:
+        if previous_post:  # seen this post before -> ignore posts from this  sub
             subreddit_names_complete.append(subreddit_name)
             continue
-        if not previous_post:
+        if not previous_post:  # have not seen this post, add to db
             post = SubmittedPost(post_to_review)
-            if post.subreddit_name in wd.nsfw_monitoring_subs:
+            if post.subreddit_name in wd.nsfw_monitoring_subs:   # do nsfw eligibility check if applicable
                 check_post_nsfw_eligibility(wd, post)
-            if subreddit_name not in subreddit_names:
-                subreddit_names.append(subreddit_name)
 
             wd.s.add(post)
             count += 1
     logger.info(f'main/CNW: found {count} posts out of {total}')
-    logger.debug("/mainCNW: updating database...")
     wd.s.commit()
-    return subreddit_names
 
 
 def check_spam_submissions(wd: WorkingData, sub_list='mod', intensity=0):
