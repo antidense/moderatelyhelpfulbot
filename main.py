@@ -174,7 +174,7 @@ def update_sub_list(wd: WorkingData, intensity=0):
         assert isinstance(tr, TrackedSubreddit)
 
         # See if due for complete re-pull from subreddit wiki (do periodically)
-        if (tr.active_status.value >= 0 and tr.config_last_checked < datetime.now() - timedelta(days=1))\
+        if (tr.active_status >= 0 and tr.config_last_checked < datetime.now() - timedelta(days=1))\
                 or not tr.mod_list:
             print(f'...rechecking...{tr.subreddit_name},'
                   f' last updated:{tr.last_updated} last config check:{tr.config_last_checked}')
@@ -184,7 +184,7 @@ def update_sub_list(wd: WorkingData, intensity=0):
             tr.config_last_checked = datetime.now()  # record this is updated
 
         # skip adding  if config is NOT okay
-        if tr.active_status.value < 4:
+        if tr.active_status < 4:
             print(f" active status for {tr.subreddit_name} is {tr.active_status},  skipping")
             wd.s.add(tr)  # update db
             continue  # don't bother with this
