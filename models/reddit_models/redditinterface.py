@@ -298,10 +298,10 @@ class SubredditInfo:
     def check_sub_access(self, ri, ignore_no_mod_access=False) -> (SubStatus, str):
         self.mod_list = ri.get_mod_list(subreddit_name=self.subreddit_name)
 
-        if not mod_list:
+        if not self.mod_list:
             self.active_status = SubStatus.SUB_FORBIDDEN.value
             return SubStatus.SUB_FORBIDDEN, f"Subreddit is banned."
-        if ignore_no_mod_access and ri.bot_name not in mod_list:
+        if ignore_no_mod_access and ri.bot_name not in self.mod_list:
             self.active_status = SubStatus.NO_MOD_PRIV.value
 
             return SubStatus.NO_MOD_PRIV, f"The bot does not have moderator privileges to /r/{self.subreddit_name}."
