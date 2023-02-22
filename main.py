@@ -176,7 +176,7 @@ def update_sub_list(wd: WorkingData, intensity=0):
         # See if due for complete re-pull from subreddit wiki (do periodically)
         if not tr.config_last_checked\
                 or (tr.active_status >= 0 and tr.config_last_checked < datetime.now() - timedelta(days=1))\
-                or not tr.mod_list:
+                or (tr.active_status >= 0 and tr.mod_list):
             print(f'...rechecking...{tr.subreddit_name},'
                   f' last updated:{tr.last_updated} last config check:{tr.config_last_checked}')
 
