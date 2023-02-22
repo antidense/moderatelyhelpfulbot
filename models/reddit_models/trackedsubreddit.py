@@ -158,6 +158,9 @@ class TrackedSubreddit(dbobj.Base):
         return self.reload_yaml_settings()
 
     def reload_yaml_settings(self) -> (Boolean, String):
+        if self.active_status.value < 3:
+            print(f"Sub access issue  {SubStatus(self.active_status.value)}")
+            return False, f"Sub access issue  {SubStatus(self.active_status.value)}"
         return_text = "Updated Successfully!"
         if not self.settings_yaml_txt:
             self.active_status = SubStatus.NO_CONFIG.value
