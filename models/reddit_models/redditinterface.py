@@ -284,15 +284,16 @@ class SubredditInfo:
         self.subreddit_api_handle = ri.reddit_client.subreddit(subreddit_name)
 
         if not self.subreddit_api_handle:  # Subreddit doesn't exist
-            active_status = SubStatus.SUB_GONE.value
+            self.active_status = SubStatus.SUB_GONE.value
             return
 
-        self.active_status, response = self.check_sub_access(ri)
-
-        if self.active_status.value > 0:
+        active_status, response = self.check_sub_access(ri)
+        self.active_status = active_status.value
+        if active_status.value > 0:
             self.is_nsfw = self.subreddit_api_handle.over18
         else:
             print(f"ri/csa: sub {subreddit_name} has this issue: {response}")
+
 
     def check_sub_access(self, ri, ignore_no_mod_access=False) -> (SubStatus, str):
         mod_list = ri.get_mod_list(subreddit_name=self.subreddit_name)
