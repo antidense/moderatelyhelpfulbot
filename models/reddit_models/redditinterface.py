@@ -296,7 +296,7 @@ class SubredditInfo:
 
 
     def check_sub_access(self, ri, ignore_no_mod_access=False) -> (SubStatus, str):
-        mod_list = ri.get_mod_list(subreddit_name=self.subreddit_name)
+        self.mod_list = ri.get_mod_list(subreddit_name=self.subreddit_name)
 
         if not mod_list:
             self.active_status = SubStatus.SUB_FORBIDDEN.value
