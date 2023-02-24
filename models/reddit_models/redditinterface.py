@@ -14,6 +14,7 @@ from models.reddit_models import SubmittedPost, TrackedSubreddit, TrackedAuthor
 from settings import MAIN_BOT_NAME
 from typing import List
 from datetime import datetime
+from static import DEFAULT_CONFIG
 import pytz
 # Set up PRAW
 
@@ -288,12 +289,12 @@ class SubredditInfo:
             return
 
         active_status, response = self.check_sub_access(ri)
+        print(active_status, response)
         self.active_status = active_status.value
         if active_status.value > 0:
             self.is_nsfw = self.subreddit_api_handle.over18
         else:
             print(f"ri/csa: sub {subreddit_name} has this issue: {response}")
-
 
     def check_sub_access(self, ri, ignore_no_mod_access=False) -> (SubStatus, str):
         mod_list = ri.get_mod_list(subreddit_name=self.subreddit_name)
@@ -310,29 +311,40 @@ class SubredditInfo:
             logger.debug(f'si/csa accessing wiki config {self.subreddit_name}, {MAIN_BOT_NAME}')
 
             # logger.debug(f'si/csa wiki_page {wiki_page.content_md}')
-            wiki_page = None
-            wiki_pages = [x.name for x in self.subreddit_api_handle.wiki]
-            for wiki_page_name in wiki_pages:
-                print(f"wiki page name: {wiki_page_name}")
-                if wiki_page_name.lower() == MAIN_BOT_NAME.lower() or wiki_page_name.lower() == ri.bot_name.lower():
-                    wiki_page=self.subreddit_api_handle.wiki[wiki_page_name]
+            possible_wiki_pages = [ ri.bot_name.lower(), MAIN_BOT_NAME.lower(),
+                                    f"config/{ri.bot_name.lower()}", f"config/{MAIN_BOT_NAME.lower()}"]
+            for possible_wiki_page in possible_wiki_pages:
+                try:
+                    wiki_page = self.subreddit_api_handle.wiki[possible_wiki_page]
+                    self.settings_yaml_txt = wiki_page.content_md
+                    print(self.settings_yaml_txt)
+                    self.settings_revision_date = wiki_page.revision_date
+                    if wiki_page.revision_by and wiki_page.revision_by.name != ri.bot_name:
+                        self.bot_mod = wiki_page.revision_by.name
+                    self.settings_yaml = yaml.safe_load(self.settings_yaml_txt)
                     break
-            if not wiki_page:  #weird workaround when the wikipage doesn't show up in the listing
-                wiki_page = self.subreddit_api_handle.wiki[ri.bot_name]
-                if not wiki_page:
-                    wiki_page = self.subreddit_api_handle.wiki[MAIN_BOT_NAME.lower()]
-            if wiki_page:
+                except prawcore.exceptions.NotFound:
+                    pass
+
+            if not self.settings_yaml_txt:
+                # attempt to create it...
+                ri.reddit_client.subreddit(self.subreddit_name).wiki.create(
+                    ri.bot_name, DEFAULT_CONFIG.replace("subredditname", self.subreddit_name).replace("moderatelyhelpfulbot", ri.bot_name),
+                    reason="default_config")
                 self.settings_yaml_txt = wiki_page.content_md
-                #logger.debug(f'si/csa wiki_page {wiki_page.content_md}')
+                print(self.settings_yaml_txt)
                 self.settings_revision_date = wiki_page.revision_date
                 if wiki_page.revision_by and wiki_page.revision_by.name != ri.bot_name:
                     self.bot_mod = wiki_page.revision_by.name
                 self.settings_yaml = yaml.safe_load(self.settings_yaml_txt)
-            else:
-                return SubStatus.NO_CONFIG, f"I only found an empty config for /r/{self.subreddit_name}."
+            if not self.settings_yaml_txt:
+                return SubStatus.NO_CONFIG, f"I did not find a config for /r/{self.subreddit_name} " \
+                                            f"Please create one at " \
+                                            f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{ri.bot_name} ."
         except prawcore.exceptions.NotFound:
-            return SubStatus.NO_CONFIG, f"I did not find a config for /r/{self.subreddit_name} Please create one at" \
-                                        f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{ri.bot_name} ."
+            return SubStatus.NO_CONFIG, f"Do you have your wiki enabled? I need a config file" \
+                                 f"Please create one at " \
+                                 f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{ri.bot_name} ."
         except prawcore.exceptions.Forbidden:
             return SubStatus.CONFIG_ACCESS_ERROR, f"I do not have any access to /r/{self.subreddit_name}."
         except prawcore.exceptions.Redirect:

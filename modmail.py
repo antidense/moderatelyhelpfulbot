@@ -406,7 +406,7 @@ def mod_mail_invitation_to_moderate(wd: WorkingData, message):
             if access_status == SubStatus.NO_CONFIG:
                 logger.warning(f'no wiki page {tr_sub.subreddit_name}..will create')
                 wd.ri.reddit_client.subreddit(tr_sub.subreddit_name).wiki.create(
-                    MAIN_BOT_NAME, DEFAULT_CONFIG.replace("subredditname", tr_sub.subreddit_name),
+                    wd.bot_name, DEFAULT_CONFIG.replace("subredditname", tr_sub.subreddit_name).replace("moderatelyhelpfulbot", wd.bot_name),
                     reason="default_config"
                 )
 

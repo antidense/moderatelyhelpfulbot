@@ -39,7 +39,6 @@ add non-binary gender
 
 """
 
-
 class Task:
     """
     __tablename__ = 'Tasks'
@@ -83,6 +82,9 @@ class Task:
                 self.task_durations.append((end_time-start_time).seconds)
             except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException) as e:
                 self.error_count += 1
+                import traceback
+                trace = traceback.format_exc()
+                print(trace)
                 return -1
             except Exception as e:
                 import traceback
@@ -163,28 +165,10 @@ def main_loop():
 
 
 def update_sub_list(wd: WorkingData, intensity=0):
+    intensity=3
     print('updating subs..', sep="")
-    wd.sub_list = []
     wd.nsfw_monitoring_subs = {}
 
-    if intensity > 4:
-        trs = wd.s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status > 0).all()  # sql query
-        for tr in trs:
-            assert isinstance(tr, TrackedSubreddit)
-            active_status, error = tr.update_from_subinfo(wd.ri.get_subreddit_info(tr))
-
-            print(f"Checked {tr.subreddit_name}:\t{tr.active_status}\t{error}")
-            if not tr.mm_convo_id and tr.active_status > 0:
-                tr.checking_mail_enabled = True
-                try:
-                    tr.mm_convo_id = wd.ri.get_modmail_thread_id(subreddit_name=tr.subreddit_name)
-
-                except prawcore.exceptions.Forbidden:
-                    tr.checking_mail_enabled = False
-                if tr.mm_convo_id:
-                    print(f"found convo id: {tr.mm_convo_id}")
-                wd.s.add(tr)
-                wd.s.commit()
     trs = wd.s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status > 0).all()
 
     # go through all subs in database
@@ -194,8 +178,9 @@ def update_sub_list(wd: WorkingData, intensity=0):
         # See if due for complete re-pull from subreddit wiki (do periodically)
         if not tr.config_last_checked\
                 or (tr.active_status >= 0 and tr.config_last_checked < datetime.now() - timedelta(days=1))\
-                or (tr.active_status >= 0 and not tr.mod_list):
-            print(f'...rechecking...{tr.subreddit_name},'
+                or (tr.active_status >= 0 and not tr.mod_list)\
+                or (0 <= tr.active_status < 10 and intensity == 3):
+            print(f'***** rechecking...{tr.subreddit_name}, {tr.active_status}'
                   f' last updated:{tr.last_updated} last config check:{tr.config_last_checked}')
 
             sub_info = wd.ri.get_subreddit_info(tr.subreddit_name)
