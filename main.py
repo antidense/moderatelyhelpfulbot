@@ -19,15 +19,11 @@ from workingdata import WorkingData
 from nsfw_monitoring import check_post_nsfw_eligibility, nsfw_checking
 from modmail import handle_modmail_message, handle_modmail_messages, handle_dm_command, handle_direct_messages
 from utils import check_spam_submissions, check_new_submissions
-import logging
 
-FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(funcName)s - %(message)s"
-#logging.basicConfig(format=FORMAT, level=logging.DEBUG)
-log = logging.getLogger(__name__)
-handler = logging.StreamHandler()
-handler.setLevel(logging.DEBUG)
-# handler.setFormatter(FORMAT)
-log.addHandler(handler)
+
+from logger import logger as log
+
+
 
 if __name__ == '__main__':
     dbobj.load_models()
