@@ -44,6 +44,7 @@ class Task:
     frequency = timedelta(minutes=5)
     task_durations = []
     error_count = 0
+    last_error=""
 
     def __init__(self, wd, target_function, frequency):
         self.wd = wd
@@ -56,7 +57,7 @@ class Task:
             logging.debug(f"Skipping task as not due for task: {self.target_function}")
             pass
         elif self.error_count > 5:
-            logging.debug(f"Skipping task due to previous errors: {self.target_function}")
+            logging.debug(f"Skipping task due to previous errors: {self.target_function} {self.last_error}")
         else:
             start_time = datetime.now()
             try:
@@ -72,6 +73,7 @@ class Task:
             except Exception as e:
                 import traceback
                 trace = traceback.format_exc()
+                self.last_error = str(trace)
                 print(trace)
         """
         except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException) as e:
@@ -134,14 +136,15 @@ def main_loop():
 
         # nsfw_checking(wd)
     rate_limiting_errors = 0
-    for task in tasks:
-        return_val = task.run_task()
-        if return_val == -1:
-            rate_limiting_errors+=1
-            if rate_limiting_errors > 2:
-                import time
-                time.sleep(60 * 5)
-                rate_limiting_errors = 0
+    while True:
+        for task in tasks:
+            return_val = task.run_task()
+            if return_val == -1:
+                rate_limiting_errors += 1
+                if rate_limiting_errors > 2:
+                    import time
+                    time.sleep(60 * 5)
+                    rate_limiting_errors = 0
 
 
 def update_sub_list(wd: WorkingData, intensity=0):
