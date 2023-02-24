@@ -318,7 +318,7 @@ class SubredditInfo:
                 try:
                     wiki_page = self.subreddit_api_handle.wiki[possible_wiki_page]
                     self.settings_yaml_txt = wiki_page.content_md
-                    print(self.settings_yaml_txt)
+                    print(self.settings_yaml_txt[0:20])
                     self.settings_revision_date = wiki_page.revision_date
                     if wiki_page.revision_by and wiki_page.revision_by.name != ri.bot_name:
                         self.bot_mod = wiki_page.revision_by.name
