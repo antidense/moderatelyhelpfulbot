@@ -165,7 +165,6 @@ def main_loop():
 
 
 def update_sub_list(wd: WorkingData, intensity=0):
-    intensity=3
     print('updating subs..', sep="")
     wd.nsfw_monitoring_subs = {}
 
