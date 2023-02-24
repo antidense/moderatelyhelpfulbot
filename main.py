@@ -22,8 +22,6 @@ from nsfw_monitoring import check_post_nsfw_eligibility, nsfw_checking
 from modmail import handle_modmail_message, handle_modmail_messages, handle_dm_command, handle_direct_messages
 from utils import check_spam_submissions, check_new_submissions
 
-if __name__ == '__main__':
-    dbobj.load_models()
 
 FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(funcName)s - %(message)s"
 #logging.basicConfig(format=FORMAT, level=logging.DEBUG)
@@ -32,6 +30,9 @@ handler = logging.StreamHandler()
 handler.setLevel(logging.DEBUG)
 # handler.setFormatter(FORMAT)
 log.addHandler(handler)
+
+if __name__ == '__main__':
+    dbobj.load_models()
 
 """
 To do list:
