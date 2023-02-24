@@ -1,7 +1,7 @@
 #!/usr/bin/env python3.7
 from __future__ import annotations
 
-import logging
+import log
 
 # from praw import exceptions
 # from praw.models import Submission
@@ -26,7 +26,13 @@ if __name__ == '__main__':
     dbobj.load_models()
 
 FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(funcName)s - %(message)s"
-logging.basicConfig(format=FORMAT, level=logging.DEBUG)
+#logging.basicConfig(format=FORMAT, level=logging.DEBUG)
+log = logging.getLogger(__name__)
+handler = logging.StreamHandler()
+handler.setLevel(logging.DEBUG)
+# handler.setFormatter(FORMAT)
+log.addHandler(handler)
+
 """
 To do list:
 asyncio 
@@ -54,9 +60,10 @@ class Task:
     target_function = None
     last_run_dt = None
     frequency = timedelta(minutes=5)
+    max_duration = timedelta(minutes=5)
     task_durations = []
     error_count = 0
-    last_error=""
+    last_error = ""
 
     def __init__(self, wd, target_function, frequency):
         self.wd = wd
@@ -66,18 +73,18 @@ class Task:
     def run_task(self):
 
         if self.last_run_dt and self.last_run_dt + self.frequency > datetime.now():
-            logging.debug(f"Skipping task as not due for task: {self.target_function}")
+            log.debug(f"Skipping task as not due for task: {self.target_function}")
             pass
         elif self.error_count > 5:
-            logging.debug(f"Skipping task due to previous errors: {self.target_function} {self.last_error}")
+            log.debug(f"Skipping task due to previous errors: {self.target_function} {self.last_error}")
         else:
             start_time = datetime.now()
             try:
-                logging.debug(f"Running task: {self.target_function}, last ran:{self.last_run_dt}")
+                log.debug(f"Running task: {self.target_function}, last ran:{self.last_run_dt}")
                 globals()[self.target_function](self.wd)
                 end_time = datetime.now()
                 self.last_run_dt = start_time
-                logging.debug(f"Task complete {self.target_function} {end_time-start_time}")
+                log.debug(f"Task complete {self.target_function} {end_time-start_time}")
                 self.task_durations.append((end_time-start_time).seconds)
             except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException) as e:
                 self.error_count += 1
@@ -124,7 +131,7 @@ def main_loop():
     wd.ri = RedditInterface()  # Reddit API instance
     wd.most_recent_review = None  # not used?
     wd.bot_name = wd.ri.reddit_client.user.me().name  # what is my name?
-    logging.debug(f"My name is {wd.bot_name}")
+    log.debug(f"My name is {wd.bot_name}")
 
     tasks = [Task(wd, 'purge_old_records', timedelta(hours=12)),
              Task(wd, 'update_sub_list', timedelta(hours=2)),
@@ -322,8 +329,8 @@ def update_common_posts(wd: WorkingData, subreddit_name, limit=1000):
             post = CommonPost(post_to_review)
             wd.s.add(post)
             count += 1
-    logging.debug(f'found {count} top posts')
-    logging.debug("updating database...")
+    log.debug(f'found {count} top posts')
+    log.debug("updating database...")
     wd.s.commit()
 
 
