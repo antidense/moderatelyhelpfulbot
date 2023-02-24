@@ -1,8 +1,6 @@
 #!/usr/bin/env python3.7
 from __future__ import annotations
 
-import log
-
 # from praw import exceptions
 # from praw.models import Submission
 from static import *
@@ -21,7 +19,7 @@ from workingdata import WorkingData
 from nsfw_monitoring import check_post_nsfw_eligibility, nsfw_checking
 from modmail import handle_modmail_message, handle_modmail_messages, handle_dm_command, handle_direct_messages
 from utils import check_spam_submissions, check_new_submissions
-
+import logging
 
 FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(funcName)s - %(message)s"
 #logging.basicConfig(format=FORMAT, level=logging.DEBUG)
