@@ -303,7 +303,8 @@ class SubredditInfo:
             self.active_status = SubStatus.SUB_FORBIDDEN.value
             return SubStatus.SUB_FORBIDDEN, f"Subreddit is banned."
         self.mod_list=','.join(mod_list)
-        if ignore_no_mod_access and ri.bot_name not in self.mod_list:
+
+        if ignore_no_mod_access is False and ri.bot_name not in self.mod_list:
             self.active_status = SubStatus.NO_MOD_PRIV.value
 
             return SubStatus.NO_MOD_PRIV, f"The bot does not have moderator privileges to /r/{self.subreddit_name}."
@@ -332,7 +333,7 @@ class SubredditInfo:
                     ri.bot_name, DEFAULT_CONFIG.replace("subredditname", self.subreddit_name).replace("moderatelyhelpfulbot", ri.bot_name),
                     reason="default_config")
                 self.settings_yaml_txt = wiki_page.content_md
-                print(self.settings_yaml_txt)
+
                 self.settings_revision_date = wiki_page.revision_date
                 if wiki_page.revision_by and wiki_page.revision_by.name != ri.bot_name:
                     self.bot_mod = wiki_page.revision_by.name
@@ -342,7 +343,7 @@ class SubredditInfo:
                                             f"Please create one at " \
                                             f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{ri.bot_name} ."
         except prawcore.exceptions.NotFound:
-            return SubStatus.NO_CONFIG, f"Do you have your wiki enabled? I need a config file" \
+            return SubStatus.NO_CONFIG, f"Do you have your wiki enabled? I need a config file. " \
                                  f"Please create one at " \
                                  f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{ri.bot_name} ."
         except prawcore.exceptions.Forbidden:
