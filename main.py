@@ -34,10 +34,22 @@ incorporate toolbox? https://www.reddit.com/r/nostalgia/wiki/edit/toolbox check 
 active status to an ENUM
 add non-binary gender
 
+
+
 """
 
 
 class Task:
+    """
+    __tablename__ = 'Tasks'
+    wd = None
+    task_name = Column(String(191), nullable=False, primary_key=True)
+    func_name = Column(String(191), nullable=False)
+    last_run_dt = Column(DateTime, nullable=True)
+    last_runtime = Column(Integer, nullable=False)
+    frequency_mins = Column(Integer, nullable=False)
+    """
+
     wd = None
     target_function = None
     last_run_dt = None
@@ -96,7 +108,8 @@ class Task:
 def check_submissions(wd):
     chunk_size = 300
     assert isinstance(wd.sub_dict, dict)
-    wd.sub_list = wd.sub_dict.keys
+    wd.sub_list = list(wd.sub_dict.keys())
+    print(wd.sub_list)
     chunked_list = [wd.sub_list[j:j + chunk_size] for j in range(0, len(wd.sub_list), chunk_size)]
 
     for sub_list in chunked_list:
