@@ -381,7 +381,7 @@ def do_reddit_actions(wd):
         .filter(SubmittedPost.time_utc > datetime.now(pytz.utc).replace(tzinfo=None) - timedelta(hours=24))
     # print(f"blacklist removals {to_remove.rowcount}")
     for op in to_remove:
-        logger.warning(f'removing post {op.author} {op.title} {op.subreddit_name}')
+        logger.info(f'removing post {op.author} {op.title} {op.subreddit_name}')
         tr_sub = get_subreddit_by_name(wd, op.subreddit_name)
         try:
             wd.ri.get_submission_api_handle(op).mod.remove()
@@ -395,8 +395,8 @@ def do_reddit_actions(wd):
             op.reply_comment = None
         except prawcore.exceptions.Forbidden as e:
             logger.warning(f'No permission to remove post {op.author} {op.title} {op.subreddit_name} {str(e)}')
-            wd.ri.sub_dict[op.subreddit_name].active_status = SubStatus.NO_BAN_ACCESS
-            wd.s.add(wd.ri.sub_dict[op.subreddit_name])
+            wd.sub_dict[op.subreddit_name].active_status = SubStatus.NO_REMOVE_ACCESS.value
+            wd.s.add(wd.sub_dict[op.subreddit_name])
         except (praw.exceptions.APIException,  prawcore.exceptions.ServerError) as e:
             logger.warning(f'something went wrong in removing post {op.author} {op.title} {op.subreddit_name} {str(e)}')
             op.counted_status = CountedStatus.REMOVE_FAILED.value

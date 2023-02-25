@@ -113,12 +113,10 @@ def check_submissions(wd):
     chunk_size = 300
     assert isinstance(wd.sub_dict, dict)
     wd.sub_list = list(wd.sub_dict.keys())
-    print(wd.sub_list)
     chunked_list = [wd.sub_list[j:j + chunk_size] for j in range(0, len(wd.sub_list), chunk_size)]
 
     for sub_list in chunked_list:
         sub_list_str = "+".join(sub_list)
-        print(sub_list_str)
         check_new_submissions(wd, sub_list=sub_list_str, intensity=0)
         check_spam_submissions(wd, sub_list=sub_list_str, intensity=0)
 
@@ -165,7 +163,7 @@ def main_loop():
 
 
 def update_sub_list(wd: WorkingData, intensity=0):
-    print('updating subs..', sep="")
+    log.info('updating subs..')
     wd.nsfw_monitoring_subs = {}
 
     trs = wd.s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status > 0).all()
@@ -179,7 +177,7 @@ def update_sub_list(wd: WorkingData, intensity=0):
                 or (tr.active_status >= 0 and tr.config_last_checked < datetime.now() - timedelta(days=1))\
                 or (tr.active_status >= 0 and not tr.mod_list)\
                 or (0 <= tr.active_status < 10 and intensity == 3):
-            print(f'***** rechecking...{tr.subreddit_name}, {tr.active_status}'
+            log.debug(f'***** rechecking...{tr.subreddit_name}, {tr.active_status}'
                   f' last updated:{tr.last_updated} last config check:{tr.config_last_checked}')
 
             sub_info = wd.ri.get_subreddit_info(tr.subreddit_name)
@@ -189,7 +187,7 @@ def update_sub_list(wd: WorkingData, intensity=0):
 
         # skip adding  if config is NOT okay
         if tr.active_status < 4:
-            print(f" active status for {tr.subreddit_name} is {tr.active_status},  skipping")
+            log.info(f" active status for {tr.subreddit_name} is {tr.active_status},  skipping")
             continue  # don't bother with this
 
         # Attempt to load config assuming it's okay
@@ -197,7 +195,7 @@ def update_sub_list(wd: WorkingData, intensity=0):
             worked, status = tr.reload_yaml_settings()
             wd.s.add(tr)
             if not worked:
-                print(f" active status for {tr.subreddit_name} is {tr.active_status},  skipping")
+                log.info(f" active status for {tr.subreddit_name} is {tr.active_status},  skipping")
                 continue
 
         # Add sub to dict to check

@@ -4,6 +4,7 @@ class SubStatus(Enum):
     UNKNOWN = 20
     ACTIVE = 10 # recheck 3-4 days
     NO_BAN_ACCESS = 8 # recheck 3-4 days
+    NO_REMOVE_ACCESS = 7  # recheck 3-4 days
     MHB_CONFIG_ERROR = 5 # recheck daily
     YAML_SYNTAX_OK = 4 # recheck daily
     YAML_SYNTAX_ERROR = 3 # recheck daily
