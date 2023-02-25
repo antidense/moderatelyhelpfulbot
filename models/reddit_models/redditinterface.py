@@ -18,8 +18,6 @@ from static import DEFAULT_CONFIG
 import pytz
 # Set up PRAW
 
-BOT_NAME = None
-
 
 class RedditInterface:
     bot_sub = None
@@ -29,7 +27,6 @@ class RedditInterface:
     def __init__(self):
         self.reddit_client = praw.Reddit(
                                     )
-        BOT_NAME = self.reddit_client.user.me().name
         self.bot_name = self.reddit_client.user.me().name
 
     '''SUBMISSION STUFF'''

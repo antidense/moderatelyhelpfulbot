@@ -1054,7 +1054,7 @@ def look_for_rule_violations3(wd):
 
 def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post: SubmittedPost,
                                           most_recent_reposts: List[SubmittedPost], wd=None):
-    BOT_NAME = wd.ri.bot_name
+    bot_name = wd.ri.bot_name
     possible_repost = most_recent_reposts[-1]
     if tr_sub.comment:
         recent_post.reply_comment = recent_post.reply_comment = make_comment(tr_sub, recent_post, most_recent_reposts,
@@ -1075,9 +1075,9 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
     if tr_sub.action == "report":
         if tr_sub.report_reason:
             rp_reason = tr_sub.populate_tags(tr_sub.report_reason, recent_post=recent_post, prev_post=possible_repost)
-            wd.ri.get_submission_api_handle(recent_post).report(f"{BOT_NAME}: {rp_reason}"[0:99])
+            wd.ri.get_submission_api_handle(recent_post).report(f"{bot_name}: {rp_reason}"[0:99])
         else:
-            wd.ri.get_submission_api_handle(recent_post).report(f"{BOT_NAME}: repeatedly exceeding posting threshold")
+            wd.ri.get_submission_api_handle(recent_post).report(f"{bot_name}: repeatedly exceeding posting threshold")
     if tr_sub.message and recent_post.author and wd.ri.get_submission_api_handle(recent_post).author:
         try:
             wd.ri.get_submission_api_handle(

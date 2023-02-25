@@ -20,7 +20,7 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
     subreddit_name: str = subreddit_name[2:] if subreddit_name.startswith('r/') else subreddit_name
     subreddit_name: str = subreddit_name[3:] if subreddit_name.startswith('/r/') else subreddit_name
     subreddit_names = subreddit_name.split('+') if '+' in subreddit_name else [subreddit_name]  # allow
-    if subreddit_name == MAIN_BOT_NAME or subreddit_name == wd.bot_name:
+    if subreddit_name == MAIN_BOT_NAME or subreddit_name == wd.ri.bot_name:
         return "this command doesn't make sense", True
 
     command: str = command[1:] if command.startswith("$") else command
@@ -206,6 +206,17 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
             post.flagged_duplicate = False
             post.counted_status = CountedStatus.EXEMPTED.value
             wd.s.add(post)
+        wd.s.commit()
+    elif command == "reloadconfig":
+        wd.ri.reddit_client.subreddit(tr_sub.subreddit_name).wiki.edit(
+            wd.ri.bot_name,
+            DEFAULT_CONFIG.replace("subredditname", tr_sub.subreddit_name).replace("moderatelyhelpfulbot",
+                                                                                   wd.ri.bot_name),
+            reason="reset to default_config")
+        sub_info = wd.ri.get_subreddit_info(tr_sub.subreddit_name)
+        tr_sub.update_from_subinfo(sub_info)
+        worked, status = tr_sub.reload_yaml_settings()
+        wd.s.add(tr_sub)
         wd.s.commit()
 
     elif command == "update":  # $update
