@@ -1286,11 +1286,10 @@ from workingdata import WorkingData
 def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_exist=True, update_if_due=False):
     # check if tr_sub already loaded in memory
     tr_sub: TrackedSubreddit = wd.sub_dict.get(subreddit_name)
-    if tr_sub:
+    if tr_sub:  # we have the sub on record
         return tr_sub
 
-    # not loaded in memory, so check if in database
-    if not tr_sub:
+    if not tr_sub: # know about the sub, but not being loaded (permissions issues, etc.)
         tr_sub: TrackedSubreddit = wd.s.query(TrackedSubreddit).get(subreddit_name)
 
     # Give up as requested if not in db
@@ -1301,12 +1300,13 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
     # If need to create, do so now
     if not tr_sub:
         print("GSBN: creating sub...")
-        sub_info = wd.ri.get_subreddit_info(subreddit_name=subreddit_name)
-        if subreddit_name == MAIN_BOT_NAME or (sub_info and sub_info.active_status >= 0):
-            tr_sub = TrackedSubreddit(subreddit_name=subreddit_name, sub_info=sub_info)
+        sub_info = wd.ri.get_subreddit_info(subreddit_name=subreddit_name)  # get subreddit info for sub from api
+        if subreddit_name == MAIN_BOT_NAME or \
+                (sub_info and sub_info.active_status >= 0):   # make sure sub is accessible
+            tr_sub = TrackedSubreddit(subreddit_name=subreddit_name, sub_info=sub_info)  # add sub to sb
             wd.s.add(tr_sub)
             wd.s.commit()
-            wd.sub_dict[subreddit_name] = tr_sub
+            wd.sub_dict[subreddit_name] = tr_sub  # add sub to current working list
 
         else:
             print(f"GSBN: subreddit doesn't exist  {sub_info}")

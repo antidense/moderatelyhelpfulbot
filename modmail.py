@@ -27,7 +27,7 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
 
     tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=True)
     if not tr_sub:
-        return "Error retrieving information for /r/{}".format(subreddit_name), True
+        return f"Error retrieving information for /r/{subreddit_name}", True
     try:
 
         moderators: List[str] = wd.ri.get_mod_list(subreddit=tr_sub)
