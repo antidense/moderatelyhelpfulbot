@@ -384,28 +384,20 @@ def do_reddit_actions(wd):
         logger.warning(f'removing post {op.author} {op.title} {op.subreddit_name}')
         tr_sub = get_subreddit_by_name(wd, op.subreddit_name)
         try:
-            success = wd.ri.mod_remove(op)
-            logger.warning(f'remove successful!: {op.author} {op.title}')
+            wd.ri.get_submission_api_handle(op).mod.remove()
+            logger.info(f'remove successful!: {op.author} {op.title}')
             new_counted_status = CountedStatus.REMOVED \
                 if op.counted_status == CountedStatus.NEED_REMOVE.value else CountedStatus.BLKLIST
-            if success and op.reply_comment:
+            if op.reply_comment:
                 wd.ri.reply(op, op.reply_comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve,
                             lock_thread=tr_sub.lock_thread)
-                op.counted_status=new_counted_status.value
-                #op.update_status(reviewed=True, flagged_duplicate=True, counted_status=new_counted_status)
-                op.reply_comment = None
-            elif success:
-                #op.update_status(reviewed=True, flagged_duplicate=True, counted_status=new_counted_status)
-                op.counted_status = new_counted_status.value
-                op.reply_comment = None
-            else:
-                # op.update_status(reviewed=True, flagged_duplicate=True,
-                                 #counted_status=CountedStatus.REMOVE_FAILED)
-                op.counted_status = CountedStatus.REMOVE_FAILED.value
-        except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
+            op.counted_status = new_counted_status.value
+            op.reply_comment = None
+        except prawcore.exceptions.Forbidden as e:
+            logger.warning(f'No permission to remove post {op.author} {op.title} {op.subreddit_name} {str(e)}')
+            wd.ri.sub_dict[op.subreddit_name].active_status = SubStatus.NO_BAN_ACCESS
+        except (praw.exceptions.APIException,  prawcore.exceptions.ServerError) as e:
             logger.warning(f'something went wrong in removing post {op.author} {op.title} {op.subreddit_name} {str(e)}')
-            #op.update_status(reviewed=True, flagged_duplicate=True,
-            #                 counted_status=CountedStatus.REMOVE_FAILED)
             op.counted_status = CountedStatus.REMOVE_FAILED.value
 
         wd.s.add(op)
@@ -1075,33 +1067,8 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
                            subject="[Notification] Post that violates rule frequency restriction", use_same_thread=True)
     if tr_sub.action == "remove":
         recent_post.counted_status = CountedStatus.NEED_REMOVE.value
-        """
-        post_status = wd.ri.get_posted_status(recent_post)
-        if post_status == PostedStatus.UP:
-            if recent_post.time_utc < datetime.now(pytz.utc).replace(tzinfo=None) - timedelta(hours=24):
-                recent_post.counted_status = CountedStatus.AGED_OUT
-                return
+        logger.debug(f"Post marked for removal {recent_post.subreddit_name} {recent_post.id} {recent_post.author}")
 
-            try:
-                was_successful = wd.ri.mod_remove(recent_post)
-                recent_post.counted_status = CountedStatus.REMOVED
-                logger.debug("\tremoved post now")
-                if not was_successful:
-                    logger.debug("\tcould not remove post")
-                elif tr_sub.ban_ability == -1:
-                    tr_sub.ban_ability = 1
-                    # if tr_sub.active_status > 3:
-                    #    tr_sub.active_status = 4
-                    wd.s.add(tr_sub)
-                    wd.s.add(recent_post)
-                    wd.s.commit()
-            except praw.exceptions.APIException:
-                logger.debug("\tcould not remove post")
-            except prawcore.exceptions.Forbidden:
-                logger.debug("\tcould not remove post: Forbidden")
-        else:
-            logger.debug("\tpost not up")
-        """
     if tr_sub.action == "report":
         if tr_sub.report_reason:
             rp_reason = tr_sub.populate_tags(tr_sub.report_reason, recent_post=recent_post, prev_post=possible_repost)
