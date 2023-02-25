@@ -396,6 +396,7 @@ def do_reddit_actions(wd):
         except prawcore.exceptions.Forbidden as e:
             logger.warning(f'No permission to remove post {op.author} {op.title} {op.subreddit_name} {str(e)}')
             wd.ri.sub_dict[op.subreddit_name].active_status = SubStatus.NO_BAN_ACCESS
+            wd.s.add(wd.ri.sub_dict[op.subreddit_name])
         except (praw.exceptions.APIException,  prawcore.exceptions.ServerError) as e:
             logger.warning(f'something went wrong in removing post {op.author} {op.title} {op.subreddit_name} {str(e)}')
             op.counted_status = CountedStatus.REMOVE_FAILED.value
