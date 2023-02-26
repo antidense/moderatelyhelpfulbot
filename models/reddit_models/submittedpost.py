@@ -51,7 +51,7 @@ class SubmittedPost(dbobj.Base):  # need posted_status
     reply_comment = Column(UnicodeText, nullable=True)
     last_reviewed = Column(DateTime, nullable=False)
 
-    next_eligible = Column(DateTime, nullable=False)
+    # next_eligible = Column(DateTime, nullable=False)
 
     api_handle = None
 
