@@ -111,7 +111,7 @@ def review_posts():   #requires mem, reddit?
         # Load subreddit settings
         tr_sub = update_list_with_subreddit(pg.subreddit_name, request_update_if_needed=True)
         max_count = tr_sub.max_count_per_interval
-        if tr_sub.active_status < 3:
+        if tr_sub.active_status_enum not in (SubStatus.ACTIVE, SubStatus.NO_BAN_ACCESS):
             continue
 
         # Check if they're on the soft blacklist

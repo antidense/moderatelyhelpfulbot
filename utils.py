@@ -339,8 +339,8 @@ def automated_reviews(wd):
         if not tr_sub:
             logger.info(f"Could not find subreddit {op.subreddit_name}")
             continue
-        if tr_sub.active_status < 4:
-            logger.info(f"active status not a pplicable {op.subreddit_name}")
+        if tr_sub.active_status_enum not in (SubStatus.ACTIVE, SubStatus.NO_BAN_ACCESS):
+            logger.info(f"active status not applicable {op.subreddit_name}")
             continue
         last_valid_post: SubmittedPost = wd.s.query(SubmittedPost).get(
             subreddit_author.last_valid_post) if subreddit_author.last_valid_post is not None else None
@@ -395,7 +395,7 @@ def do_reddit_actions(wd):
             op.reply_comment = None
         except prawcore.exceptions.Forbidden as e:
             logger.warning(f'No permission to remove post {op.author} {op.title} {op.subreddit_name} {str(e)}')
-            wd.sub_dict[op.subreddit_name].active_status = SubStatus.NO_REMOVE_ACCESS.value
+            wd.sub_dict[op.subreddit_name].active_status_enum = SubStatus.NO_REMOVE_ACCESS
             wd.s.add(wd.sub_dict[op.subreddit_name])
             op.counted_status = CountedStatus.REMOVE_FAILED.value
             print('test')
@@ -565,7 +565,7 @@ def look_for_rule_violations4(wd):
         # Break if taking too long
         tock = datetime.now(pytz.utc) - tick
         if tock > timedelta(minutes=10):
-            logger.debug("Aborting, taking more than 10 min")
+            logger.warning("Aborting, taking more than 10 min")
             wd.s.commit()
             break
 
@@ -576,8 +576,8 @@ def look_for_rule_violations4(wd):
             logger.debug(f"skipping this sub for some reason {pg.subreddit_name} ")
             continue
         max_count = tr_sub.max_count_per_interval
-        if tr_sub.active_status < 6:
-            logger.debug(f"Subreddit is not active {tr_sub.subreddit_name} {tr_sub.active_status}")
+        if tr_sub.active_status_enum.value not in (SubStatus.ACTIVE, SubStatus.NO_BAN_ACCESS):
+            logger.warning(f"Subreddit is not active {tr_sub.subreddit_name} {tr_sub.active_status_enum}")
             continue
 
         # Check if they're on the soft blacklist
@@ -589,14 +589,14 @@ def look_for_rule_violations4(wd):
               f"grace_period: {tr_sub.grace_period}")
         for j, post in enumerate(pg.posts):
             assert (isinstance(post, SubmittedPost))
-            logger.info(
+            logger.debug(
                 f"{i}-{j}Checking: "
                 f"{pg.author_name} {post.time_utc} url:{post.get_url()} reviewed:{post.reviewed}  "
                 f"counted:{post.counted_status} "
                 f"posted:{post.posted_status}  title:{post.title[0:30]}")
 
             if post.counted_status == CountedStatus.BLKLIST.value:  # May not need this later
-                logger.info(
+                logger.debug(
                     f"{i}-{j}\t\tAlready handled")
                 continue
 
@@ -632,14 +632,14 @@ def look_for_rule_violations4(wd):
                 post.counted_status = counted_status.value
                 #post.update_status(counted_status=counted_status)
                 wd.s.add(post)
-                logger.info(f"\t\tpost status: {counted_status} {result}")
+                logger.debug(f"\t\tpost status: {counted_status} {result}")
                 if counted_status in ( CountedStatus.COUNTS , CountedStatus.NEED_REMOVE):
                     posts_to_verify.append(post)
                 if i % 25 == 0:
                     wd.s.commit()
 
             else:
-                logger.info(f"{i}-{j}\t\tpost status: "
+                logger.debug(f"{i}-{j}\t\tpost status: "
                             f"already reviewed {post.counted_status} "
                             f"{'---MHB removed' if post.flagged_duplicate else ''}")
 
@@ -667,20 +667,20 @@ def look_for_rule_violations4(wd):
             .all()
 
         possible_pre_posts = []
-        logger.info(f"Found {len(back_posts)} backposts")
+        logger.debug(f"Found {len(back_posts)} backposts")
         if len(back_posts) == 0:
             if pg.posts[-1].counted_status <2:
                 pg.posts[-1].counted_status==2
             pg.posts[-1].reviewed = True
             wd.s.add(pg.posts[-1])
 
-            logger.info("Nothing to do, moving on.")
+            logger.debug("Nothing to do, moving on.")
             continue
 
         # Check backposts
         print("reviwing back posts")
         for j, post in enumerate(back_posts):
-            logger.info(f"{i}-{j} Backpost: {post.time_utc} url:{post.get_url()}  title:{post.title[0:30]}"
+            logger.debug(f"{i}-{j} Backpost: {post.time_utc} url:{post.get_url()}  title:{post.title[0:30]}"
                         f"\t counted_status: {post.counted_status} posted_status: {post.posted_status} ")
             if post.counted_status == CountedStatus.NOT_CHKD.value \
                     or post.counted_status == CountedStatus.PREV_EXEMPT.value:
@@ -688,18 +688,18 @@ def look_for_rule_violations4(wd):
                 post.counted_status=counted_status.value
                 #post.update_status(counted_status=counted_status)
                 wd.s.add(post)
-                logger.info(
+                logger.debug(
                     f"\tpost_counted_status updated: {post.counted_status} {CountedStatus(post.counted_status)}")
             if post.counted_status == CountedStatus.COUNTS.value:
-                logger.info(f"\t....Including")
+                logger.debug(f"\t....Including")
                 possible_pre_posts.append(post)
             else:
-                logger.info(f"\t..exempting ")
+                logger.debug(f"\t..exempting ")
 
         # Go through left over posts
         grace_count = 0
         for j, post in enumerate(posts_to_verify):
-            logger.info(f"{i}-{j} Reviewing: r/{pg.subreddit_name}  {pg.author_name}  {post.time_utc}  "
+            logger.debug(f"{i}-{j} Reviewing: r/{pg.subreddit_name}  {pg.author_name}  {post.time_utc}  "
                         f"url:{post.get_url()}  title:{post.title[0:30]}"
                         f"\t counted_status: {post.counted_status} posted_status: {post.posted_status}")
 
@@ -736,7 +736,7 @@ def look_for_rule_violations4(wd):
 
             # not enough posts
             if len(associated_reposts) < tr_sub.max_count_per_interval:
-                logger.info(f"\tNot enough previous posts: {len(associated_reposts)}/{max_count}: "
+                logger.debug(f"\tNot enough previous posts: {len(associated_reposts)}/{max_count}: "
                             f"{','.join([x.id for x in associated_reposts])}")
                 post.reviewed=True
 
@@ -799,7 +799,7 @@ def look_for_rule_violations3(wd):
             .order_by(SubmittedPost.added_time).first()
 
     # AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL)
-    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, GROUP_CONCAT(t.counted_status ORDER BY t.id), COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status >3 and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND MAX(added_time) > :look_back  ORDER BY most_recent desc ;"
+    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, GROUP_CONCAT(t.counted_status ORDER BY t.id), COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status in ('ACTIVE', 'NO_BAN_ACCESS') and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND MAX(added_time) > :look_back  ORDER BY most_recent desc ;"
     # more_accurate_statement.replace("[date]")
     search_back = 48
     more_accurate_statement = more_accurate_statement.replace('72', str(search_back))
@@ -858,8 +858,8 @@ def look_for_rule_violations3(wd):
             logger.debug(f"skipping this sub for some reason {pg.subreddit_name} ")
             continue
         max_count = tr_sub.max_count_per_interval
-        if tr_sub.active_status < 6:
-            logger.debug(f"Subreddit is not active {tr_sub.subreddit_name} {tr_sub.active_status}")
+        if tr_sub.active_status_enum not in (SubStatus.ACTIVE, SubStatus.NO_BAN_ACCESS):
+            logger.debug(f"Subreddit is not active {tr_sub.subreddit_name} {tr_sub.active_status_enum}")
             continue
 
         # Check if they're on the soft blacklist
@@ -871,14 +871,14 @@ def look_for_rule_violations3(wd):
               f"grace_period: {tr_sub.grace_period}")
         for j, post in enumerate(pg.posts):
             assert (isinstance(post, SubmittedPost))
-            logger.info(
+            logger.debug(
                 f"{i}-{j}Checking: "
                 f"{pg.author_name} {post.time_utc} url:{post.get_url()} reviewed:{post.reviewed}  "
                 f"counted:{post.counted_status} "
                 f"posted:{post.posted_status}  title:{post.title[0:30]}")
 
             if post.counted_status == CountedStatus.BLKLIST.value:  # May not need this later
-                logger.info(
+                logger.debug(
                     f"{i}-{j}\t\tAlready handled")
                 continue
 
@@ -914,14 +914,14 @@ def look_for_rule_violations3(wd):
                 post.counted_status = counted_status.value
                 #post.update_status(counted_status=counted_status)
                 wd.s.add(post)
-                logger.info(f"\t\tpost status: {counted_status} {result}")
+                logger.debug(f"\t\tpost status: {counted_status} {result}")
                 if counted_status in ( CountedStatus.COUNTS , CountedStatus.NEED_REMOVE):
                     posts_to_verify.append(post)
                 if i % 25 == 0:
                     wd.s.commit()
 
             else:
-                logger.info(f"{i}-{j}\t\tpost status: "
+                logger.debug(f"{i}-{j}\t\tpost status: "
                             f"already reviewed {post.counted_status} "
                             f"{'---MHB removed' if post.flagged_duplicate else ''}")
 
@@ -949,20 +949,20 @@ def look_for_rule_violations3(wd):
             .all()
 
         possible_pre_posts = []
-        logger.info(f"Found {len(back_posts)} backposts")
+        logger.debug(f"Found {len(back_posts)} backposts")
         if len(back_posts) == 0:
             if pg.posts[-1].counted_status <2:
                 pg.posts[-1].counted_status==2
             pg.posts[-1].reviewed = True
             wd.s.add(pg.posts[-1])
 
-            logger.info("Nothing to do, moving on.")
+            logger.debug("Nothing to do, moving on.")
             continue
 
         # Check backposts
         print("reviwing back posts")
         for j, post in enumerate(back_posts):
-            logger.info(f"{i}-{j} Backpost: {post.time_utc} url:{post.get_url()}  title:{post.title[0:30]}"
+            logger.debug(f"{i}-{j} Backpost: {post.time_utc} url:{post.get_url()}  title:{post.title[0:30]}"
                         f"\t counted_status: {post.counted_status} posted_status: {post.posted_status} ")
             if post.counted_status == CountedStatus.NOT_CHKD.value \
                     or post.counted_status == CountedStatus.PREV_EXEMPT.value:
@@ -970,18 +970,18 @@ def look_for_rule_violations3(wd):
                 post.counted_status=counted_status.value
                 #post.update_status(counted_status=counted_status)
                 wd.s.add(post)
-                logger.info(
+                logger.debug(
                     f"\tpost_counted_status updated: {post.counted_status} {CountedStatus(post.counted_status)}")
             if post.counted_status == CountedStatus.COUNTS.value:
-                logger.info(f"\t....Including")
+                logger.debug(f"\t....Including")
                 possible_pre_posts.append(post)
             else:
-                logger.info(f"\t..exempting ")
+                logger.debug(f"\t..exempting ")
 
         # Go through left over posts
         grace_count = 0
         for j, post in enumerate(posts_to_verify):
-            logger.info(f"{i}-{j} Reviewing: r/{pg.subreddit_name}  {pg.author_name}  {post.time_utc}  "
+            logger.debug(f"{i}-{j} Reviewing: r/{pg.subreddit_name}  {pg.author_name}  {post.time_utc}  "
                         f"url:{post.get_url()}  title:{post.title[0:30]}"
                         f"\t counted_status: {post.counted_status} posted_status: {post.posted_status}")
 
@@ -1018,7 +1018,7 @@ def look_for_rule_violations3(wd):
 
             # not enough posts
             if len(associated_reposts) < tr_sub.max_count_per_interval:
-                logger.info(f"\tNot enough previous posts: {len(associated_reposts)}/{max_count}: "
+                logger.debug(f"\tNot enough previous posts: {len(associated_reposts)}/{max_count}: "
                             f"{','.join([x.id for x in associated_reposts])}")
                 post.reviewed=True
 
@@ -1305,7 +1305,7 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
         print("GSBN: creating sub...")
         sub_info = wd.ri.get_subreddit_info(subreddit_name=subreddit_name)  # get subreddit info for sub from api
         if subreddit_name == MAIN_BOT_NAME or \
-                (sub_info and sub_info.active_status >= 0):   # make sure sub is accessible
+                (sub_info and sub_info.active_status_enum.value >= 0):   # make sure sub is accessible
             tr_sub = TrackedSubreddit(subreddit_name=subreddit_name, sub_info=sub_info)  # add sub to sb
             wd.s.add(tr_sub)
             wd.s.commit()
@@ -1328,7 +1328,7 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
         worked, status = tr_sub.reload_yaml_settings()
         if not worked:
 
-            print(f"GSBN: couldn't load from stored info {tr_sub.subreddit_name} because {status} ACTIVE STATUS {tr_sub.active_status}")
+            print(f"GSBN: couldn't load from stored info {tr_sub.subreddit_name} because {status} ACTIVE STATUS {tr_sub.active_status_enum}")
             # sub_info = wd.ri.get_subreddit_info(subreddit_name=tr_sub.subreddit_name)
 
             # if hasattr(sub_info, 'yaml_settings_text'):

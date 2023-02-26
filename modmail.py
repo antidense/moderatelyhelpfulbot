@@ -243,8 +243,8 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
                         "Please remove it.  " \
                         f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{MAIN_BOT_NAME}. "
 
-        sub_status_code = tr_sub.active_status
-        sub_status_enum = str(SubStatus(sub_status_code))
+        # sub_status_code =
+        sub_status_enum = tr_sub.active_status_enum
 
         reply_text = f"Received message to update config for {subreddit_name}.  See the output below. {status}" \
                      f"Please message [/r/moderatelyhelpfulbot](https://www.reddit.com/" \
@@ -425,11 +425,11 @@ def mod_mail_invitation_to_moderate(wd: WorkingData, message):
                                     body=f"There was no configuration created for {wd.bot_name} so "
                                          "one was automatically generated. Please check it to make sure it is "
                                          f"what you want. https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{wd.bot_name}")
-                tr_sub.active_status = SubStatus.ACTIVE.value
+                tr_sub.active_status_enum = SubStatus.ACTIVE
                 wd.s.add(tr_sub)
         except prawcore.exceptions.NotFound:
             logger.warning(f'no config accessible for {tr_sub.subreddit_name}')
-            tr_sub.active_status = SubStatus.CONFIG_ACCESS_ERROR.value
+            tr_sub.active_status_enum = SubStatus.CONFIG_ACCESS_ERROR
             wd.s.add(tr_sub)
     else:
         message.reply(body=f"Invitation received. Please wait for approval by bot owner. In the mean time, "

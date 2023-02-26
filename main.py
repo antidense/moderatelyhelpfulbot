@@ -166,7 +166,8 @@ def update_sub_list(wd: WorkingData, intensity=0):
     log.info('updating subs..')
     wd.nsfw_monitoring_subs = {}
 
-    trs = wd.s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status > 0).all()
+    trs = wd.s.query(TrackedSubreddit)\
+        .filter(~TrackedSubreddit.active_status_enum.in_((SubStatus.SUB_FORBIDDEN, SubStatus.SUB_GONE))).all()
 
     # go through all subs in database
     for tr in trs:
@@ -174,10 +175,10 @@ def update_sub_list(wd: WorkingData, intensity=0):
 
         # See if due for complete re-pull from subreddit wiki (do periodically)
         if not tr.config_last_checked\
-                or (tr.active_status >= 0 and tr.config_last_checked < datetime.now() - timedelta(days=1))\
-                or (tr.active_status >= 0 and not tr.mod_list)\
-                or (0 <= tr.active_status < 10 and intensity == 3):
-            log.debug(f'***** rechecking...{tr.subreddit_name}, {tr.active_status}'
+                or (tr.config_last_checked < datetime.now() - timedelta(days=1))\
+                or (not tr.mod_list)\
+                or (intensity == 3):
+            log.debug(f'***** rechecking...{tr.subreddit_name}, {tr.active_status_enum}'
                   f' last updated:{tr.last_updated} last config check:{tr.config_last_checked}')
 
             sub_info = wd.ri.get_subreddit_info(tr.subreddit_name)
@@ -186,8 +187,8 @@ def update_sub_list(wd: WorkingData, intensity=0):
             wd.s.add(tr)
 
         # skip adding  if config is NOT okay
-        if tr.active_status < 4:
-            log.info(f" active status for {tr.subreddit_name} is {tr.active_status},  skipping")
+        if tr.active_status_enum in (SubStatus.YAML_SYNTAX_ERROR, SubStatus.NO_CONFIG, SubStatus.CONFIG_ACCESS_ERROR):
+            log.info(f" active status for {tr.subreddit_name} is {tr.active_status_enum},  skipping")
             continue  # don't bother with this
 
         # Attempt to load config assuming it's okay
@@ -195,7 +196,7 @@ def update_sub_list(wd: WorkingData, intensity=0):
             worked, status = tr.reload_yaml_settings()
             wd.s.add(tr)
             if not worked:
-                log.info(f" active status for {tr.subreddit_name} is {tr.active_status},  skipping")
+                log.info(f" active status for {tr.subreddit_name} is {tr.active_status_enum},  skipping")
                 continue
 
         # Add sub to dict to check

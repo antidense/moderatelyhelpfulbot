@@ -197,8 +197,8 @@ class RedditInterface:
                 already_done = True
             except(praw.exceptions.RedditAPIException):
                 subreddit.mm_convo_id = None
-            except (praw.exceptions.APIException, prawcore.exceptions.Forbidden, AttributeError):
-                logger.warning('something went wrong in sending modmail')
+            except (praw.exceptions.APIException, prawcore.exceptions.Forbidden, AttributeError) as e:
+                logger.warning(f'something went wrong in sending modmail {e}')
                 already_done = True
 
 
@@ -208,8 +208,8 @@ class RedditInterface:
                 conversation = self.reddit_client.subreddit(subreddit_name).message(subject=subject, message=body)
                 if subreddit:
                     subreddit.mm_convo_id = conversation.id  # won't get saved?
-            except (praw.exceptions.APIException, prawcore.exceptions.Forbidden, AttributeError):
-                logger.warning('something went wrong in sending modmail')
+            except (praw.exceptions.APIException, prawcore.exceptions.Forbidden, AttributeError) as e:
+                logger.warning(f'something went wrong in sending modmail {e}')
 
         return conversation
 
@@ -268,7 +268,7 @@ class SubmissionInfo:
 
 class SubredditInfo:
     subreddit_api_handle = None
-    active_status = SubStatus.UNKNOWN.value
+    active_status_enum = SubStatus.UNKNOWN
     subreddit_name = None
     mod_list = None
     settings_yaml_txt = None
@@ -282,13 +282,13 @@ class SubredditInfo:
         self.subreddit_api_handle = ri.reddit_client.subreddit(subreddit_name)
 
         if not self.subreddit_api_handle:  # Subreddit doesn't exist
-            self.active_status = SubStatus.SUB_GONE.value
+            self.active_status_enum = SubStatus.SUB_GONE
             return
 
-        active_status, response = self.check_sub_access(ri)
-        print(active_status, response)
-        self.active_status = active_status.value
-        if active_status.value > 0:
+        active_status_enum, response = self.check_sub_access(ri)
+        print(active_status_enum, response)
+        self.active_status_enum = active_status_enum
+        if active_status_enum.value > 0:
             self.is_nsfw = self.subreddit_api_handle.over18
         else:
             print(f"ri/csa: sub {subreddit_name} has this issue: {response}")
