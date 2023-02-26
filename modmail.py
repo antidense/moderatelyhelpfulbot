@@ -243,16 +243,15 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
                         "Please remove it.  " \
                         f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{MAIN_BOT_NAME}. "
 
-        # sub_status_code =
-        sub_status_enum = tr_sub.active_status_enum
 
+        sub_status_enum =
         reply_text = f"Received message to update config for {subreddit_name}.  See the output below. {status}" \
                      f"Please message [/r/moderatelyhelpfulbot](https://www.reddit.com/" \
                      f"message/old?to=%2Fr%2Fmoderatelyhelpfulbot) if you have any questions \n\n" \
                      f"Update report: \n\n >{help_text}" \
-                     f"\n\nCurrent Status: {sub_status_code}: {sub_status_enum}  "
+                     f"\n\nCurrent Status: {tr_sub.active_status_enum}  "
         bot_owner_message = f"subreddit: {subreddit_name}\n\nrequestor: {requestor_name}\n\n" \
-                            f"report: {status}\n\nCurrent Status: {sub_status_code}: {sub_status_enum}  "
+                            f"report: {status}\n\nCurrent Status: {tr_sub.active_status_enum}  "
         # wd.ri.reddit_client.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
         try:
             assert isinstance(requestor_name, str)
