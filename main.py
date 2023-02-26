@@ -110,7 +110,7 @@ class Task:
 
 
 def check_submissions(wd):
-    chunk_size = 300
+    chunk_size = 150
     assert isinstance(wd.sub_dict, dict)
     wd.sub_list = list(wd.sub_dict.keys())
     chunked_list = [wd.sub_list[j:j + chunk_size] for j in range(0, len(wd.sub_list), chunk_size)]

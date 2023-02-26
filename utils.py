@@ -576,7 +576,7 @@ def look_for_rule_violations4(wd):
             logger.debug(f"skipping this sub for some reason {pg.subreddit_name} ")
             continue
         max_count = tr_sub.max_count_per_interval
-        if tr_sub.active_status_enum.value not in (SubStatus.ACTIVE, SubStatus.NO_BAN_ACCESS):
+        if tr_sub.active_status_enum not in (SubStatus.ACTIVE, SubStatus.NO_BAN_ACCESS):
             logger.warning(f"Subreddit is not active {tr_sub.subreddit_name} {tr_sub.active_status_enum}")
             continue
 
@@ -1305,7 +1305,7 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
         print("GSBN: creating sub...")
         sub_info = wd.ri.get_subreddit_info(subreddit_name=subreddit_name)  # get subreddit info for sub from api
         if subreddit_name == MAIN_BOT_NAME or \
-                (sub_info and sub_info.active_status_enum.value >= 0):   # make sure sub is accessible
+                (sub_info and sub_info.active_status_enum not in (SubStatus.SUB_FORBIDDEN, SubStatus.SUB_GONE)):   # make sure sub is accessible
             tr_sub = TrackedSubreddit(subreddit_name=subreddit_name, sub_info=sub_info)  # add sub to sb
             wd.s.add(tr_sub)
             wd.s.commit()
