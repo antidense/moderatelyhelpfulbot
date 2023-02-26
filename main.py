@@ -190,7 +190,7 @@ def update_sub_list(wd: WorkingData, intensity=0):
             wd.s.add(tr)
 
         # skip adding  if config is NOT okay
-        if tr.active_status_enum in (SubStatus.YAML_SYNTAX_ERROR, SubStatus.NO_CONFIG, SubStatus.CONFIG_ACCESS_ERROR):
+        if tr.active_status_enum in (SubStatus.YAML_SYNTAX_ERROR, SubStatus.NO_CONFIG, SubStatus.CONFIG_ACCESS_ERROR, SubStatus.BOT_NOT_PRIMARY):
             log.info(f" active status for {tr.subreddit_name} is {tr.active_status_enum},  skipping")
             continue  # don't bother with this
 
