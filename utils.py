@@ -185,9 +185,8 @@ def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPo
 
 
 def automated_reviews(wd):
-    print("AR: excluding mod posts...")
+    logger.debug("AR: excluding mod posts...")
     now_date = datetime.now(pytz.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
-    print(f"now date {now_date}")
 
     # ignore moderators
     """
@@ -205,10 +204,10 @@ def automated_reviews(wd):
                    'WHERE t.counted_status < 1 and t.reviewed = 0 and s.mod_list like CONCAT("%", t.author, "%") ',
                    {"counted_status": CountedStatus.MODPOST_EXEMPT.value,
                     "last_reviewed": now_date})
-    print(rs.rowcount)
+    logger.debug(rs.rowcount)
 
 
-    print("AR: excluding self posts...")
+    logger.debug("AR: excluding self posts...")
     # ignore self posts
     rs = wd.s.execute("UPDATE RedditPost t "
                    "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
@@ -218,7 +217,7 @@ def automated_reviews(wd):
                    {"counted_status": CountedStatus.SELF_EXEMPT.value,
                     "banned_by": "AutoModerator",
                     "last_reviewed": now_date})
-    print(rs.rowcount)
+    logger.debug(rs.rowcount)
 
     """  No one has excluded link posts...
     print("AR: excluding link posts...")
@@ -232,7 +231,7 @@ def automated_reviews(wd):
     print(rs.rowcount)
     """
 
-    print("AR excluding OC posts")
+    logger.debug("AR excluding OC posts")
     # ignore OC
     rs = wd.s.execute("UPDATE RedditPost t "
                    "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
@@ -243,7 +242,7 @@ def automated_reviews(wd):
                     "last_reviewed": now_date})
 
     #ignore autoremoved
-    print("AR excluding autoremoved posts...")
+    logger.debug("AR excluding autoremoved posts...")
     rs = wd.s.execute("UPDATE RedditPost t "
                    "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
                    "SET counted_status = :counted_status, reviewed = 1, last_reviewed = :last_reviewed "
@@ -252,8 +251,8 @@ def automated_reviews(wd):
                    {"counted_status": CountedStatus.AM_RM_EXEMPT.value,
                     "posted_status": PostedStatus.AUTOMOD_RM.value,
                     "last_reviewed": now_date})
-    print(rs.rowcount)
-    print("AR excluding moderator removed posts...DOES NOT INCLUDE Flair helper??")
+    logger.debug(rs.rowcount)
+    logger.debug("AR excluding moderator removed posts...DOES NOT INCLUDE Flair helper??")
     # ignore link posts
     rs = wd.s.execute("UPDATE RedditPost t "
                    "INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name "
@@ -263,9 +262,9 @@ def automated_reviews(wd):
                    {"counted_status": CountedStatus.MOD_RM_EXEMPT.value,
                     "posted_status": PostedStatus.MOD_RM.value,
                     "last_reviewed": now_date})
-    print(rs.rowcount)
+    logger.debug(rs.rowcount)
 
-    print("AR: excluding author flair")
+    logger.debug("AR: excluding author flair")
     rs = wd.s.execute('UPDATE RedditPost t '
                    'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
                    'SET counted_status = :counted_status, reviewed = 1, last_reviewed = :last_reviewed '
@@ -274,8 +273,8 @@ def automated_reviews(wd):
                    'AND t.author_flair REGEXP s.author_exempt_flair_keyword ',
                    {"counted_status": CountedStatus.FLAIR_EXEMPT.value,
                     "last_reviewed": now_date})
-    print(rs.rowcount)
-    print("AR: author flair inclusion")
+    logger.debug(rs.rowcount)
+    logger.debug("AR: author flair inclusion")
     rs = wd.s.execute('UPDATE RedditPost t '
                    'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
                    'SET counted_status = :counted_status, reviewed = 1, last_reviewed = :last_reviewed  '
@@ -286,8 +285,8 @@ def automated_reviews(wd):
                    ')',
                    {"counted_status": CountedStatus.FLAIR_EXEMPT.value,
                     "last_reviewed": now_date})
-    print(rs.rowcount)
-    print("AR: excluding title/post_flair")
+    logger.debug(rs.rowcount)
+    logger.debug("AR: excluding title/post_flair")
     rs = wd.s.execute('UPDATE RedditPost t '
                    'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
                    'SET counted_status = :counted_status, reviewed = 1 , last_reviewed = :last_reviewed  '
@@ -296,8 +295,8 @@ def automated_reviews(wd):
                    'AND CONCAT(t.title, COALESCE(t.post_flair)) REGEXP s.author_exempt_flair_keyword ',
                    {"counted_status": CountedStatus.TITLE_KW_EXEMPT.value,
                     "last_reviewed": now_date})
-    print(rs.rowcount)
-    print("AR: inclusion title/post flair - reversed")
+    logger.debug(rs.rowcount)
+    logger.debug("AR: inclusion title/post flair - reversed")
     rs = wd.s.execute('UPDATE RedditPost t '
                    'INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name '
                    'SET counted_status = :counted_status, reviewed = 1, last_reviewed = :last_reviewed  '
@@ -306,7 +305,9 @@ def automated_reviews(wd):
                    'AND NOT (CONCAT(t.title, COALESCE(t.post_flair)) REGEXP s.title_not_exempt_keyword)',
                    {"counted_status": CountedStatus.TITLE_KW_EXEMPT.value,
                     "last_reviewed": now_date})
-    print(rs.rowcount)
+    logger.debug(rs.rowcount)
+
+
 
     """
     logger.info(f"finding blacklist violations")
@@ -352,7 +353,7 @@ def automated_reviews(wd):
                                             do_actual_comment=False)
         else:
             logger.info(f"Making comment is not set")
-        op.counted_status = 503
+        op.counted_status = CountedStatus.BLKLIST_NEED_REMOVE.value
         op.reviewed = True
         logger.info(f"added to blacklist: {j} {op.author} {op.title} {op.counted_status}")
         wd.s.add(op)
@@ -770,8 +771,8 @@ def look_for_rule_violations4(wd):
 
 def look_for_rule_violations3(wd):
 
+    # need to rule out easy ones - moderators, etc.
     automated_reviews(wd)
-    do_reddit_actions(wd)
 
     print(f"LRWT: querying recent post(s)")
     posting_groups = []
@@ -1035,6 +1036,7 @@ def look_for_rule_violations3(wd):
                 wd.s.add(subreddit_author)
             # Must take action on post
             else:
+                logger.info("post needs action - identifyinig action")
                 do_requested_action_for_valid_reposts(tr_sub, post, associated_reposts, wd=wd)
                 # post.update_status(reviewed=True, flagged_duplicate=True)
                 wd.s.add(post)
@@ -1065,6 +1067,7 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
         if message is True:
             message = "Repost that violates rules: [{title}]({url}) by [{author}](/u/{author})"
         # send_modmail_populate_tags(tr_sub, message, recent_post=recent_post, prev_post=possible_repost, )
+        logger.debug("sending modmail notification)")
         wd.ri.send_modmail(subreddit=tr_sub,
                            body=tr_sub.populate_tags(message, recent_post=recent_post, prev_post=possible_repost),
                            subject="[Notification] Post that violates rule frequency restriction", use_same_thread=True)
@@ -1072,7 +1075,9 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
         recent_post.counted_status = CountedStatus.NEED_REMOVE.value
         logger.debug(f"Post marked for removal {recent_post.subreddit_name} {recent_post.id} {recent_post.author}")
 
+
     if tr_sub.action == "report":
+        logger.debug("reporting post")
         if tr_sub.report_reason:
             rp_reason = tr_sub.populate_tags(tr_sub.report_reason, recent_post=recent_post, prev_post=possible_repost)
             wd.ri.get_submission_api_handle(recent_post).report(f"{bot_name}: {rp_reason}"[0:99])
@@ -1084,10 +1089,9 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
                 recent_post).author.message("Regarding your post", tr_sub.populate_tags(tr_sub.message,
                                                                                         recent_post=recent_post,
                                                                                         post_list=most_recent_reposts))
-        except praw.exceptions.APIException:
-            logger.debug("\tcould not remove post")
-        except prawcore.exceptions.Forbidden:
-            logger.debug("\tcould not remove post: Forbidden")
+        except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
+            logger.debug("\tcould not send message")
+
 
 
 def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: SubmittedPost,
@@ -1230,12 +1234,13 @@ def make_comment(subreddit: TrackedSubreddit, recent_post: SubmittedPost, most_r
     prev_submission = most_recent_reposts[-1] if most_recent_reposts else None
     if not next_eligibility:
         next_eligibility = most_recent_reposts[0].time_utc + subreddit.min_post_interval
+        recent_post.next_eligible = next_eligibility
     # print(most_recent_reposts)
     reposts_str = ",".join(
         [f" [{a.id}]({a.get_comments_url()})" for a in most_recent_reposts]) \
         if most_recent_reposts and most_recent_reposts[0] else "BL"
     if blacklist:
-        reposts_str = " Temporary lock out per" + reposts_str
+        reposts_str = " Temporary lock out per " + reposts_str
     else:
         reposts_str = " Previous post(s):" + reposts_str
     ids = f"{reposts_str} | limit: {{maxcount}} per {{interval}} | " \

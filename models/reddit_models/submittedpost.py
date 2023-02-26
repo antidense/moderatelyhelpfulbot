@@ -51,6 +51,8 @@ class SubmittedPost(dbobj.Base):  # need posted_status
     reply_comment = Column(UnicodeText, nullable=True)
     last_reviewed = Column(DateTime, nullable=False)
 
+    next_eligible = Column(DateTime, nullable=False)
+
     api_handle = None
 
     def __init__(self, submission, save_text: bool = False):
@@ -109,6 +111,7 @@ class SubmittedPost(dbobj.Base):  # need posted_status
             self.nsfw_repliers_checked = False
             self.posted_status = PostedStatus.UNKNOWN.value
             self.is_oc = subm_info.is_oc
+
 
     def get_url(self) -> str:
         return f"http://redd.it/{self.id}"

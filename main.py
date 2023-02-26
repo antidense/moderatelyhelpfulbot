@@ -18,7 +18,7 @@ from core import dbobj
 from workingdata import WorkingData
 from nsfw_monitoring import check_post_nsfw_eligibility, nsfw_checking
 from modmail import handle_modmail_message, handle_modmail_messages, handle_dm_command, handle_direct_messages
-from utils import check_spam_submissions, check_new_submissions
+from utils import check_spam_submissions, check_new_submissions, do_reddit_actions
 
 
 from logger import logger as log
@@ -129,6 +129,7 @@ def main_loop():
     log.debug(f"My name is {wd.bot_name}")
 
     tasks = [Task(wd, 'purge_old_records', timedelta(hours=12)),
+             Task(wd, 'do_reddit_actions', timedelta(minutes=1)),
              Task(wd, 'update_sub_list', timedelta(hours=2)),
              Task(wd, 'handle_direct_messages', timedelta(minutes=1)),
              Task(wd, 'handle_modmail_messages', timedelta(minutes=1)),
