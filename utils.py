@@ -1074,6 +1074,8 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
     if tr_sub.action == "remove":
         recent_post.counted_status = CountedStatus.NEED_REMOVE.value
         logger.debug(f"Post marked for removal {recent_post.subreddit_name} {recent_post.id} {recent_post.author}")
+        if len(most_recent_reposts) >3:
+            soft_blacklist(tr_sub, recent_post, recent_post.next_eligible, wd=wd)
 
 
     if tr_sub.action == "report":
@@ -1338,7 +1340,7 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
 
             # if hasattr(sub_info, 'yaml_settings_text'):
             #     print(f"GSBN: settings: {sub_info.yaml_settings_text}")
-            # else:
+            # else:z
             #     print(f"GSBN: no luck in getting yaml text  {tr_sub.subreddit_name}")
             # worked, status = tr_sub.update_from_subinfo(sub_info)
             # worked, status = tr_sub.reload_yaml_settings()

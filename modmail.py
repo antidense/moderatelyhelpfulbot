@@ -244,7 +244,7 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
                         f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{MAIN_BOT_NAME}. "
 
 
-        sub_status_enum =
+
         reply_text = f"Received message to update config for {subreddit_name}.  See the output below. {status}" \
                      f"Please message [/r/moderatelyhelpfulbot](https://www.reddit.com/" \
                      f"message/old?to=%2Fr%2Fmoderatelyhelpfulbot) if you have any questions \n\n" \
