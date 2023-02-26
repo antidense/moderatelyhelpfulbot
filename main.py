@@ -185,6 +185,9 @@ def update_sub_list(wd: WorkingData, intensity=0):
             tr.update_from_subinfo(sub_info)  # repopulate db with new values/settings from sub
             tr.config_last_checked = datetime.now()  # record this is updated
             wd.s.add(tr)
+        if wd.ri.bot_name.lower() == "moderatelyhelpfulbot" and "moderatelyusefulbot" in tr.mod_list.lower():
+            tr.active_status_enum = SubStatus.BOT_NOT_PRIMARY
+            wd.s.add(tr)
 
         # skip adding  if config is NOT okay
         if tr.active_status_enum in (SubStatus.YAML_SYNTAX_ERROR, SubStatus.NO_CONFIG, SubStatus.CONFIG_ACCESS_ERROR):

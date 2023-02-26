@@ -13,5 +13,6 @@ class SubStatus(Enum):
     NO_MOD_PRIV = 0 # recheck daily
     SUB_GONE = -1  # never recheck
     SUB_FORBIDDEN = -2   # never recheck
+    BOT_NOT_PRIMARY = 6  # this isn't the primary bot for this sub - should ignore this sub
 
 #☑ sub exists(0); ☑ mod access(1); ☑ wiki access (2); ☑ found config file(3); ☑ config syntax ok(5); ☑ config ok(6); ☑ ban access (9)
