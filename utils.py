@@ -46,6 +46,7 @@ def check_new_submissions(wd: WorkingData, query_limit=800, sub_list='mod', inte
         previous_post: SubmittedPost = wd.s.query(SubmittedPost).get(post_to_review.id)
         if previous_post:  # seen this post before -> ignore posts from this  sub
             subreddit_names_complete.append(subreddit_name)
+            # logger.info(f"seen this post before {subreddit_name} {post_to_review.id}")
             continue
         if not previous_post:  # have not seen this post, add to db
             post = SubmittedPost(post_to_review)
@@ -407,7 +408,6 @@ def do_reddit_actions(wd):
         wd.s.add(op)
     wd.s.commit()
 
-
 def look_for_rule_violations4(wd):
     # automated_reviews(wd)
     last_reviews = datetime.now(pytz.utc)
@@ -489,17 +489,24 @@ def look_for_rule_violations4(wd):
                 posts_checked[pp_id]=pp
 
 
+def look_for_rule_violations3(wd):
 
-
+    # need to rule out easy ones - moderators, etc.
+    automated_reviews(wd)
 
     print(f"LRWT: querying recent post(s)")
     posting_groups = []
     most_recent_identified = None
-    posts_to_verify = wd.s.query(SubmittedPost).filter(SubmittedPost.reviewed == 0,
-                                                       SubmittedPost.counted_status < 1,
-                                                       SubmittedPost.review_debug.like("ma:%"),
-                                                       SubmittedPost.time_utc > datetime.now() - timedelta(hours=48)
-                                                       ).order_by(SubmittedPost.added_time.desc()).all()
+
+    posts_to_verify = wd.s.query(SubmittedPost) \
+        .join(TrackedSubreddit, TrackedSubreddit.subreddit_name == SubmittedPost.subreddit_name, isouter=False) \
+        .filter(SubmittedPost.reviewed == 0,
+                SubmittedPost.counted_status < 1,
+                SubmittedPost.review_debug.like("ma:%"),
+                SubmittedPost.time_utc > datetime.now() - timedelta(hours=48),
+                TrackedSubreddit.active_status_enum.in_((SubStatus.ACTIVE,SubStatus.NO_BAN_ACCESS))
+                ).order_by(SubmittedPost.added_time.desc()).all()
+
     for post in posts_to_verify:
         if not most_recent_identified:
             most_recent_identified = post
@@ -512,13 +519,15 @@ def look_for_rule_violations4(wd):
         posting_groups.append(
             PostingGroup(post.id, author_name=post.author, subreddit_name=post.subreddit_name, posts=posts))
 
+    logger.debug(f"leftover posts from before: {len(posting_groups)}")
+
     if not most_recent_identified:
         most_recent_identified: SubmittedPost | None = wd.s.query(SubmittedPost) \
             .filter(SubmittedPost.review_debug.like("ma:%")) \
             .order_by(SubmittedPost.added_time).first()
 
     # AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL)
-    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, GROUP_CONCAT(t.counted_status ORDER BY t.id), COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status >7 and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND MAX(added_time) > :look_back  ORDER BY most_recent desc ;"
+    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, GROUP_CONCAT(t.counted_status ORDER BY t.id), COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status_enum FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status_enum in ('ACTIVE', 'NO_BAN_ACCESS') and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND MAX(added_time) > :look_back  ORDER BY most_recent desc ;"
     # more_accurate_statement.replace("[date]")
     search_back = 48
     more_accurate_statement = more_accurate_statement.replace('72', str(search_back))
@@ -526,13 +535,13 @@ def look_for_rule_violations4(wd):
     tick = datetime.now()
     last_date = most_recent_identified.added_time.isoformat() \
         if most_recent_identified and most_recent_identified.added_time else "2022-06-30 00:00:00"
-    print(f"doing more accurate {datetime.now()} last date:{last_date}")
+    logger.debug(f"doing more accurate {datetime.now()} last date:{last_date}")
     # last_date = "2022-06-30 00:00:00"  # REMOVE THIS!!!!!!!!!!!!!!!!!!!!!!!
     rs = wd.s.execute(more_accurate_statement, {"look_back": last_date})
-    print(f"query took this long {datetime.now() - tick}")
+    logger.debug(f"query took this long {datetime.now() - tick}")
 
     for row in rs:
-        print(row[0], row[1], row[2], row[3], row[4], row[5])
+        logger.debug(row[0], row[1], row[2], row[3], row[4], row[5])
         post_ids = row[1].replace("ma:", "").split(',')
         posts = []
         for post_id in post_ids:
@@ -552,15 +561,15 @@ def look_for_rule_violations4(wd):
                 PostingGroup(last_post.id, author_name=row[3], subreddit_name=row[4].lower(), posts=posts))
     wd.s.commit()
 
-    print(f"Total groups found: {len(posting_groups)}")
+    logger.debug(f"Total groups found: {len(posting_groups)}")
     tick = datetime.now(pytz.utc)
 
-    print(f"sorting list...", end="")
+    logger.debug(f"sorting list...", end="")
     posting_groups.sort(key=lambda y: y.latest_post_id, reverse=True)
-    print(f"done")
+    logger.debug(f"done")
     # Go through posting group
     for i, pg in enumerate(posting_groups):
-        print(
+        logger.debug(
             f"========================{i + 1}/{len(posting_groups)}============{search_back}=====================")
 
         # Break if taking too long
@@ -586,7 +595,7 @@ def look_for_rule_violations4(wd):
 
         # Remove any posts that are prior to eligibility
         posts_to_verify = []
-        print(f"/r/{pg.subreddit_name}---max_count: {max_count}, interval: {tr_sub.min_post_interval_txt} "
+        logger.debug(f"/r/{pg.subreddit_name}---max_count: {max_count}, interval: {tr_sub.min_post_interval_txt} "
               f"grace_period: {tr_sub.grace_period}")
         for j, post in enumerate(pg.posts):
             assert (isinstance(post, SubmittedPost))
@@ -655,7 +664,7 @@ def look_for_rule_violations4(wd):
         wd.s.commit()
 
         # Collect all relevant posts
-        print("finding back posts")
+        logger.debug("finding back posts")
         back_posts = wd.s.query(SubmittedPost) \
             .filter(
             # SubmittedPost.flagged_duplicate.is_(False), # redundant with new flag
@@ -679,7 +688,7 @@ def look_for_rule_violations4(wd):
             continue
 
         # Check backposts
-        print("reviwing back posts")
+        logger.debug("reviwing back posts")
         for j, post in enumerate(back_posts):
             logger.debug(f"{i}-{j} Backpost: {post.time_utc} url:{post.get_url()}  title:{post.title[0:30]}"
                         f"\t counted_status: {post.counted_status} posted_status: {post.posted_status} ")
@@ -707,314 +716,32 @@ def look_for_rule_violations4(wd):
             # Go through possible preposts for left over post
             associated_reposts = []
             for x in possible_pre_posts:
-                print(f"\tpost time:{post.time_utc} prev:{x.time_utc} "
+                logger.debug(f"\tpost time:{post.time_utc} prev:{x.time_utc} "
                       f"furthestback: {post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period}")
                 if x.time_utc < post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period:
                     if post.time_utc - x.time_utc > tr_sub.min_post_interval:
-                        print("\t\t Post too far back")
+                        logger.debug("\t\t Post too far back")
                     else:
-                        print("\t\t Post too far back - only grace peroid")
+                        logger.debug("\t\t Post too far back - only grace peroid")
                         # post.update(counted_status=CountedStatus.GRACE_PERIOD_EXEMPT)
                         # s.add(post)
                     continue
                 if x.id == post.id or x.time_utc > post.time_utc:
-                    print("\t\t Same or future post - breaking loop")
+                    logger.debug("\t\t Same or future post - breaking loop")
                     break
                 status = wd.ri.get_posted_status(x, get_removed_info=True)
-                print(f"\t\tpost status: {status} gp:{tr_sub.grace_period} diff: {post.time_utc - x.time_utc}")
+                logger.debug(f"\t\tpost status: {status} gp:{tr_sub.grace_period} diff: {post.time_utc - x.time_utc}")
                 if status == PostedStatus.SELF_DEL and post.time_utc - x.time_utc < tr_sub.grace_period:
-                    print("\t\t Grace period exempt")
+                    logger.debug("\t\t Grace period exempt")
                     grace_count += 1
                     if grace_count < 3:
-                        print("\t\t Grace period exempt")
+                        logger.debug("\t\t Grace period exempt")
 
                         post.counted_status=CountedStatus.GRACE_PERIOD_EXEMPT.value
                         wd.s.add(post)
                         continue
                     else:
-                        print("\t\t Too many grace exemptions")
-                associated_reposts.append(x)
-
-            # not enough posts
-            if len(associated_reposts) < tr_sub.max_count_per_interval:
-                logger.debug(f"\tNot enough previous posts: {len(associated_reposts)}/{max_count}: "
-                            f"{','.join([x.id for x in associated_reposts])}")
-                post.reviewed=True
-
-            # Hall pass eligible
-            elif subreddit_author and subreddit_author.hall_pass > 0:
-                subreddit_author.hall_pass -= 1
-                notification_text = f"Hall pass was used by {subreddit_author.author_name}: http://redd.it/{post.id}"
-                # REDDIT_CLIENT.redditor(BOT_OWNER).message(pg.subreddit_name, notification_text)
-
-                wd.ri.send_modmail(subreddit=tr_sub, subject="[Notification]  Hall pass was used",
-                                   body=notification_text)
-                # tr_sub.send_modmail(subject="[Notification]  Hall pass was used", body=notification_text)
-                post.counted_status=CountedStatus.HALLPASS.value
-                wd.s.add(subreddit_author)
-            # Must take action on post
-            else:
-                do_requested_action_for_valid_reposts(tr_sub, post, associated_reposts, wd=wd)
-                # post.update_status(reviewed=True, flagged_duplicate=True)
-                wd.s.add(post)
-                # Keep preduplicate posts to keep track of later
-                for predupe_post in associated_reposts:
-                    predupe_post.pre_duplicate = True
-                    wd.s.add(predupe_post)
-                wd.s.commit()  # just did a lot of work, need to save
-                check_for_actionable_violations(tr_sub, post, associated_reposts, wd=wd)
-            wd.s.add(post)
-        wd.s.commit()
-
-    wd.s.commit()
-
-
-def look_for_rule_violations3(wd):
-
-    # need to rule out easy ones - moderators, etc.
-    automated_reviews(wd)
-
-    print(f"LRWT: querying recent post(s)")
-    posting_groups = []
-    most_recent_identified = None
-    posts_to_verify = wd.s.query(SubmittedPost).filter(SubmittedPost.reviewed == 0,
-                                                       SubmittedPost.counted_status < 1,
-                                                       SubmittedPost.review_debug.like("ma:%"),
-                                                       SubmittedPost.time_utc > datetime.now() - timedelta(hours=48)
-                                                       ).order_by(SubmittedPost.added_time.desc()).all()
-    for post in posts_to_verify:
-        if not most_recent_identified:
-            most_recent_identified = post
-        assert isinstance(post, SubmittedPost)
-        post_ids = post.review_debug.replace("ma:", "").split(',')
-
-        posts = []
-        for post_id in post_ids:
-            posts.append(wd.s.query(SubmittedPost).get(post_id))
-        posting_groups.append(
-            PostingGroup(post.id, author_name=post.author, subreddit_name=post.subreddit_name, posts=posts))
-
-    if not most_recent_identified:
-        most_recent_identified: SubmittedPost | None = wd.s.query(SubmittedPost) \
-            .filter(SubmittedPost.review_debug.like("ma:%")) \
-            .order_by(SubmittedPost.added_time).first()
-
-    # AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL)
-    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, GROUP_CONCAT(t.counted_status ORDER BY t.id), COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status_enum FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status_enum in ('ACTIVE', 'NO_BAN_ACCESS') and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND MAX(added_time) > :look_back  ORDER BY most_recent desc ;"
-    # more_accurate_statement.replace("[date]")
-    search_back = 48
-    more_accurate_statement = more_accurate_statement.replace('72', str(search_back))
-
-    tick = datetime.now()
-    last_date = most_recent_identified.added_time.isoformat() \
-        if most_recent_identified and most_recent_identified.added_time else "2022-06-30 00:00:00"
-    print(f"doing more accurate {datetime.now()} last date:{last_date}")
-    # last_date = "2022-06-30 00:00:00"  # REMOVE THIS!!!!!!!!!!!!!!!!!!!!!!!
-    rs = wd.s.execute(more_accurate_statement, {"look_back": last_date})
-    print(f"query took this long {datetime.now() - tick}")
-
-    for row in rs:
-        print(row[0], row[1], row[2], row[3], row[4], row[5])
-        post_ids = row[1].replace("ma:", "").split(',')
-        posts = []
-        for post_id in post_ids:
-            # print(f"\t{post_id}")
-            posts.append(wd.s.query(SubmittedPost).get(post_id))
-        # print(row[0], row[1], row[2], row[3], row[4])
-        # post = s.query(SubmittedPost).get(row[0])
-        # predecessors = row[1].split(',')
-        # predecessors_times = row[2].split(',')
-
-        last_post = posts[-1]
-        assert isinstance(last_post, SubmittedPost)
-        if not last_post.review_debug:
-            last_post.review_debug = f"ma:{row[1]}"
-            wd.s.add(last_post)
-        posting_groups.append(
-                PostingGroup(last_post.id, author_name=row[3], subreddit_name=row[4].lower(), posts=posts))
-    wd.s.commit()
-
-    print(f"Total groups found: {len(posting_groups)}")
-    tick = datetime.now(pytz.utc)
-
-    print(f"sorting list...", end="")
-    posting_groups.sort(key=lambda y: y.latest_post_id, reverse=True)
-    print(f"done")
-    # Go through posting group
-    for i, pg in enumerate(posting_groups):
-        print(
-            f"========================{i + 1}/{len(posting_groups)}============{search_back}=====================")
-
-        # Break if taking too long
-        tock = datetime.now(pytz.utc) - tick
-        if tock > timedelta(minutes=10):
-            logger.debug("Aborting, taking more than 10 min")
-            wd.s.commit()
-            break
-
-        # Load subreddit settings
-        # tr_sub = wd.sub_dict[pg.subreddit_name]
-        tr_sub = get_subreddit_by_name(wd, pg.subreddit_name, update_if_due=False)
-        if not tr_sub:
-            logger.debug(f"skipping this sub for some reason {pg.subreddit_name} ")
-            continue
-        max_count = tr_sub.max_count_per_interval
-        if tr_sub.active_status_enum not in (SubStatus.ACTIVE, SubStatus.NO_BAN_ACCESS):
-            logger.debug(f"Subreddit is not active {tr_sub.subreddit_name} {tr_sub.active_status_enum}")
-            continue
-
-        # Check if they're on the soft blacklist
-        subreddit_author: SubAuthor = wd.s.query(SubAuthor).get((pg.subreddit_name, pg.author_name))
-
-        # Remove any posts that are prior to eligibility
-        posts_to_verify = []
-        print(f"/r/{pg.subreddit_name}---max_count: {max_count}, interval: {tr_sub.min_post_interval_txt} "
-              f"grace_period: {tr_sub.grace_period}")
-        for j, post in enumerate(pg.posts):
-            assert (isinstance(post, SubmittedPost))
-            logger.debug(
-                f"{i}-{j}Checking: "
-                f"{pg.author_name} {post.time_utc} url:{post.get_url()} reviewed:{post.reviewed}  "
-                f"counted:{post.counted_status} "
-                f"posted:{post.posted_status}  title:{post.title[0:30]}")
-
-            if post.counted_status == CountedStatus.BLKLIST.value:  # May not need this later
-                logger.debug(
-                    f"{i}-{j}\t\tAlready handled")
-                continue
-
-            # Check for soft blacklist
-            """
-            if subreddit_author and subreddit_author.next_eligible and post.time_utc \
-                    and post.time_utc < subreddit_author.next_eligible:
-                # this will ignore if too old
-                logger.info(
-                    f"{i}-{j}\t\tpost removed - prior to eligibility")
-                try:
-                    if tick.replace(tzinfo=None) - timedelta(hours=24) < post.time_utc:
-                        post.counted_status = CountedStatus.AGED_OUT
-                        success = False
-                    else:
-                        success = wd.ri.mod_remove(post)  # no checking if it can't remove post
-                    if success and tr_sub.comment:
-                        last_valid_post: SubmittedPost = wd.s.query(SubmittedPost).get(
-                            subreddit_author.last_valid_post) if subreddit_author.last_valid_post is not None else None
-                        make_comment(tr_sub, post, [last_valid_post, ],
-                                     tr_sub.comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve,
-                                     lock_thread=tr_sub.lock_thread, stickied=tr_sub.comment_stickied,
-                                     next_eligibility=subreddit_author.next_eligible, blacklist=True, wd=wd)
-                        post.update_status(reviewed=True, flagged_duplicate=True, counted_status=CountedStatus.BLKLIST)
-                        wd.s.add(post)
-                except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
-                    logger.warning(f'something went wrong in removing post {str(e)}')
-            """
-            # Check for post exemptions
-            if not post.reviewed:
-
-                counted_status, result = check_for_post_exemptions(tr_sub, post, wd=wd)
-                post.counted_status = counted_status.value
-                #post.update_status(counted_status=counted_status)
-                wd.s.add(post)
-                logger.debug(f"\t\tpost status: {counted_status} {result}")
-                if counted_status in ( CountedStatus.COUNTS , CountedStatus.NEED_REMOVE):
-                    posts_to_verify.append(post)
-                if i % 25 == 0:
-                    wd.s.commit()
-
-            else:
-                logger.debug(f"{i}-{j}\t\tpost status: "
-                            f"already reviewed {post.counted_status} "
-                            f"{'---MHB removed' if post.flagged_duplicate else ''}")
-
-        """
-        # Skip if we don't need to go through each post
-        if len(left_over_posts) < max_count:
-            logger.info("Did not collect enough counted posts")
-            wd.s.commit()
-            continue
-        """
-
-        wd.s.commit()
-
-        # Collect all relevant posts
-        print("finding back posts")
-        back_posts = wd.s.query(SubmittedPost) \
-            .filter(
-            # SubmittedPost.flagged_duplicate.is_(False), # redundant with new flag
-            SubmittedPost.subreddit_name.ilike(tr_sub.subreddit_name),
-            SubmittedPost.time_utc > pg.posts[0].time_utc - tr_sub.min_post_interval + tr_sub.grace_period,
-            SubmittedPost.time_utc < pg.posts[-1].time_utc,  # posts not after last post in question
-            SubmittedPost.author == pg.author_name,
-            SubmittedPost.counted_status < 3) \
-            .order_by(SubmittedPost.time_utc) \
-            .all()
-
-        possible_pre_posts = []
-        logger.debug(f"Found {len(back_posts)} backposts")
-        if len(back_posts) == 0:
-            if pg.posts[-1].counted_status <2:
-                pg.posts[-1].counted_status==2
-            pg.posts[-1].reviewed = True
-            wd.s.add(pg.posts[-1])
-
-            logger.debug("Nothing to do, moving on.")
-            continue
-
-        # Check backposts
-        print("reviwing back posts")
-        for j, post in enumerate(back_posts):
-            logger.debug(f"{i}-{j} Backpost: {post.time_utc} url:{post.get_url()}  title:{post.title[0:30]}"
-                        f"\t counted_status: {post.counted_status} posted_status: {post.posted_status} ")
-            if post.counted_status == CountedStatus.NOT_CHKD.value \
-                    or post.counted_status == CountedStatus.PREV_EXEMPT.value:
-                counted_status, result = check_for_post_exemptions(tr_sub, post, wd=wd)
-                post.counted_status=counted_status.value
-                #post.update_status(counted_status=counted_status)
-                wd.s.add(post)
-                logger.debug(
-                    f"\tpost_counted_status updated: {post.counted_status} {CountedStatus(post.counted_status)}")
-            if post.counted_status == CountedStatus.COUNTS.value:
-                logger.debug(f"\t....Including")
-                possible_pre_posts.append(post)
-            else:
-                logger.debug(f"\t..exempting ")
-
-        # Go through left over posts
-        grace_count = 0
-        for j, post in enumerate(posts_to_verify):
-            logger.debug(f"{i}-{j} Reviewing: r/{pg.subreddit_name}  {pg.author_name}  {post.time_utc}  "
-                        f"url:{post.get_url()}  title:{post.title[0:30]}"
-                        f"\t counted_status: {post.counted_status} posted_status: {post.posted_status}")
-
-            # Go through possible preposts for left over post
-            associated_reposts = []
-            for x in possible_pre_posts:
-                print(f"\tpost time:{post.time_utc} prev:{x.time_utc} "
-                      f"furthestback: {post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period}")
-                if x.time_utc < post.time_utc - tr_sub.min_post_interval + tr_sub.grace_period:
-                    if post.time_utc - x.time_utc > tr_sub.min_post_interval:
-                        print("\t\t Post too far back")
-                    else:
-                        print("\t\t Post too far back - only grace peroid")
-                        # post.update(counted_status=CountedStatus.GRACE_PERIOD_EXEMPT)
-                        # s.add(post)
-                    continue
-                if x.id == post.id or x.time_utc > post.time_utc:
-                    print("\t\t Same or future post - breaking loop")
-                    break
-                status = wd.ri.get_posted_status(x, get_removed_info=True)
-                print(f"\t\tpost status: {status} gp:{tr_sub.grace_period} diff: {post.time_utc - x.time_utc}")
-                if status == PostedStatus.SELF_DEL and post.time_utc - x.time_utc < tr_sub.grace_period:
-                    print("\t\t Grace period exempt")
-                    grace_count += 1
-                    if grace_count < 3:
-                        print("\t\t Grace period exempt")
-
-                        post.counted_status=CountedStatus.GRACE_PERIOD_EXEMPT.value
-                        wd.s.add(post)
-                        continue
-                    else:
-                        print("\t\t Too many grace exemptions")
+                        logger.debug("\t\t Too many grace exemptions")
                 associated_reposts.append(x)
 
             # not enough posts
@@ -1050,6 +777,7 @@ def look_for_rule_violations3(wd):
         wd.s.commit()
 
     wd.s.commit()
+
 
 
 
