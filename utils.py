@@ -92,9 +92,9 @@ def check_spam_submissions(wd: WorkingData, sub_list='mod', intensity=0):
 
 def check_for_post_exemptions(tr_sub: TrackedSubreddit, recent_post: SubmittedPost, wd=None):  # uses some reddit api
     # check if removed
-    if recent_post.counted_status > 2:
-        return CountedStatus(recent_post.counted_status),\
-               f"previously exempted {CountedStatus(recent_post.counted_status)}"
+    if recent_post.counted_status_enum not in (CountedStatus.NEEDS_UPDATE, CountedStatus.NOT_CHKD, CountedStatus.PREV_EXEMPT, CountedStatus.COUNTS, CountedStatus.REVIEWED):
+        return CountedStatus(recent_post.counted_status_enum),\
+               f"previously exempted {CountedStatus(recent_post.counted_status_enum)}"
 
     posted_status = recent_post.posted_status
     if posted_status == PostedStatus.UNKNOWN.value \
@@ -354,9 +354,9 @@ def automated_reviews(wd):
                                             do_actual_comment=False)
         else:
             logger.info(f"Making comment is not set")
-        op.counted_status = CountedStatus.BLKLIST_NEED_REMOVE.value
+        op.counted_status_enum = CountedStatus.BLKLIST_NEED_REMOVE
         op.reviewed = True
-        logger.info(f"added to blacklist: {j} {op.author} {op.title} {op.counted_status}")
+        logger.info(f"added to blacklist: {j} {op.author} {op.title} {op.counted_status_enum}")
         wd.s.add(op)
     wd.s.commit()
 
@@ -367,7 +367,7 @@ def do_reddit_actions(wd):
 
     print("do status updates")
     to_update = wd.s.query(SubmittedPost)\
-        .filter(SubmittedPost.counted_status == CountedStatus.NEEDS_UPDATE.value)\
+        .filter(SubmittedPost.counted_status_enum == CountedStatus.NEEDS_UPDATE)\
         .filter(SubmittedPost.time_utc > datetime.now(pytz.utc).replace(tzinfo=None) - timedelta(hours=48))
     for op in to_update:
         assert(isinstance(op, SubmittedPost))
@@ -378,28 +378,28 @@ def do_reddit_actions(wd):
 
     print("do removals...")
     to_remove = wd.s.query(SubmittedPost)\
-        .filter(or_(SubmittedPost.counted_status == CountedStatus.BLKLIST_NEED_REMOVE.value,
-                    SubmittedPost.counted_status == CountedStatus.NEED_REMOVE.value))\
+        .filter(or_(SubmittedPost.counted_status_enum == CountedStatus.BLKLIST_NEED_REMOVE,
+                    SubmittedPost.counted_status_enum == CountedStatus.NEED_REMOVE))\
         .filter(SubmittedPost.time_utc > datetime.now(pytz.utc).replace(tzinfo=None) - timedelta(hours=24))
     # print(f"blacklist removals {to_remove.rowcount}")
     for op in to_remove:
-        logger.info(f'removing post {op.author} {op.title} {op.subreddit_name}')
+        # logger.info(f'removing post {op.author} {op.title} {op.subreddit_name}')
         tr_sub = get_subreddit_by_name(wd, op.subreddit_name)
         try:
             wd.ri.get_submission_api_handle(op).mod.remove()
             logger.info(f'remove successful!: {op.author} {op.title}')
             new_counted_status = CountedStatus.REMOVED \
-                if op.counted_status == CountedStatus.NEED_REMOVE.value else CountedStatus.BLKLIST
+                if op.counted_status_enum == CountedStatus.NEED_REMOVE else CountedStatus.BLKLIST
             if op.reply_comment:
                 wd.ri.reply(op, op.reply_comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve,
                             lock_thread=tr_sub.lock_thread)
-            op.counted_status = new_counted_status.value
+            op.counted_status_enum = new_counted_status
             op.reply_comment = None
         except prawcore.exceptions.Forbidden as e:
             logger.warning(f'No permission to remove post {op.author} {op.title} {op.subreddit_name} {str(e)}')
             wd.sub_dict[op.subreddit_name].active_status_enum = SubStatus.NO_REMOVE_ACCESS
             wd.s.add(wd.sub_dict[op.subreddit_name])
-            op.counted_status = CountedStatus.REMOVE_FAILED.value
+            op._enum = CountedStatus.REMOVE_FAILED
             print('test')
         except (praw.exceptions.APIException,  prawcore.exceptions.ServerError) as e:
             logger.warning(f'something went wrong in removing post {op.author} {op.title} {op.subreddit_name} {str(e)}')
@@ -474,7 +474,7 @@ def look_for_rule_violations4(wd):
 
     # First check which ones need to be checked
     posts_to_check = wd.s.query(SubmittedPost)\
-        .filter(SubmittedPost.counted_status == CountedStatus.NEEDS_UPDATE.value,
+        .filter(SubmittedPost.counted_status_enum == CountedStatus.NEEDS_UPDATE,
                 SubmittedPost.time_utc > datetime.now(pytz.utc) - timedelta(hours=48))\
         .order_by(SubmittedPost.time_utc.asc()).all()
     for post in posts_to_check:
@@ -501,7 +501,7 @@ def look_for_rule_violations3(wd):
     posts_to_verify = wd.s.query(SubmittedPost) \
         .join(TrackedSubreddit, TrackedSubreddit.subreddit_name == SubmittedPost.subreddit_name, isouter=False) \
         .filter(SubmittedPost.reviewed == 0,
-                SubmittedPost.counted_status < 1,
+                SubmittedPost.counted_status_enum.in_(CountedStatus.NEEDS_UPDATE, CountedStatus.NOT_CHKD),
                 SubmittedPost.review_debug.like("ma:%"),
                 SubmittedPost.time_utc > datetime.now() - timedelta(hours=48),
                 TrackedSubreddit.active_status_enum.in_((SubStatus.ACTIVE,SubStatus.NO_BAN_ACCESS))
@@ -602,10 +602,10 @@ def look_for_rule_violations3(wd):
             logger.debug(
                 f"{i}-{j}Checking: "
                 f"{pg.author_name} {post.time_utc} url:{post.get_url()} reviewed:{post.reviewed}  "
-                f"counted:{post.counted_status} "
+                f"counted:{post.counted_status_enum} "
                 f"posted:{post.posted_status}  title:{post.title[0:30]}")
 
-            if post.counted_status == CountedStatus.BLKLIST.value:  # May not need this later
+            if post.counted_status_enum == CountedStatus.BLKLIST:  # May not need this later
                 logger.debug(
                     f"{i}-{j}\t\tAlready handled")
                 continue
@@ -639,7 +639,7 @@ def look_for_rule_violations3(wd):
             if not post.reviewed:
 
                 counted_status, result = check_for_post_exemptions(tr_sub, post, wd=wd)
-                post.counted_status = counted_status.value
+                post.counted_status_enum = counted_status
                 #post.update_status(counted_status=counted_status)
                 wd.s.add(post)
                 logger.debug(f"\t\tpost status: {counted_status} {result}")
@@ -650,7 +650,7 @@ def look_for_rule_violations3(wd):
 
             else:
                 logger.debug(f"{i}-{j}\t\tpost status: "
-                            f"already reviewed {post.counted_status} "
+                            f"already reviewed {post.counted_status_enum} "
                             f"{'---MHB removed' if post.flagged_duplicate else ''}")
 
         """
@@ -672,15 +672,15 @@ def look_for_rule_violations3(wd):
             SubmittedPost.time_utc > pg.posts[0].time_utc - tr_sub.min_post_interval + tr_sub.grace_period,
             SubmittedPost.time_utc < pg.posts[-1].time_utc,  # posts not after last post in question
             SubmittedPost.author == pg.author_name,
-            SubmittedPost.counted_status < 3) \
+            SubmittedPost.counted_status_enum.in_((CountedStatus.NEEDS_UPDATE, CountedStatus.NOT_CHKD, CountedStatus.COUNTS))) \
             .order_by(SubmittedPost.time_utc) \
             .all()
 
         possible_pre_posts = []
         logger.debug(f"Found {len(back_posts)} backposts")
         if len(back_posts) == 0:
-            if pg.posts[-1].counted_status <2:
-                pg.posts[-1].counted_status==2
+            # if pg.posts[-1].counted_status <2:   # This doesn't make sense?? what was this supposed to do
+            #     pg.posts[-1].counted_status==2   # not an assignment!
             pg.posts[-1].reviewed = True
             wd.s.add(pg.posts[-1])
 
@@ -691,16 +691,16 @@ def look_for_rule_violations3(wd):
         logger.debug("reviwing back posts")
         for j, post in enumerate(back_posts):
             logger.debug(f"{i}-{j} Backpost: {post.time_utc} url:{post.get_url()}  title:{post.title[0:30]}"
-                        f"\t counted_status: {post.counted_status} posted_status: {post.posted_status} ")
-            if post.counted_status == CountedStatus.NOT_CHKD.value \
-                    or post.counted_status == CountedStatus.PREV_EXEMPT.value:
+                        f"\t counted_status: {post.counted_status_enum} posted_status: {post.posted_status} ")
+            if post.counted_status_enum == CountedStatus.NOT_CHKD \
+                    or post.counted_status_enum == CountedStatus.PREV_EXEMPT:
                 counted_status, result = check_for_post_exemptions(tr_sub, post, wd=wd)
-                post.counted_status=counted_status.value
+                post.counted_status_enum = counted_status
                 #post.update_status(counted_status=counted_status)
                 wd.s.add(post)
                 logger.debug(
-                    f"\tpost_counted_status updated: {post.counted_status} {CountedStatus(post.counted_status)}")
-            if post.counted_status == CountedStatus.COUNTS.value:
+                    f"\tpost_counted_status updated: {post.counted_status_enum} {CountedStatus(post.counted_status_enum)}")
+            if post.counted_status_enum == CountedStatus.COUNTS:
                 logger.debug(f"\t....Including")
                 possible_pre_posts.append(post)
             else:
@@ -711,7 +711,7 @@ def look_for_rule_violations3(wd):
         for j, post in enumerate(posts_to_verify):
             logger.debug(f"{i}-{j} Reviewing: r/{pg.subreddit_name}  {pg.author_name}  {post.time_utc}  "
                         f"url:{post.get_url()}  title:{post.title[0:30]}"
-                        f"\t counted_status: {post.counted_status} posted_status: {post.posted_status}")
+                        f"\t counted_status: {post.counted_status_enum} posted_status: {post.posted_status}")
 
             # Go through possible preposts for left over post
             associated_reposts = []
@@ -737,7 +737,7 @@ def look_for_rule_violations3(wd):
                     if grace_count < 3:
                         logger.debug("\t\t Grace period exempt")
 
-                        post.counted_status=CountedStatus.GRACE_PERIOD_EXEMPT.value
+                        post.counted_status_enum = CountedStatus.GRACE_PERIOD_EXEMPT
                         wd.s.add(post)
                         continue
                     else:
@@ -759,7 +759,7 @@ def look_for_rule_violations3(wd):
                 wd.ri.send_modmail(subreddit=tr_sub, subject="[Notification]  Hall pass was used",
                                    body=notification_text)
                 # tr_sub.send_modmail(subject="[Notification]  Hall pass was used", body=notification_text)
-                post.counted_status=CountedStatus.HALLPASS.value
+                post.counted_status_enum = CountedStatus.HALLPASS
                 wd.s.add(subreddit_author)
             # Must take action on post
             else:
@@ -800,7 +800,7 @@ def do_requested_action_for_valid_reposts(tr_sub: TrackedSubreddit, recent_post:
                            body=tr_sub.populate_tags(message, recent_post=recent_post, prev_post=possible_repost),
                            subject="[Notification] Post that violates rule frequency restriction", use_same_thread=True)
     if tr_sub.action == "remove":
-        recent_post.counted_status = CountedStatus.NEED_REMOVE.value
+        recent_post.counted_status_enum = CountedStatus.NEED_REMOVE
         logger.debug(f"Post marked for removal {recent_post.subreddit_name} {recent_post.id} {recent_post.author}")
         if len(most_recent_reposts) >3:
             soft_blacklist(tr_sub, recent_post, recent_post.next_eligible, wd=wd)
@@ -830,7 +830,7 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
     tick = datetime.now(pytz.utc)
     other_spam_by_author = wd.s.query(SubmittedPost).filter(
         # SubmittedPost.flagged_duplicate.is_(True),
-        SubmittedPost.counted_status == CountedStatus.FLAGGED.value,
+        SubmittedPost.counted_status_enum == CountedStatus.FLAGGED,
         SubmittedPost.author == recent_post.author,
         SubmittedPost.subreddit_name.ilike(tr_sub.subreddit_name),
         SubmittedPost.time_utc < recent_post.time_utc) \

@@ -200,11 +200,12 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
             return "User was removed from blacklist", False
         posts = wd.s.query(SubmittedPost).filter(SubmittedPost.author == author_param,
                                                  # SubmittedPost.flagged_duplicate.is_(True),
-                                                 SubmittedPost.counted_status == CountedStatus.FLAGGED.value,
+                                                 SubmittedPost.counted_status_enum == CountedStatus.FLAGGED,
                                                  SubmittedPost.subreddit_name == tr_sub.subreddit_name).all()
         for post in posts:
             post.flagged_duplicate = False
-            post.counted_status = CountedStatus.EXEMPTED.value
+            # post.counted_status = CountedStatus.EXEMPTED.value
+            post.counted_status_enum = CountedStatus.EXEMPTED
             wd.s.add(post)
         wd.s.commit()
     elif command == "reloadconfig":

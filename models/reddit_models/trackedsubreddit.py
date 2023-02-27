@@ -392,7 +392,7 @@ class TrackedSubreddit(dbobj.Base):
                     f"|[{post.author}](/u/{post.author})"
                     f"|[{post.title}]({post.get_comments_url()})"
                     f"|{post}"
-                    f"|{CountedStatus(post.counted_status)}"
+                    f"|{CountedStatus(post.counted_status_enum)}"
                     f"|\n")
             final_response = "".join(response_lines)
             input_text = input_text.replace("{summary table}", final_response)
@@ -439,7 +439,7 @@ class TrackedSubreddit(dbobj.Base):
                     f"|[{post.title}]({post.get_comments_url()})"
                     f"|{posted_status}"
                     # post.get_posted_status().value
-                    f"|{CountedStatus(post.counted_status)}"
+                    f"|{CountedStatus(post.counted_status_enum)}"
                     f"|\n")
             final_response = "".join(response_lines)
             input_text = input_text.replace("{summary table}", final_response)

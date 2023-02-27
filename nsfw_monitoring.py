@@ -106,7 +106,8 @@ def nsfw_checking(wd: WorkingData):  # Does not expand comments
     posts_to_check = wd.s.query(SubmittedPost).filter(
         SubmittedPost.post_flair.ilike("%strict sfw%"),
         SubmittedPost.time_utc > datetime.now(pytz.utc) - timedelta(hours=36),
-        SubmittedPost.counted_status < 3) \
+        SubmittedPost.counted_status_enum
+        .in_((CountedStatus.NEEDS_UPDATE, CountedStatus.NOT_CHKD, CountedStatus.PREV_EXEMPT, CountedStatus.REVIEWED))) \
         .order_by(desc(SubmittedPost.time_utc)) \
         .all()
 

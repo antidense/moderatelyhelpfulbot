@@ -63,8 +63,8 @@ class RedditInterface:
         submission.post_flair = post_api_handle.link_flair_text
         submission.author_flair = post_api_handle.author_flair_text
         # submission.author_css = post_api_handle.author_flair_css_class  ## there was big typo here!!
-        if submission.counted_status == 1:
-            submission.counted_status = CountedStatus.NEEDS_UPDATE.value
+        if submission.counted_status_enum == CountedStatus.COUNTS:
+            submission.counted_status_enum = CountedStatus.NEEDS_UPDATE
         submission.last_checked = datetime.now(pytz.utc)
 
 

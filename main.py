@@ -346,7 +346,7 @@ def check_common_posts(wd: WorkingData, subreddit_names):
         print(blurb)
 
         # rp.mod_remove()
-        rp.counted_status = CountedStatus.BOT_SPAM.value
+        rp.counted_status_enum = CountedStatus.BOT_SPAM
         wd.s.add(rp)
 
     for subreddit_name in blurbs:
