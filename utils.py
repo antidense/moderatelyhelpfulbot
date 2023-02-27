@@ -501,7 +501,7 @@ def look_for_rule_violations3(wd):
     posts_to_verify = wd.s.query(SubmittedPost) \
         .join(TrackedSubreddit, TrackedSubreddit.subreddit_name == SubmittedPost.subreddit_name, isouter=False) \
         .filter(SubmittedPost.reviewed == 0,
-                SubmittedPost.counted_status_enum.in_(CountedStatus.NEEDS_UPDATE, CountedStatus.NOT_CHKD),
+                SubmittedPost.counted_status_enum.in_((CountedStatus.NEEDS_UPDATE, CountedStatus.NOT_CHKD)),
                 SubmittedPost.review_debug.like("ma:%"),
                 SubmittedPost.time_utc > datetime.now() - timedelta(hours=48),
                 TrackedSubreddit.active_status_enum.in_((SubStatus.ACTIVE,SubStatus.NO_BAN_ACCESS))
