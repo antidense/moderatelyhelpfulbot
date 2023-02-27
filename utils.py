@@ -489,6 +489,32 @@ def look_for_rule_violations4(wd):
                 posts_checked[pp_id]=pp
 
 
+def look_for_rule_violations5(wd):
+
+    more_accurate_statement = "SELECT MAX(t.id), " \
+                              "GROUP_CONCAT(t.id ORDER BY t.id) as debug, " \
+                              "GROUP_CONCAT(t.reviewed ORDER BY t.id), " \
+                              "t.author, " \
+                              "t.subreddit_name, " \
+                              "GROUP_CONCAT(t.counted_status ORDER BY t.id), " \
+                              "COUNT(t.author), " \
+                              "MAX(t.time_utc) as most_recent, " \
+                              "t.reviewed, " \
+                              "t.flagged_duplicate, " \
+                              "s.is_nsfw, " \
+                              "s.max_count_per_interval, " \
+                              "s.min_post_interval_mins/60, " \
+                              "s.active_status " \
+                              "FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name " \
+                              "WHERE s.active_status s.active_status_enum in ('ACTIVE', 'NO_BAN_ACCESS') " \
+                              "and counted_status <2 "\
+                              "AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  " \
+                              "GROUP BY t.author, t.subreddit_name " \
+                              "HAVING COUNT(t.author) > s.max_count_per_interval " \
+                              "AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND MAX(added_time) > :look_back " \
+                              "ORDER BY most_recent desc ;"
+
+
 def look_for_rule_violations3(wd):
 
     # need to rule out easy ones - moderators, etc.
@@ -564,7 +590,7 @@ def look_for_rule_violations3(wd):
     logger.debug(f"Total groups found: {len(posting_groups)}")
     tick = datetime.now(pytz.utc)
 
-    logger.debug(f"sorting list...", end="")
+    logger.debug(f"sorting list...")
     posting_groups.sort(key=lambda y: y.latest_post_id, reverse=True)
     logger.debug(f"done")
     # Go through posting group
