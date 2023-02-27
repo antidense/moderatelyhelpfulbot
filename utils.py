@@ -397,12 +397,13 @@ def do_reddit_actions(wd):
             op.reply_comment = None
         except prawcore.exceptions.Forbidden as e:
             logger.warning(f'No permission to remove post {op.author} {op.title} {op.subreddit_name} {str(e)}')
+            op.counted_status_enum = CountedStatus.REMOVE_FAILED
             wd.sub_dict[op.subreddit_name].active_status_enum = SubStatus.NO_REMOVE_ACCESS
             wd.s.add(wd.sub_dict[op.subreddit_name])
-            op._enum = CountedStatus.REMOVE_FAILED
             print('test')
         except (praw.exceptions.APIException,  prawcore.exceptions.ServerError) as e:
             logger.warning(f'something went wrong in removing post {op.author} {op.title} {op.subreddit_name} {str(e)}')
+            op.counted_status_enum = CountedStatus.REMOVE_FAILED
 
 
         wd.s.add(op)
@@ -507,7 +508,7 @@ def look_for_rule_violations5(wd):
                               "s.active_status " \
                               "FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name " \
                               "WHERE s.active_status s.active_status_enum in ('ACTIVE', 'NO_BAN_ACCESS') " \
-                              "and counted_status <2 "\
+                              "and counted_status in ('NOT_CHKD', 'NEEDS_UPDATE', 'COUNTS', 'REMOVE_FAILED') "\
                               "AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  " \
                               "GROUP BY t.author, t.subreddit_name " \
                               "HAVING COUNT(t.author) > s.max_count_per_interval " \
@@ -520,7 +521,8 @@ def look_for_rule_violations3(wd):
     # need to rule out easy ones - moderators, etc.
     automated_reviews(wd)
 
-    print(f"LRWT: querying recent post(s)")
+    # get "leftover" posts that were not checked
+    logger.debug(f"LRWT: querying recent post(s)")
     posting_groups = []
     most_recent_identified = None
 
@@ -544,25 +546,22 @@ def look_for_rule_violations3(wd):
             posts.append(wd.s.query(SubmittedPost).get(post_id))
         posting_groups.append(
             PostingGroup(post.id, author_name=post.author, subreddit_name=post.subreddit_name, posts=posts))
+    logger.debug(f"# of leftover posts from before: {len(posting_groups)}")
 
-    logger.debug(f"leftover posts from before: {len(posting_groups)}")
-
+    # Get a lookback date
+    last_date = "2022-06-30 00:00:00"
     if not most_recent_identified:
         most_recent_identified: SubmittedPost | None = wd.s.query(SubmittedPost) \
             .filter(SubmittedPost.review_debug.like("ma:%")) \
             .order_by(SubmittedPost.added_time).first()
+    if most_recent_identified and most_recent_identified.added_time:
+        last_date = most_recent_identified.added_time.isoformat()
 
-    # AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL)
-    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, GROUP_CONCAT(t.counted_status ORDER BY t.id), COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status_enum FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status_enum in ('ACTIVE', 'NO_BAN_ACCESS') and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND MAX(added_time) > :look_back  ORDER BY most_recent desc ;"
-    # more_accurate_statement.replace("[date]")
-    search_back = 48
-    more_accurate_statement = more_accurate_statement.replace('72', str(search_back))
+    # Run the query
+    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, GROUP_CONCAT(t.counted_status ORDER BY t.id), COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status_enum FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status_enum in ('ACTIVE', 'NO_BAN_ACCESS') and counted_status in ('NOT_CHKD', 'NEEDS_UPDATE', 'COUNTS', 'REMOVE_FAILED') AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 48 HOUR AND MAX(added_time) > :look_back  ORDER BY most_recent desc ;"
 
     tick = datetime.now()
-    last_date = most_recent_identified.added_time.isoformat() \
-        if most_recent_identified and most_recent_identified.added_time else "2022-06-30 00:00:00"
     logger.debug(f"doing more accurate {datetime.now()} last date:{last_date}")
-    # last_date = "2022-06-30 00:00:00"  # REMOVE THIS!!!!!!!!!!!!!!!!!!!!!!!
     rs = wd.s.execute(more_accurate_statement, {"look_back": last_date})
     logger.debug(f"query took this long {datetime.now() - tick}")
 
@@ -573,10 +572,6 @@ def look_for_rule_violations3(wd):
         for post_id in post_ids:
             # print(f"\t{post_id}")
             posts.append(wd.s.query(SubmittedPost).get(post_id))
-        # print(row[0], row[1], row[2], row[3], row[4])
-        # post = s.query(SubmittedPost).get(row[0])
-        # predecessors = row[1].split(',')
-        # predecessors_times = row[2].split(',')
 
         last_post = posts[-1]
         assert isinstance(last_post, SubmittedPost)
@@ -590,9 +585,11 @@ def look_for_rule_violations3(wd):
     logger.debug(f"Total groups found: {len(posting_groups)}")
     tick = datetime.now(pytz.utc)
 
+    # sort this list
     logger.debug(f"sorting list...")
     posting_groups.sort(key=lambda y: y.latest_post_id, reverse=True)
     logger.debug(f"done")
+
     # Go through posting group
     for i, pg in enumerate(posting_groups):
         logger.debug(
@@ -636,31 +633,6 @@ def look_for_rule_violations3(wd):
                     f"{i}-{j}\t\tAlready handled")
                 continue
 
-            # Check for soft blacklist
-            """
-            if subreddit_author and subreddit_author.next_eligible and post.time_utc \
-                    and post.time_utc < subreddit_author.next_eligible:
-                # this will ignore if too old
-                logger.info(
-                    f"{i}-{j}\t\tpost removed - prior to eligibility")
-                try:
-                    if tick.replace(tzinfo=None) - timedelta(hours=24) < post.time_utc:
-                        post.counted_status = CountedStatus.AGED_OUT
-                        success = False
-                    else:
-                        success = wd.ri.mod_remove(post)  # no checking if it can't remove post
-                    if success and tr_sub.comment:
-                        last_valid_post: SubmittedPost = wd.s.query(SubmittedPost).get(
-                            subreddit_author.last_valid_post) if subreddit_author.last_valid_post is not None else None
-                        make_comment(tr_sub, post, [last_valid_post, ],
-                                     tr_sub.comment, distinguish=tr_sub.distinguish, approve=tr_sub.approve,
-                                     lock_thread=tr_sub.lock_thread, stickied=tr_sub.comment_stickied,
-                                     next_eligibility=subreddit_author.next_eligible, blacklist=True, wd=wd)
-                        post.update_status(reviewed=True, flagged_duplicate=True, counted_status=CountedStatus.BLKLIST)
-                        wd.s.add(post)
-                except (praw.exceptions.APIException, prawcore.exceptions.Forbidden) as e:
-                    logger.warning(f'something went wrong in removing post {str(e)}')
-            """
             # Check for post exemptions
             if not post.reviewed:
 
@@ -872,7 +844,7 @@ def check_for_actionable_violations(tr_sub: TrackedSubreddit, recent_post: Submi
             tr_sub.ban_ability = 0
             wd.s.add(tr_sub)
             wd.s.commit()
-        # if len(most_recent_reposts) > 2:  this doesn't work - doesn't coun't bans
+        # if len(most_recent_reposts) > 2:  this doesn't work - doesn't count bans
         #    logger.info("Adding to soft blacklist based on next eligibility - for tracking only")
         #    next_eligibility = most_recent_reposts[0].time_utc + subreddit.min_post_interval
         #    soft_blacklist(tr_sub, recent_post, next_eligibility)
@@ -1061,7 +1033,7 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
         print(f"GSBN: doesn't exist and not supposed to create  {subreddit_name}")
         return None
 
-    # If need to create, do so now
+    # If need to create this, do so now
     if not tr_sub:
         print("GSBN: creating sub...")
         sub_info = wd.ri.get_subreddit_info(subreddit_name=subreddit_name)  # get subreddit info for sub from api

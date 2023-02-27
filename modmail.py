@@ -19,7 +19,7 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
         -> tuple[str, bool]:
     subreddit_name: str = subreddit_name[2:] if subreddit_name.startswith('r/') else subreddit_name
     subreddit_name: str = subreddit_name[3:] if subreddit_name.startswith('/r/') else subreddit_name
-    subreddit_names = subreddit_name.split('+') if '+' in subreddit_name else [subreddit_name]  # allow
+    # subreddit_names = subreddit_name.split('+') if '+' in subreddit_name else [subreddit_name]  # allow
     if subreddit_name == MAIN_BOT_NAME or subreddit_name == wd.ri.bot_name:
         return "this command doesn't make sense", True
 
@@ -216,7 +216,7 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
             reason="reset to default_config")
         sub_info = wd.ri.get_subreddit_info(tr_sub.subreddit_name)
         tr_sub.update_from_subinfo(sub_info)
-        worked, status = tr_sub.reload_yaml_settings()
+        _, _ = tr_sub.reload_yaml_settings()
         wd.s.add(tr_sub)
         wd.s.commit()
 
@@ -324,7 +324,6 @@ def handle_direct_messages(wd: WorkingData):
                 thread_id = None
                 requestor_name = "[modmail]"
             message_subject = message.subject
-            thread_id = None
             if not subreddit_name:
                 matches = \
                     re.match(r'^(re: )?(/?r/)?(?P<sub_name>[a-zA-Z0-9_]{1,21})(:(?P<thread_id>[a-z0-9]+))?$',

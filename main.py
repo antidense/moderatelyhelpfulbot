@@ -80,13 +80,13 @@ class Task:
                 self.last_run_dt = start_time
                 log.debug(f"Task complete {self.target_function} {end_time-start_time}")
                 self.task_durations.append((end_time-start_time).seconds)
-            except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException) as e:
+            except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException):
                 self.error_count += 1
                 import traceback
                 trace = traceback.format_exc()
                 print(trace)
                 return -1
-            except Exception as e:
+            except Exception:
                 import traceback
                 trace = traceback.format_exc()
                 self.last_error = str(trace)
