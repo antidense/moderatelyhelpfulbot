@@ -541,7 +541,7 @@ def look_for_rule_violations3(wd):
     logger.debug(f"query took this long {datetime.now() - tick}")
 
     for row in rs:
-        logger.debug(row[0], row[1], row[2], row[3], row[4], row[5])
+        logger.debug(",".join((row[0], row[1], row[2], row[3], row[4], row[5])))
         post_ids = row[1].replace("ma:", "").split(',')
         posts = []
         for post_id in post_ids:
