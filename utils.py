@@ -630,9 +630,12 @@ def look_for_rule_violations3(wd):
               f"grace_period: {tr_sub.grace_period}")
         for j, post in enumerate(pg.posts):
             try:
-                assert (isinstance(post, SubmittedPost))
-            except AssertionError:
+                assert (isinstance(post, SubmittedPost))  #Assertion error
+            except(AssertionError) as e:
+                print(f"{e}")
                 print(f"{post}")
+                continue
+
             logger.debug(
                 f"{i}-{j}Checking: "
                 f"{pg.author_name} {post.time_utc} url:{post.get_url()} reviewed:{post.reviewed}  "

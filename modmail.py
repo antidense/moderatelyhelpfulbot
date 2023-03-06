@@ -343,7 +343,7 @@ def handle_direct_messages(wd: WorkingData):
             if not subreddit_name or not subreddit_name.replace('_','').isalnum()  \
                     or '/' in subreddit_name or len(subreddit_name) > 21 or subreddit_name == "yoursubredditname":
                 message.mark_read()
-                message.reply(body=f'"'Sorry, I don"t think "{message_subject}" contains a valid subreddit?")
+                message.reply(body=f"Sorry, I don''t think '{message_subject}' contains a valid subreddit?")
                 continue
             tr_sub = get_subreddit_by_name(wd, subreddit_name)
             response, _ = handle_dm_command(wd, subreddit_name, requestor_name, command, body_parts[1:])
