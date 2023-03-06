@@ -561,7 +561,7 @@ def look_for_rule_violations3(wd):
             ON t.subreddit_name = s.subreddit_name 
         WHERE 
             s.active_status_enum in ('ACTIVE', 'NO_BAN_ACCESS') 
-            and counted_status_enum  in ('NEEDS_UPDATE', 'NOT_CHKD', "PREV_EXEMPT', 'COUNTS')
+            and counted_status_enum  in ('NEEDS_UPDATE', 'NOT_CHKD', 'PREV_EXEMPT', 'COUNTS')
             AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  
         GROUP BY 
             t.author, t.subreddit_name 
