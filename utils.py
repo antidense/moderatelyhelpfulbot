@@ -490,48 +490,33 @@ def look_for_rule_violations4(wd):
                 posts_checked[pp_id]=pp
 
 
-def look_for_rule_violations5(wd):
-
-    more_accurate_statement = "SELECT MAX(t.id), " \
-                              "GROUP_CONCAT(t.id ORDER BY t.id) as debug, " \
-                              "GROUP_CONCAT(t.reviewed ORDER BY t.id), " \
-                              "t.author, " \
-                              "t.subreddit_name, " \
-                              "GROUP_CONCAT(t.counted_status ORDER BY t.id), " \
-                              "COUNT(t.author), " \
-                              "MAX(t.time_utc) as most_recent, " \
-                              "t.reviewed, " \
-                              "t.flagged_duplicate, " \
-                              "s.is_nsfw, " \
-                              "s.max_count_per_interval, " \
-                              "s.min_post_interval_mins/60, " \
-                              "s.active_status " \
-                              "FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name " \
-                              "WHERE s.active_status s.active_status_enum in ('ACTIVE', 'NO_BAN_ACCESS') " \
-                              "and counted_status in ('NOT_CHKD', 'NEEDS_UPDATE', 'COUNTS', 'REMOVE_FAILED') "\
-                              "AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  " \
-                              "GROUP BY t.author, t.subreddit_name " \
-                              "HAVING COUNT(t.author) > s.max_count_per_interval " \
-                              "AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND MAX(added_time) > :look_back " \
-                              "ORDER BY most_recent desc ;"
-
-
 def look_for_rule_violations3(wd):
 
     # need to rule out easy ones - moderators, etc.
     automated_reviews(wd)
 
+    # posts that are deleted/removed
+    # exempted posts:
+    #   permanent: moderator post, title keywords, self/oc
+    #   non permanent: author/post flair, moderator
+    # grace period
+    # hall pass
+    # sub not active
+    #
+
+
     # get "leftover" posts that were not checked
     logger.debug(f"LRWT: querying recent post(s)")
     posting_groups = []
     most_recent_identified = None
+    look_back_hrs = 48
 
     posts_to_verify = wd.s.query(SubmittedPost) \
         .join(TrackedSubreddit, TrackedSubreddit.subreddit_name == SubmittedPost.subreddit_name, isouter=False) \
         .filter(SubmittedPost.reviewed == 0,
                 SubmittedPost.counted_status_enum.in_((CountedStatus.NEEDS_UPDATE, CountedStatus.NOT_CHKD)),
                 SubmittedPost.review_debug.like("ma:%"),
-                SubmittedPost.time_utc > datetime.now() - timedelta(hours=48),
+                SubmittedPost.time_utc > datetime.now() - timedelta(hours=look_back_hrs),
                 TrackedSubreddit.active_status_enum.in_((SubStatus.ACTIVE,SubStatus.NO_BAN_ACCESS))
                 ).order_by(SubmittedPost.added_time.desc()).all()
 
@@ -558,11 +543,33 @@ def look_for_rule_violations3(wd):
         last_date = most_recent_identified.added_time.isoformat()
 
     # Run the query
-    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, GROUP_CONCAT(t.counted_status ORDER BY t.id), COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status_enum FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status_enum in ('ACTIVE', 'NO_BAN_ACCESS') and counted_status_enum in ('NOT_CHKD', 'NEEDS_UPDATE', 'COUNTS') AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 48 HOUR AND MAX(added_time) > :look_back  ORDER BY most_recent desc ;"
+
+    more_accurate_statement = "SELECT MAX(t.id), " \
+                              "GROUP_CONCAT(t.id ORDER BY t.id) as debug, " \
+                              "GROUP_CONCAT(t.reviewed ORDER BY t.id), " \
+                              "t.author, " \
+                              "t.subreddit_name, " \
+                              "GROUP_CONCAT(t.counted_status ORDER BY t.id), " \
+                              "COUNT(t.author), " \
+                              "MAX(t.time_utc) as most_recent, " \
+                              "t.reviewed, " \
+                              "s.is_nsfw, " \
+                              "s.max_count_per_interval, " \
+                              "s.min_post_interval_mins/60, " \
+                              "s.active_status " \
+                              "FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name " \
+                              "WHERE s.active_status s.active_status_enum in ('ACTIVE', 'NO_BAN_ACCESS') " \
+                              "and counted_status in ('NOT_CHKD', 'NEEDS_UPDATE', 'COUNTS', 'REMOVE_FAILED') "\
+                              "AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  " \
+                              "GROUP BY t.author, t.subreddit_name " \
+                              "HAVING COUNT(t.author) > s.max_count_per_interval " \
+                              "AND most_recent > utc_timestamp() - INTERVAL :look_back_hrs HOUR " \
+                              "AND MAX(added_time) > :look_back_date " \
+                              "ORDER BY most_recent desc ;"
 
     tick = datetime.now()
     logger.debug(f"doing more accurate {datetime.now()} last date:{last_date}")
-    rs = wd.s.execute(more_accurate_statement, {"look_back": last_date})
+    rs = wd.s.execute(more_accurate_statement, {"look_back_date": last_date, "look_back_hrs": look_back_hrs})
     logger.debug(f"query took this long {datetime.now() - tick}")
 
     for row in rs:

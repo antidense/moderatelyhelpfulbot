@@ -224,59 +224,22 @@ def purge_old_records(wd: WorkingData):  # requires db only
 def calculate_stats(wd: WorkingData):
     # Todo: repeat offenders?
 
-    statement = 'select count(*),counted_status, subreddit_name, date(time_utc) as date from RedditPost  where   time_utc < date(utc_timestamp) group by date(time_utc),  subreddit_name,  counted_status order by date desc'
-    rs = wd.s.execute(statement)
+    save_stats_statement = """CREATE TABLE IF NOT EXISTS stats5 (
+      subreddit_name VARCHAR(255),
+      counted_status VARCHAR(255),
+      post_date DATE,
+      post_count INT
+    );
 
-    for row in rs:
-        count = row[0]
-        counted_status = row[1]
-        subreddit_name = row[2]
-        date = row[3]
-        stat_name = str(CountedStatus(counted_status)).replace("CountedStatus.", "").lower()[0:21]
-        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, stat_name))
-        if not sub_stat:
-            sub_stat = Stats2(subreddit_name, date, stat_name)
-            sub_stat.value_int = count
-            wd.s.add(sub_stat)
-        elif sub_stat.value_int < count:
-            sub_stat.value_int = count
-        wd.s.add(sub_stat)
-    wd.s.commit()
+    INSERT INTO stats5 (subreddit_name, counted_status, post_date, post_count)
+    SELECT rp.subreddit_name, rp.counted_status_enum, DATE(rp.time_utc), COUNT(*)
+    FROM RedditPost rp
+    INNER JOIN TrackedSubs s
+    WHERE DATE(DATE_SUB(NOW(), INTERVAL 2 DAY)) > DATE(rp.time_utc) >= DATE(DATE_SUB(NOW(), INTERVAL 5 DAY)) 
+    GROUP BY rp.subreddit_name, rp.counted_status_enum, DATE(rp.time_utc);
+    """
 
-    statement = 'select count(*), sum(if(counted_status=5, 1, 0)) as flagged, sum(if(counted_status=3, 1, 0)) as blacklisted, sum(if(counted_status=20, 1, 0)) as removed,  subreddit_name, date(time_utc) as date from RedditPost  where  time_utc > utc_timestamp() - INTERVAL  60*24*14 MINUTE and time_utc < date(utc_timestamp)  group by  subreddit_name, date  order by date'
-    rs = wd.s.execute(statement)
-    for row in rs:
-        count = row[0]
-        flagged_count = row[1]
-        blacklisted_count = row[2]
-        removed_count = row[3]
-        subreddit_name = row[4]
-        date = row[5]
-        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'collected'))
-        if not sub_stat:
-            sub_stat = Stats2(subreddit_name, date, 'collected')
-            sub_stat.value_int = count
-            wd.s.add(sub_stat)
-        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'flagged_'))
-        if not sub_stat:
-            sub_stat = Stats2(subreddit_name, date, 'flagged_')
-            sub_stat.value_int = flagged_count
-            wd.s.add(sub_stat)
-        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'blacklisted_'))
-        if not sub_stat:
-            sub_stat = Stats2(subreddit_name, date, 'blacklisted_')
-            sub_stat.value_int = blacklisted_count
-            wd.s.add(sub_stat)
-        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'removed_'))
-        if not sub_stat:
-            sub_stat = Stats2(subreddit_name, date, 'removed_')
-            sub_stat.value_int = removed_count
-            wd.s.add(sub_stat)
-        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'flagged_total'))
-        if not sub_stat:
-            sub_stat = Stats2(subreddit_name, date, 'flagged_total')
-            sub_stat.value_int = flagged_count + blacklisted_count + removed_count
-            wd.s.add(sub_stat)
+    _ = wd.s.execute(save_stats_statement)
 
     # REMOVED(20) added as of 10/27/21 - previously not tracked separately from FLAGGED
 
