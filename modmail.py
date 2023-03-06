@@ -392,12 +392,12 @@ def mod_mail_invitation_to_moderate(wd: WorkingData, message):
 
     tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=False)
     # accept invite if accepting invites or had been accepted previously
-    print("to make sub:", subreddit_name)
+    print(f"Got invite for {subreddit_name}, {tr_sub}, accepting new subs?{ACCEPTING_NEW_SUBS}")
     if tr_sub or (ACCEPTING_NEW_SUBS and 'karma' not in subreddit_name.lower()):
         try:
             wd.ri.reddit_client.subreddit(subreddit_name).mod.accept_invite()
         except praw.exceptions.RedditAPIException as ex:  # Changed from praw.exceptions.APIException
-            reply= f"Message from reddit: {ex.message}"
+            reply =  f"Message from reddit: {ex.message}"
             print(f"error reply {reply}")
             message.reply(body=reply)
             message.mark_read()
