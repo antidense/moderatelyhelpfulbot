@@ -670,8 +670,8 @@ def handle_modmail_message(wd: WorkingData, convo):
                 # wd.ri.reddit_client.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
                 wd.ri.send_modmail(subreddit_name=wd.bot_name, subject="[Notification] MHB Command used",
                                    body=bot_owner_message, use_same_thread=True)
-        except (prawcore.exceptions.BadRequest, praw.exceptions.RedditAPIException):
-            logger.debug("reply failed {0}".format(response))
+        except (prawcore.exceptions.BadRequest, praw.exceptions.RedditAPIException, prawcore.exceptions.ServerError):
+            logger.debug(f"reply failed {subreddit_name} {response} ")
     record_actioned(wd, f"mm{convo.id}-{convo.num_messages}")
     convo.read()
     wd.s.commit()
