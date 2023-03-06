@@ -533,44 +533,25 @@ def look_for_rule_violations3(wd):
             PostingGroup(post.id, author_name=post.author, subreddit_name=post.subreddit_name, posts=posts))
     logger.debug(f"# of leftover posts from before: {len(posting_groups)}")
 
-    # Get a lookback date
-    last_date = "2022-06-30 00:00:00"
+    logger.debug(f"leftover posts from before: {len(posting_groups)}")
+
     if not most_recent_identified:
         most_recent_identified: SubmittedPost | None = wd.s.query(SubmittedPost) \
             .filter(SubmittedPost.review_debug.like("ma:%")) \
             .order_by(SubmittedPost.added_time).first()
-    if most_recent_identified and most_recent_identified.added_time:
-        last_date = most_recent_identified.added_time.isoformat()
 
-    # Run the query
-
-    more_accurate_statement = """SELECT MAX(t.id), 
-                              GROUP_CONCAT(t.id ORDER BY t.id) as debug,
-                              GROUP_CONCAT(t.reviewed ORDER BY t.id), 
-                              t.author, 
-                              t.subreddit_name, 
-                              GROUP_CONCAT(t.counted_status ORDER BY t.id), 
-                              COUNT(t.author), 
-                              MAX(t.time_utc) as most_recent, 
-                              t.reviewed, 
-                              s.is_nsfw, 
-                              s.max_count_per_interval, 
-                              s.min_post_interval_mins/60, 
-                              s.active_status 
-                              FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name 
-                              WHERE s.active_status_enum in ('ACTIVE', 'NO_BAN_ACCESS') 
-                              and counted_status in ('NOT_CHKD', 'NEEDS_UPDATE', 'COUNTS', 'REMOVE_FAILED') 
-                              AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  
-                              GROUP BY t.author, t.subreddit_name 
-                              HAVING COUNT(t.author) > s.max_count_per_interval 
-                              AND most_recent > utc_timestamp() - INTERVAL :look_back_hrs HOUR 
-                              AND MAX(added_time) > :look_back_date 
-                              ORDER BY most_recent desc
-                              """
+    # AND (most_recent > MAX(t.last_checked) or max(t.last_checked) is NULL)
+    more_accurate_statement = "SELECT MAX(t.id), GROUP_CONCAT(t.id ORDER BY t.id), GROUP_CONCAT(t.reviewed ORDER BY t.id), t.author, t.subreddit_name, GROUP_CONCAT(t.counted_status ORDER BY t.id), COUNT(t.author), MAX(t.time_utc) as most_recent, t.reviewed, t.flagged_duplicate, s.is_nsfw, s.max_count_per_interval, s.min_post_interval_mins/60, s.active_status_enum FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name WHERE s.active_status_enum in ('ACTIVE', 'NO_BAN_ACCESS') and counted_status <2 AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  GROUP BY t.author, t.subreddit_name HAVING COUNT(t.author) > s.max_count_per_interval AND most_recent > utc_timestamp() - INTERVAL 72 HOUR AND MAX(added_time) > :look_back  ORDER BY most_recent desc ;"
+    # more_accurate_statement.replace("[date]")
+    search_back = 48
+    more_accurate_statement = more_accurate_statement.replace('72', str(search_back))
 
     tick = datetime.now()
+    last_date = most_recent_identified.added_time.isoformat() \
+        if most_recent_identified and most_recent_identified.added_time else "2022-06-30 00:00:00"
     logger.debug(f"doing more accurate {datetime.now()} last date:{last_date}")
-    rs = wd.s.execute(more_accurate_statement, {"look_back_date": last_date, "look_back_hrs": look_back_hrs})
+    # last_date = "2022-06-30 00:00:00"  # REMOVE THIS!!!!!!!!!!!!!!!!!!!!!!!
+    rs = wd.s.execute(more_accurate_statement, {"look_back": last_date})
     logger.debug(f"query took this long {datetime.now() - tick}")
 
     for row in rs:
@@ -634,7 +615,7 @@ def look_for_rule_violations3(wd):
             except(AssertionError) as e:
                 print(f"{e}")
                 print(f"{post}")
-                continue
+                break
 
             logger.debug(
                 f"{i}-{j}Checking: "
@@ -674,6 +655,8 @@ def look_for_rule_violations3(wd):
         """
 
         wd.s.commit()
+
+
 
         # Collect all relevant posts
         logger.debug("finding back posts")
