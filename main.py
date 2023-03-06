@@ -48,6 +48,9 @@ class Task:
     last_run_dt = Column(DateTime, nullable=True)
     last_runtime = Column(Integer, nullable=False)
     frequency_mins = Column(Integer, nullable=False)
+    last_error
+    time out?
+
     """
 
     wd = None

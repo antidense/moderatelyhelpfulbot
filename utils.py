@@ -629,7 +629,10 @@ def look_for_rule_violations3(wd):
         logger.debug(f"/r/{pg.subreddit_name}---max_count: {max_count}, interval: {tr_sub.min_post_interval_txt} "
               f"grace_period: {tr_sub.grace_period}")
         for j, post in enumerate(pg.posts):
-            assert (isinstance(post, SubmittedPost))
+            try:
+                assert (isinstance(post, SubmittedPost))
+            except AssertionError:
+                print(f"{post}")
             logger.debug(
                 f"{i}-{j}Checking: "
                 f"{pg.author_name} {post.time_utc} url:{post.get_url()} reviewed:{post.reviewed}  "

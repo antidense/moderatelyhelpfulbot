@@ -291,6 +291,11 @@ def handle_direct_messages(wd: WorkingData):
         elif message_subject.startswith('username mention'):
             message.mark_read()
             continue
+        elif message_subject.startswith('[Notification]'):
+            message.mark_read()
+        elif "has been removed as a moderator" in message_subject:
+            message.mark_read()
+            continue
         # Check if this a user mention (just ignore this)
         elif message_subject.startswith('moderator added'):
             message.mark_read()
@@ -338,7 +343,7 @@ def handle_direct_messages(wd: WorkingData):
             if not subreddit_name or not subreddit_name.replace('_','').isalnum()  \
                     or '/' in subreddit_name or len(subreddit_name) > 21 or subreddit_name == "yoursubredditname":
                 message.mark_read()
-                message.reply(body=f"Sorry, I don't think {message_subject} contains a valid subreddit?")
+                message.reply(body=f'"'Sorry, I don"t think "{message_subject}" contains a valid subreddit?")
                 continue
             tr_sub = get_subreddit_by_name(wd, subreddit_name)
             response, _ = handle_dm_command(wd, subreddit_name, requestor_name, command, body_parts[1:])
@@ -353,9 +358,9 @@ def handle_direct_messages(wd: WorkingData):
                                 f"command: {command}\n\n" \
                                 f"response: {response}\n\n" \
                                 f"wiki: https://www.reddit.com/r/{subreddit_name}/wiki/{MAIN_BOT_NAME}\n\n"
-            if requestor_name is not None and requestor_name.lower() != BOT_OWNER.lower():
-                wd.ri.send_modmail(subreddit_name=MAIN_BOT_NAME, subject="[Notification]  Command processed",
-                                   body=bot_owner_message, use_same_thread=True)
+            # if requestor_name is not None and requestor_name.lower() != BOT_OWNER.lower():
+            #    wd.ri.send_modmail(subreddit_name=MAIN_BOT_NAME, subject="[Notification]  Command processed",
+            #                       body=bot_owner_message, use_same_thread=True)
             # wd.ri.reddit_client.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
 
         elif requestor_name and not check_actioned(wd, requestor_name):
