@@ -224,20 +224,22 @@ def purge_old_records(wd: WorkingData):  # requires db only
 def calculate_stats(wd: WorkingData):
     # Todo: repeat offenders?
 
-    save_stats_statement = """CREATE TABLE IF NOT EXISTS stats5 (
+    """CREATE TABLE IF NOT EXISTS stats5 (
       subreddit_name VARCHAR(255),
       counted_status VARCHAR(255),
       post_date DATE,
-      post_count INT
+      post_count INT,
       PRIMARY KEY (subreddit_name, counted_status, post_date)
     );
+    """
 
+    save_stats_statement = """
     INSERT INTO stats5 (subreddit_name, counted_status, post_date, post_count)
     SELECT rp.subreddit_name, rp.counted_status_enum, DATE(rp.time_utc), COUNT(*)
     FROM RedditPost rp
     INNER JOIN TrackedSubs s
     WHERE rp.time_utc >= (utc_timestamp() - INTERVAL 2 DAY) AND rp.time_utc < DATE(utc_timestamp() - INTERVAL 5 DAY)
-    GROUP BY rp.subreddit_name, rp.counted_status_enum, DATE(rp.time_utc);
+    GROUP BY rp.subreddit_name, rp.counted_status_enum, DATE(rp.time_utc)
     ON DUPLICATE KEY UPDATE post_count = VALUES(post_count);
     """
 
