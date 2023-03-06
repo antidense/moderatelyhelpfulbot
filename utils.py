@@ -562,7 +562,7 @@ def look_for_rule_violations3(wd):
                               and counted_status in ('NOT_CHKD', 'NEEDS_UPDATE', 'COUNTS', 'REMOVE_FAILED') 
                               AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  
                               GROUP BY t.author, t.subreddit_name 
-                              HAVING COUNT(t.author) > s.max_count_per_interval "
+                              HAVING COUNT(t.author) > s.max_count_per_interval 
                               AND most_recent > utc_timestamp() - INTERVAL :look_back_hrs HOUR 
                               AND MAX(added_time) > :look_back_date 
                               ORDER BY most_recent desc
