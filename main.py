@@ -229,14 +229,16 @@ def calculate_stats(wd: WorkingData):
       counted_status VARCHAR(255),
       post_date DATE,
       post_count INT
+      PRIMARY KEY (subreddit_name, counted_status, post_date)
     );
 
     INSERT INTO stats5 (subreddit_name, counted_status, post_date, post_count)
     SELECT rp.subreddit_name, rp.counted_status_enum, DATE(rp.time_utc), COUNT(*)
     FROM RedditPost rp
     INNER JOIN TrackedSubs s
-    WHERE DATE(DATE_SUB(NOW(), INTERVAL 2 DAY) > DATE(rp.time_utc) >= DATE(DATE_SUB(NOW(), INTERVAL 5 DAY)) 
+    WHERE rp.time_utc >= (utc_timestamp() - INTERVAL 2 DAY) AND rp.time_utc < DATE(utc_timestamp() - INTERVAL 5 DAY)
     GROUP BY rp.subreddit_name, rp.counted_status_enum, DATE(rp.time_utc);
+    ON DUPLICATE KEY UPDATE post_count = VALUES(post_count);
     """
 
     _ = wd.s.execute(save_stats_statement)
