@@ -544,28 +544,29 @@ def look_for_rule_violations3(wd):
 
     # Run the query
 
-    more_accurate_statement = "SELECT MAX(t.id), " \
-                              "GROUP_CONCAT(t.id ORDER BY t.id) as debug, " \
-                              "GROUP_CONCAT(t.reviewed ORDER BY t.id), " \
-                              "t.author, " \
-                              "t.subreddit_name, " \
-                              "GROUP_CONCAT(t.counted_status ORDER BY t.id), " \
-                              "COUNT(t.author), " \
-                              "MAX(t.time_utc) as most_recent, " \
-                              "t.reviewed, " \
-                              "s.is_nsfw, " \
-                              "s.max_count_per_interval, " \
-                              "s.min_post_interval_mins/60, " \
-                              "s.active_status " \
-                              "FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name " \
-                              "WHERE s.active_status s.active_status_enum in ('ACTIVE', 'NO_BAN_ACCESS') " \
-                              "and counted_status in ('NOT_CHKD', 'NEEDS_UPDATE', 'COUNTS', 'REMOVE_FAILED') "\
-                              "AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  " \
-                              "GROUP BY t.author, t.subreddit_name " \
-                              "HAVING COUNT(t.author) > s.max_count_per_interval " \
-                              "AND most_recent > utc_timestamp() - INTERVAL :look_back_hrs HOUR " \
-                              "AND MAX(added_time) > :look_back_date " \
-                              "ORDER BY most_recent desc ;"
+    more_accurate_statement = """SELECT MAX(t.id), 
+                              GROUP_CONCAT(t.id ORDER BY t.id) as debug,
+                              GROUP_CONCAT(t.reviewed ORDER BY t.id), 
+                              t.author, 
+                              t.subreddit_name, 
+                              GROUP_CONCAT(t.counted_status ORDER BY t.id), 
+                              COUNT(t.author), 
+                              MAX(t.time_utc) as most_recent, 
+                              t.reviewed, 
+                              s.is_nsfw, 
+                              s.max_count_per_interval, 
+                              s.min_post_interval_mins/60, 
+                              s.active_status 
+                              FROM RedditPost t INNER JOIN TrackedSubs s ON t.subreddit_name = s.subreddit_name 
+                              WHERE s.active_status_enum in ('ACTIVE', 'NO_BAN_ACCESS') 
+                              and counted_status in ('NOT_CHKD', 'NEEDS_UPDATE', 'COUNTS', 'REMOVE_FAILED') 
+                              AND t.time_utc > utc_timestamp() - INTERVAL s.min_post_interval_mins MINUTE  
+                              GROUP BY t.author, t.subreddit_name 
+                              HAVING COUNT(t.author) > s.max_count_per_interval "
+                              AND most_recent > utc_timestamp() - INTERVAL :look_back_hrs HOUR 
+                              AND MAX(added_time) > :look_back_date 
+                              ORDER BY most_recent desc
+                              """
 
     tick = datetime.now()
     logger.debug(f"doing more accurate {datetime.now()} last date:{last_date}")

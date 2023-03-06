@@ -235,7 +235,7 @@ def calculate_stats(wd: WorkingData):
     SELECT rp.subreddit_name, rp.counted_status_enum, DATE(rp.time_utc), COUNT(*)
     FROM RedditPost rp
     INNER JOIN TrackedSubs s
-    WHERE DATE(DATE_SUB(NOW(), INTERVAL 2 DAY)) > DATE(rp.time_utc) >= DATE(DATE_SUB(NOW(), INTERVAL 5 DAY)) 
+    WHERE DATE(DATE_SUB(NOW(), INTERVAL 2 DAY) > DATE(rp.time_utc) >= DATE(DATE_SUB(NOW(), INTERVAL 5 DAY)) 
     GROUP BY rp.subreddit_name, rp.counted_status_enum, DATE(rp.time_utc);
     """
 
