@@ -623,7 +623,7 @@ def look_for_rule_violations3(wd):
         # tr_sub = wd.sub_dict[pg.subreddit_name]
         tr_sub = get_subreddit_by_name(wd, pg.subreddit_name, update_if_due=False)
         if not tr_sub:
-            logger.debug(f"skipping this sub for some reason {pg.subreddit_name} ")
+            logger.debug(f"Unable to find subreddit in database{pg.subreddit_name} ")
             continue
         max_count = tr_sub.max_count_per_interval
         if tr_sub.active_status_enum not in (SubStatus.ACTIVE, SubStatus.NO_BAN_ACCESS):
@@ -651,7 +651,10 @@ def look_for_rule_violations3(wd):
                 f"counted:{post.counted_status_enum} "
                 f"posted:{post.posted_status}  title:{post.title[0:30]}")
 
-            if post.counted_status_enum == CountedStatus.BLKLIST:  # May not need this later
+            if post.counted_status_enum in (CountedStatus.NEED_REMOVE,
+                                            CountedStatus.REMOVED
+                                            CountedStatus.BLKLIST_NEED_REMOVE
+                                            ):  # May not need this later
                 logger.debug(
                     f"{i}-{j}\t\tAlready handled")
                 continue

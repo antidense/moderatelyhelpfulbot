@@ -300,6 +300,9 @@ def handle_direct_messages(wd: WorkingData):
         elif message_subject.startswith('moderator added'):
             message.mark_read()
             continue
+        elif 'verification' in message.body or 'Verification' in message.body:
+            message.mark_read()
+            continue
         # Check if this is a ban notice (not new modmail)
         elif message_subject.startswith("re: You've been temporarily banned from participating"):
             message.mark_read()
