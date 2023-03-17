@@ -652,8 +652,8 @@ def look_for_rule_violations3(wd):
                 f"posted:{post.posted_status}  title:{post.title[0:30]}")
 
             if post.counted_status_enum in (CountedStatus.NEED_REMOVE,
-                                            CountedStatus.REMOVED
-                                            CountedStatus.BLKLIST_NEED_REMOVE
+                                            CountedStatus.REMOVED,
+                                            CountedStatus.BLKLIST_NEED_REMOVE,
                                             ):  # May not need this later
                 logger.debug(
                     f"{i}-{j}\t\tAlready handled")
