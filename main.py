@@ -72,7 +72,8 @@ class Task:
         if self.last_run_dt and self.last_run_dt + self.frequency > datetime.now():
             log.debug(f"Skipping task as not due for task: {self.target_function}")
             pass
-        elif self.error_count > 5:
+        elif self.error_count > 5 and self.last_run_dt > datetime.now()-timedelta(hours=5):
+            # if had multiple erros  and last ran less than five hours ago
             log.debug(f"Skipping task due to previous errors: {self.target_function} {self.last_error}")
         else:
             start_time = datetime.now()
