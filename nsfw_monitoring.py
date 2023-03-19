@@ -47,7 +47,7 @@ def check_post_nsfw_eligibility(wd: WorkingData, submitted_post):
                 (datetime.now(pytz.utc) - timedelta(days=7)):
             nsfw_pct, items = post_author.calculate_nsfw(wd, instaban_subs=tr_sub.nsfw_instaban_subs)
             if hasattr(tr_sub, 'nsfw_pct_set_user_flair') and tr_sub.nsfw_pct_set_user_flair is True:
-                if nsfw_pct < 10 and items < 10:
+                if nsfw_pct is None or nsfw_pct < 10 and items < 10:
                     new_flair_text = f"Warning: Minimal User History"
                 else:
                     new_flair_text = f"{int(nsfw_pct)}% NSFW"
@@ -106,7 +106,8 @@ def nsfw_checking(wd: WorkingData):  # Does not expand comments
     posts_to_check = wd.s.query(SubmittedPost).filter(
         SubmittedPost.post_flair.ilike("%strict sfw%"),
         SubmittedPost.time_utc > datetime.now(pytz.utc) - timedelta(hours=36),
-        SubmittedPost.counted_status < 3) \
+        SubmittedPost.counted_status_enum
+        .in_((CountedStatus.NEEDS_UPDATE, CountedStatus.NOT_CHKD, CountedStatus.PREV_EXEMPT, CountedStatus.REVIEWED))) \
         .order_by(desc(SubmittedPost.time_utc)) \
         .all()
 

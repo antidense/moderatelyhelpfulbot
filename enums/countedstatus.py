@@ -24,6 +24,7 @@ class CountedStatus(Enum):
     GRACE_PERIOD_EXEMPT = 17
     FLAIR_HELPER = 18
     REMOVED = 20
+    SUB_CONFIG_ERROR = 25
     BOT_SPAM = 30
     AGED_OUT = 40
     REMOVE_FAILED = 50

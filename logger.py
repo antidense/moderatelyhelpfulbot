@@ -9,6 +9,9 @@ def init_logger(logger_name, filename=None):
     ilogger.setLevel(logging.DEBUG)
     stream_handler = logging.StreamHandler()
     stream_handler.setLevel(logging.DEBUG)
+    stream_handler.setFormatter(logging.Formatter(fmt="%(asctime)s - %(name)s - %(levelname)s - %(funcName)s - %(message)s"))
+    # logging.basicConfig(format=FORMAT, level=logging.DEBUG)
+
     # create formatter
     # formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     # add formatter
@@ -44,6 +47,7 @@ def init_logger(logger_name, filename=None):
         # logger.addHandler(file_logger)
         logger.addHandler(sh)
     return logger
+
 
 
 

@@ -22,7 +22,7 @@ from sqlalchemy import (
 )
 
 from settings import MAIN_BOT_NAME
-
+from sqlalchemy import Enum
 
 s = dbobj.s
 
@@ -30,11 +30,11 @@ s = dbobj.s
 class TrackedSubreddit(dbobj.Base):
     __tablename__ = 'TrackedSubs'
     subreddit_name = Column(String(21), nullable=False, primary_key=True)
-    checking_mail_enabled = Column(Boolean, nullable=True)  #don't need this?
+    # checking_mail_enabled = Column(Boolean, nullable=True)  #don't need this?
     settings_yaml_txt = Column(UnicodeText, nullable=True)
     settings_yaml = None
     last_updated = Column(DateTime, nullable=True)
-    last_error_msg = Column(DateTime, nullable=True)  # not used
+    # last_error_msg = Column(DateTime, nullable=True)  # not used
     save_text = Column(Boolean, nullable=True)
     max_count_per_interval = Column(Integer, nullable=False, default=1)
     min_post_interval_mins = Column(Integer, nullable=False, default=60 * 72)
@@ -44,6 +44,7 @@ class TrackedSubreddit(dbobj.Base):
     # -1 -> unknown (not yet checked)
     # 0 -> bans not enabled
     active_status = Column(SMALLINT, nullable=True)
+    active_status_enum = Column(Enum(SubStatus))
     mm_convo_id = Column(String(10), nullable=True, default=None)
     is_nsfw = Column(Boolean, nullable=False, default=0)
 
@@ -58,8 +59,10 @@ class TrackedSubreddit(dbobj.Base):
     author_not_exempt_flair_keyword = Column(String(191), nullable=True, primary_key=False)
     title_exempt_keyword = Column(String(191), nullable=True, primary_key=False)
     title_not_exempt_keyword = Column(String(191), nullable=True, primary_key=False)
+    # self.last_updated = datetime.now() - timedelta(days=10)
 
     last_pulled = Column(DateTime, nullable=True)
+    config_last_checked = Column(DateTime, nullable=True)
 
     subreddit_mods = []
     rate_limiting_enabled = False
@@ -70,7 +73,6 @@ class TrackedSubreddit(dbobj.Base):
     ban_duration_days = 0
     ban_threshold_count = 5
     notify_about_spammers = False
-
 
     action = None
     modmail = None
@@ -106,9 +108,8 @@ class TrackedSubreddit(dbobj.Base):
     nsfw_pct_ban_duration_days = -1
     nsfw_pct_moderation = False
     nsfw_pct_threshold = 80
+
     # enforce_nsfw_checking = False
-
-
 
     def __init__(self, subreddit_name: str, sub_info=None):
         self.subreddit_name = subreddit_name.lower()
@@ -122,11 +123,11 @@ class TrackedSubreddit(dbobj.Base):
         self.author_not_exempt_flair_keyword = None
         self.title_exempt_keyword = None
         self.title_not_exempt_keyword = None
-        self.last_pulled = datetime.now(pytz.utc)-timedelta(hours=24)
+        self.last_pulled = datetime.now(pytz.utc) - timedelta(hours=24)
 
         if not sub_info:
-            self.active_status = SubStatus.NO_CONFIG.value
-        self.active_status = sub_info.active_status
+            self.active_status_enum = SubStatus.NO_CONFIG
+        self.active_status_enum = sub_info.active_status_enum
         self.mod_list = sub_info.mod_list
         self.settings_yaml_txt = sub_info.settings_yaml_txt
         self.settings_revision_date = sub_info.settings_revision_date
@@ -138,11 +139,11 @@ class TrackedSubreddit(dbobj.Base):
 
     def update_from_subinfo(self, sub_info):
         if not sub_info:
-            self.active_status = SubStatus.NO_CONFIG.value
+            self.active_status_enum = SubStatus.NO_CONFIG
             return False, f"no subinfo for {self.subreddit_name}"
         self.ignore_Automoderator_removed = True
         self.ignore_moderator_removed = True
-        self.active_status = sub_info.active_status
+        self.active_status_enum = sub_info.active_status_enum
         self.mod_list = sub_info.mod_list
         self.settings_yaml_txt = sub_info.settings_yaml_txt
         self.settings_revision_date = sub_info.settings_revision_date
@@ -156,23 +157,26 @@ class TrackedSubreddit(dbobj.Base):
         return self.reload_yaml_settings()
 
     def reload_yaml_settings(self) -> (Boolean, String):
+        if self.active_status_enum in (SubStatus.SUB_FORBIDDEN, SubStatus.SUB_GONE, SubStatus.CONFIG_ACCESS_ERROR):
+            print(f"Sub access issue  {self.active_status_enum}")
+            return False, f"Sub access issue  {self.active_status_enum}"
         return_text = "Updated Successfully!"
         if not self.settings_yaml_txt:
-            self.active_status = SubStatus.NO_CONFIG.value
+            self.active_status_enum = SubStatus.NO_CONFIG
             return False, "Nothing in yaml?"
         try:
             self.settings_yaml = yaml.safe_load(self.settings_yaml_txt)
         except (yaml.scanner.ScannerError, yaml.composer.ComposerError, yaml.parser.ParserError):
-            self.active_status = SubStatus.YAML_SYNTAX_ERROR.value
+            self.active_status_enum = SubStatus.YAML_SYNTAX_ERROR
             return False, f"There is a syntax error in your config: " \
-                                                f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{MAIN_BOT_NAME} ."\
-                                                f"Please validate your config using http://www.yamllint.com/. "
+                          f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{MAIN_BOT_NAME} ." \
+                          f"Please validate your config using http://www.yamllint.com/. "
         if not self.settings_yaml:
-            self.active_status = SubStatus.YAML_SYNTAX_OK.value
+            self.active_status_enum = SubStatus.YAML_SYNTAX_OK
             return False, "blank config?? settings yaml is None"
 
         if 'post_restriction' not in self.settings_yaml:
-            self.active_status = SubStatus.MHB_CONFIG_ERROR.value
+            self.active_status_enum = SubStatus.MHB_CONFIG_ERROR
             return False, "Cannot load yaml config?"
 
         self.ban_ability = -1
@@ -211,7 +215,7 @@ class TrackedSubreddit(dbobj.Base):
 
             }
             if not pr_settings:
-                self.active_status = SubStatus.MHB_CONFIG_ERROR.value
+                self.active_status_enum = SubStatus.MHB_CONFIG_ERROR
                 return False, "No settings for post restriction"
             for pr_setting in pr_settings:
                 if pr_setting in possible_settings:
@@ -222,7 +226,7 @@ class TrackedSubreddit(dbobj.Base):
 
                     pr_setting_type = type(pr_setting_value).__name__
                     # if possible_settings[pr_setting] not in f"{type(pr_settings[pr_setting])}":  will not work for true for modmail stting to use default template
-                    #if "min" in pr_setting or "hrs" in pr_setting\
+                    # if "min" in pr_setting or "hrs" in pr_setting\
                     #        and isinstance(pr_settings[pr_setting], str):
 
                     # print(f"{self.subreddit_name}: {pr_setting} {pr_setting_value} {pr_setting_type}, {possible_settings[pr_setting]}")
@@ -238,7 +242,7 @@ class TrackedSubreddit(dbobj.Base):
                                       f"{possible_settings[pr_setting]} but is type {pr_setting_type}.  " \
                                       f"Make sure you use lowercase true and false"
                         print(return_text)
-                        self.active_status = SubStatus.MHB_CONFIG_ERROR.value
+                        self.active_status_enum = SubStatus.MHB_CONFIG_ERROR
                         return False, return_text
                 else:
                     return_text = "Did not recognize variable '{}' for {}".format(pr_setting, self.subreddit_name)
@@ -250,7 +254,7 @@ class TrackedSubreddit(dbobj.Base):
                 self.min_post_interval_txt = f"{pr_settings['min_post_interval_mins']}m"
             if 'min_post_interval_hrs' in pr_settings:
                 self.min_post_interval = timedelta(hours=pr_settings['min_post_interval_hrs'])
-                self.min_post_interval_mins = pr_settings['min_post_interval_hrs']*60
+                self.min_post_interval_mins = pr_settings['min_post_interval_hrs'] * 60
                 if self.min_post_interval_hrs < 24:
                     self.min_post_interval_txt = f"{self.min_post_interval_hrs}h"
                 else:
@@ -273,7 +277,7 @@ class TrackedSubreddit(dbobj.Base):
                     if m_setting in possible_settings:
                         setattr(self, m_setting, m_settings[m_setting])
                     else:
-                        self.active_status = SubStatus.MHB_CONFIG_ERROR.value
+                        self.active_status_enum = SubStatus.MHB_CONFIG_ERROR
                         return_text = "Did not understand variable '{}'".format(m_setting)
 
         if 'nsfw_pct_moderation' in self.settings_yaml:
@@ -305,7 +309,7 @@ class TrackedSubreddit(dbobj.Base):
                                       f"{possible_settings[n_setting]} but is type {n_setting_type}.  " \
                                       f"Make sure you use lowercase true and false"
                         print(return_text)
-                        self.active_status = SubStatus.MHB_CONFIG_ERROR.value
+                        self.active_status_enum = SubStatus.MHB_CONFIG_ERROR
                         return False, return_text
                 else:
                     return_text = "Did not understand variable '{}' for {}".format(n_setting, self.subreddit_name)
@@ -313,10 +317,10 @@ class TrackedSubreddit(dbobj.Base):
 
         self.min_post_interval = self.min_post_interval if self.min_post_interval else timedelta(hours=72)
         self.max_count_per_interval = self.max_count_per_interval if self.max_count_per_interval else 1
-        self.active_status = SubStatus.ACTIVE.value
+        self.active_status_enum = SubStatus.ACTIVE
 
         if self.ban_duration_days == 0:
-            self.active_status = SubStatus.MHB_CONFIG_ERROR.value
+            self.active_status_enum = SubStatus.MHB_CONFIG_ERROR
             return False, "ban_duration_days can no longer be zero. Use `ban_duration_days: ~` to disable or use " \
                           "`ban_duration_days: 999` for permanent bans. Make sure there is a space after the colon."
 
@@ -388,7 +392,7 @@ class TrackedSubreddit(dbobj.Base):
                     f"|[{post.author}](/u/{post.author})"
                     f"|[{post.title}]({post.get_comments_url()})"
                     f"|{post}"
-                    f"|{CountedStatus(post.counted_status)}"
+                    f"|{CountedStatus(post.counted_status_enum)}"
                     f"|\n")
             final_response = "".join(response_lines)
             input_text = input_text.replace("{summary table}", final_response)
@@ -435,7 +439,7 @@ class TrackedSubreddit(dbobj.Base):
                     f"|[{post.title}]({post.get_comments_url()})"
                     f"|{posted_status}"
                     # post.get_posted_status().value
-                    f"|{CountedStatus(post.counted_status)}"
+                    f"|{CountedStatus(post.counted_status_enum)}"
                     f"|\n")
             final_response = "".join(response_lines)
             input_text = input_text.replace("{summary table}", final_response)
@@ -450,6 +454,5 @@ class TrackedSubreddit(dbobj.Base):
                            })
 
         input_text = re.sub(r'{(.+?)}', lambda m: mydict.get(m.group(), m.group()), input_text)
-        input_text = input_text.replace("\\n","\n\n")
+        input_text = input_text.replace("\\n", "\n\n")
         return input_text
-

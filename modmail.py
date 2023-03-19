@@ -19,15 +19,15 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
         -> tuple[str, bool]:
     subreddit_name: str = subreddit_name[2:] if subreddit_name.startswith('r/') else subreddit_name
     subreddit_name: str = subreddit_name[3:] if subreddit_name.startswith('/r/') else subreddit_name
-    subreddit_names = subreddit_name.split('+') if '+' in subreddit_name else [subreddit_name]  # allow
-    if subreddit_name == MAIN_BOT_NAME or subreddit_name == wd.bot_name:
+    # subreddit_names = subreddit_name.split('+') if '+' in subreddit_name else [subreddit_name]  # allow
+    if subreddit_name == MAIN_BOT_NAME or subreddit_name == wd.ri.bot_name:
         return "this command doesn't make sense", True
 
     command: str = command[1:] if command.startswith("$") else command
 
     tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=True)
     if not tr_sub:
-        return "Error retrieving information for /r/{}".format(subreddit_name), True
+        return f"Error retrieving information for /r/{subreddit_name}", True
     try:
 
         moderators: List[str] = wd.ri.get_mod_list(subreddit=tr_sub)
@@ -76,7 +76,7 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
                 subreddit_author = SubAuthor(tr_sub.subreddit_name, author_handle.name)
 
             if command == "unban":
-                if subreddit_author.next_eligible.replace(tzinfo=timezone.utc) > datetime.now(pytz.utc):
+                if subreddit_author.next_eligible and subreddit_author.next_eligible.replace(tzinfo=timezone.utc) > datetime.now(pytz.utc):
                     subreddit_author.next_eligible = datetime(2019, 1, 1, 0, 0)
                     return_text = "User was removed from blacklist"
                 else:
@@ -200,12 +200,24 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
             return "User was removed from blacklist", False
         posts = wd.s.query(SubmittedPost).filter(SubmittedPost.author == author_param,
                                                  # SubmittedPost.flagged_duplicate.is_(True),
-                                                 SubmittedPost.counted_status == CountedStatus.FLAGGED.value,
+                                                 SubmittedPost.counted_status_enum == CountedStatus.FLAGGED,
                                                  SubmittedPost.subreddit_name == tr_sub.subreddit_name).all()
         for post in posts:
             post.flagged_duplicate = False
-            post.counted_status = CountedStatus.EXEMPTED.value
+            # post.counted_status = CountedStatus.EXEMPTED.value
+            post.counted_status_enum = CountedStatus.EXEMPTED
             wd.s.add(post)
+        wd.s.commit()
+    elif command == "reloadconfig":
+        wd.ri.reddit_client.subreddit(tr_sub.subreddit_name).wiki.edit(
+            wd.ri.bot_name,
+            DEFAULT_CONFIG.replace("subredditname", tr_sub.subreddit_name).replace("moderatelyhelpfulbot",
+                                                                                   wd.ri.bot_name),
+            reason="reset to default_config")
+        sub_info = wd.ri.get_subreddit_info(tr_sub.subreddit_name)
+        tr_sub.update_from_subinfo(sub_info)
+        _, _ = tr_sub.reload_yaml_settings()
+        wd.s.add(tr_sub)
         wd.s.commit()
 
     elif command == "update":  # $update
@@ -225,23 +237,22 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
                         f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{MAIN_BOT_NAME}. "
         elif "yaml" in status:
             help_text = "Looks like there is an error in your yaml code. " \
-                        "Please make sure to validate your syntax at https://yamlvalidator.com/.  " \
+                        "Please make sure to validate your syntax.  " \
                         f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{MAIN_BOT_NAME}. "
         elif "single document in the stream" in status:
             help_text = "Looks like there is an extra double hyphen in your code at the end, e.g. '--'. " \
                         "Please remove it.  " \
                         f"Link to your config: https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{MAIN_BOT_NAME}. "
 
-        sub_status_code = tr_sub.active_status
-        sub_status_enum = str(SubStatus(sub_status_code))
+
 
         reply_text = f"Received message to update config for {subreddit_name}.  See the output below. {status}" \
                      f"Please message [/r/moderatelyhelpfulbot](https://www.reddit.com/" \
                      f"message/old?to=%2Fr%2Fmoderatelyhelpfulbot) if you have any questions \n\n" \
                      f"Update report: \n\n >{help_text}" \
-                     f"\n\nCurrent Status: {sub_status_code}: {sub_status_enum}  "
+                     f"\n\nCurrent Status: {tr_sub.active_status_enum}  "
         bot_owner_message = f"subreddit: {subreddit_name}\n\nrequestor: {requestor_name}\n\n" \
-                            f"report: {status}\n\nCurrent Status: {sub_status_code}: {sub_status_enum}  "
+                            f"report: {status}\n\nCurrent Status: {tr_sub.active_status_enum}  "
         # wd.ri.reddit_client.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
         try:
             assert isinstance(requestor_name, str)
@@ -261,6 +272,7 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
 def handle_direct_messages(wd: WorkingData):
     print("checking direct messages")
     for message in wd.ri.reddit_client.inbox.unread(limit=None):
+
         logger.info("got this email author:{} subj:{}  body:{} ".format(message.author, message.subject, message.body))
 
         # Get author name, message_id if available
@@ -270,22 +282,31 @@ def handle_direct_messages(wd: WorkingData):
         body_parts = message.body.split(' ')
         command = body_parts[0].lower() if len(body_parts) > 0 else None
         # subreddit_name = message.subject.replace("re: ", "") if command else None
+        message_subject = message.subject.replace("re: ", "") if message.subject else None
         # First check if already actioned
         if check_actioned(wd, message_id):
             message.mark_read()  # should have already been "read"
             continue
         # Check if this a user mention (just ignore this)
-        elif message.subject.startswith('username mention'):
+        elif message_subject.startswith('username mention'):
+            message.mark_read()
+            continue
+        elif message_subject.startswith('[Notification]'):
+            message.mark_read()
+        elif "has been removed as a moderator" in message_subject:
             message.mark_read()
             continue
         # Check if this a user mention (just ignore this)
-        elif message.subject.startswith('moderator added'):
+        elif message_subject.startswith('moderator added'):
+            message.mark_read()
+            continue
+        elif 'verification' in message.body or 'Verification' in message.body:
             message.mark_read()
             continue
         # Check if this is a ban notice (not new modmail)
-        elif message.subject.startswith("re: You've been temporarily banned from participating"):
+        elif message_subject.startswith("re: You've been temporarily banned from participating"):
             message.mark_read()
-            subreddit_name = message.subject.replace("re: You've been temporarily banned from participating in r/", "")
+            subreddit_name  = message_subject.replace("re: You've been temporarily banned from participating in r/", "")
             if not check_actioned(wd, "ban_note: {0}".format(requestor_name)):
                 # record actioned first out of safety in case of error
                 record_actioned(wd, "ban_note: {0}".format(message.author))
@@ -297,7 +318,7 @@ def handle_direct_messages(wd: WorkingData):
                     except (praw.exceptions.APIException, prawcore.exceptions.Forbidden):
                         pass
         # Respond to an invitation to moderate
-        elif message.subject.startswith('invitation to moderate'):
+        elif message_subject.startswith('invitation to moderate'):
             mod_mail_invitation_to_moderate(wd, message)
         elif command in ("summary", "update", "stats") or command.startswith("$"):
             subreddit_name = None
@@ -307,13 +328,26 @@ def handle_direct_messages(wd: WorkingData):
                 print("requestor name is none?")
                 continue
             if is_modmail_message:
-                subreddit_name = message.subject
+                #subreddit_name = message_subject
                 thread_id = None
                 requestor_name = "[modmail]"
+            message_subject = message.subject
             if not subreddit_name:
-                subject_parts = message.subject.replace("re: ", "").split(":")
-                thread_id = subject_parts[1] if len(subject_parts) > 1 else None
-                subreddit_name = subject_parts[0].lower().replace("re: ", "").replace("/r/", "").replace("r/", "")
+                matches = \
+                    re.match(r'^(re: )?(/?r/)?(?P<sub_name>[a-zA-Z0-9_]{1,21})(:(?P<thread_id>[a-z0-9]+))?$',
+                             message_subject)
+                if matches and matches.group("sub_name"):
+                    subreddit_name = matches.group("sub_name")
+                    # subject_parts = message.subject.replace("re: ", "").split(":")
+                    if matches.group("thread_id"):
+                        thread_id = matches.group("thread_id")
+                    # subreddit_name = subject_parts[0].lower().replace("re: ", "").replace("/r/", "").replace("r/", "")
+            print(f"Subreddit name = {subreddit_name}")
+            if not subreddit_name or not subreddit_name.replace('_','').isalnum()  \
+                    or '/' in subreddit_name or len(subreddit_name) > 21 or subreddit_name == "yoursubredditname":
+                message.mark_read()
+                message.reply(body=f"Sorry, I don''t think '{message_subject}' contains a valid subreddit?")
+                continue
             tr_sub = get_subreddit_by_name(wd, subreddit_name)
             response, _ = handle_dm_command(wd, subreddit_name, requestor_name, command, body_parts[1:])
             print("response---", response)
@@ -327,9 +361,9 @@ def handle_direct_messages(wd: WorkingData):
                                 f"command: {command}\n\n" \
                                 f"response: {response}\n\n" \
                                 f"wiki: https://www.reddit.com/r/{subreddit_name}/wiki/{MAIN_BOT_NAME}\n\n"
-            if requestor_name is not None and requestor_name.lower() != BOT_OWNER.lower():
-                wd.ri.send_modmail(subreddit_name=MAIN_BOT_NAME, subject="[Notification]  Command processed",
-                                   body=bot_owner_message, use_same_thread=True)
+            # if requestor_name is not None and requestor_name.lower() != BOT_OWNER.lower():
+            #    wd.ri.send_modmail(subreddit_name=MAIN_BOT_NAME, subject="[Notification]  Command processed",
+            #                       body=bot_owner_message, use_same_thread=True)
             # wd.ri.reddit_client.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
 
         elif requestor_name and not check_actioned(wd, requestor_name):
@@ -361,16 +395,19 @@ def handle_direct_messages(wd: WorkingData):
 
 
 def mod_mail_invitation_to_moderate(wd: WorkingData, message):
-    subreddit_name = message.subject.replace("invitation to moderate /r/", "")
+    subreddit_name = message.subject.replace("re: invitation to moderate /r/", "")
+    subreddit_name = subreddit_name.replace("invitation to moderate /r/", "")
 
     tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=False)
     # accept invite if accepting invites or had been accepted previously
-    print("to make sub:", subreddit_name)
+    print(f"Got invite for {subreddit_name}, {tr_sub}, accepting new subs?{ACCEPTING_NEW_SUBS}")
     if tr_sub or (ACCEPTING_NEW_SUBS and 'karma' not in subreddit_name.lower()):
         try:
             wd.ri.reddit_client.subreddit(subreddit_name).mod.accept_invite()
-        except praw.exceptions.APIException:
-            message.reply(body="Error: Invite message has been rescinded? or already accepted?")
+        except praw.exceptions.RedditAPIException as ex:  # Changed from praw.exceptions.APIException
+            reply =  f"Message from reddit: {ex.message}"
+            print(f"error reply {reply}")
+            message.reply(body=reply)
             message.mark_read()
 
         if not tr_sub:
@@ -387,7 +424,7 @@ def mod_mail_invitation_to_moderate(wd: WorkingData, message):
             if access_status == SubStatus.NO_CONFIG:
                 logger.warning(f'no wiki page {tr_sub.subreddit_name}..will create')
                 wd.ri.reddit_client.subreddit(tr_sub.subreddit_name).wiki.create(
-                    MAIN_BOT_NAME, DEFAULT_CONFIG.replace("subredditname", tr_sub.subreddit_name),
+                    wd.bot_name, DEFAULT_CONFIG.replace("subredditname", tr_sub.subreddit_name).replace("moderatelyhelpfulbot", wd.bot_name),
                     reason="default_config"
                 )
 
@@ -395,11 +432,11 @@ def mod_mail_invitation_to_moderate(wd: WorkingData, message):
                                     body=f"There was no configuration created for {wd.bot_name} so "
                                          "one was automatically generated. Please check it to make sure it is "
                                          f"what you want. https://www.reddit.com/r/{tr_sub.subreddit_name}/wiki/{wd.bot_name}")
-                tr_sub.active_status = SubStatus.ACTIVE.value
+                tr_sub.active_status_enum = SubStatus.ACTIVE
                 wd.s.add(tr_sub)
         except prawcore.exceptions.NotFound:
             logger.warning(f'no config accessible for {tr_sub.subreddit_name}')
-            tr_sub.active_status = SubStatus.CONFIG_ACCESS_ERROR.value
+            tr_sub.active_status_enum = SubStatus.CONFIG_ACCESS_ERROR
             wd.s.add(tr_sub)
     else:
         message.reply(body=f"Invitation received. Please wait for approval by bot owner. In the mean time, "
@@ -424,13 +461,14 @@ def handle_modmail_message(wd: WorkingData, convo):
         tr_sub.mm_convo_id = convo.id
         wd.s.add(tr_sub)
         wd.s.commit()
+        convo.read()
 
 
     # Ignore if already actioned (at this many message #s)
     if check_actioned(wd, "mm{}-{}".format(convo.id, convo.num_messages)):  # sql query
         try:
             convo.read()  # praw query
-            convo.read()  # praw query24
+            # convo.read()  # praw query24
         except prawcore.exceptions.Forbidden:
             pass
 
@@ -453,8 +491,10 @@ def handle_modmail_message(wd: WorkingData, convo):
     # If this conversation only has one message -> canned response or summary table
     # Does not respond if already responded to by a mod
     if convo.num_messages == 1 \
-            and initiating_author_name not in tr_sub.subreddit_mods \
-            and initiating_author_name not in ("AutoModerator", "Sub_Mentions", "mod_mailer"):
+            and initiating_author_name.lower() not in tr_sub.mod_list.lower() \
+            and initiating_author_name not in ("AutoModerator", "Sub_Mentions", "mod_mailer")\
+            and initiating_author_name.lower() != wd.bot_name.lower()\
+            and initiating_author_name.lower() != MAIN_BOT_NAME:
         # Join request
         if "ADD USER" in convo.messages[0].body:
             record_actioned(wd, "mm{}-{}".format(convo.id, convo.num_messages))
@@ -639,8 +679,8 @@ def handle_modmail_message(wd: WorkingData, convo):
                 # wd.ri.reddit_client.redditor(BOT_OWNER).message(subreddit_name, bot_owner_message)
                 wd.ri.send_modmail(subreddit_name=wd.bot_name, subject="[Notification] MHB Command used",
                                    body=bot_owner_message, use_same_thread=True)
-        except (prawcore.exceptions.BadRequest, praw.exceptions.RedditAPIException):
-            logger.debug("reply failed {0}".format(response))
+        except (prawcore.exceptions.BadRequest, praw.exceptions.RedditAPIException, prawcore.exceptions.ServerError):
+            logger.debug(f"reply failed {subreddit_name} {response} ")
     record_actioned(wd, f"mm{convo.id}-{convo.num_messages}")
     convo.read()
     wd.s.commit()

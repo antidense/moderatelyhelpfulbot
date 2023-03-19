@@ -1,23 +1,29 @@
 #!/usr/bin/env python3.7
 from __future__ import annotations
-from praw import exceptions
-from praw.models import Submission
+
+# from praw import exceptions
+# from praw.models import Submission
 from static import *
 from datetime import datetime, timedelta, timezone
-from typing import List
-import praw
+# from typing import List
+# import praw
 import prawcore
 import pytz
 from settings import MAIN_BOT_NAME, ACCEPTING_NEW_SUBS, BOT_OWNER
 from utils import look_for_rule_violations3
 from models.reddit_models import ActionedComments, CommonPost, Stats2, SubAuthor, SubmittedPost, TrackedAuthor, \
     TrackedSubreddit, RedditInterface
-from logger import logger
+# from logger import logger
 from core import dbobj
 from workingdata import WorkingData
 from nsfw_monitoring import check_post_nsfw_eligibility, nsfw_checking
 from modmail import handle_modmail_message, handle_modmail_messages, handle_dm_command, handle_direct_messages
-from utils import check_spam_submissions, check_new_submissions
+from utils import check_spam_submissions, check_new_submissions, do_reddit_actions
+
+
+from logger import logger as log
+
+
 
 if __name__ == '__main__':
     dbobj.load_models()
@@ -29,174 +35,186 @@ incorporate toolbox? https://www.reddit.com/r/nostalgia/wiki/edit/toolbox check 
 active status to an ENUM
 add non-binary gender
 
+
+
 """
-BOT_NAME = None
 
+class Task:
+    """
+    __tablename__ = 'Tasks'
+    wd = None
+    task_name = Column(String(191), nullable=False, primary_key=True)
+    func_name = Column(String(191), nullable=False)
+    last_run_dt = Column(DateTime, nullable=True)
+    last_runtime = Column(Integer, nullable=False)
+    frequency_mins = Column(Integer, nullable=False)
+    last_error
+    time out?
 
-def main_loop():
-    wd = WorkingData()
-    wd.s = dbobj.s
-    wd.ri = RedditInterface()
-    wd.most_recent_review = None
+    """
 
+    wd = None
+    target_function = None
+    last_run_dt = None
+    frequency = timedelta(minutes=5)
+    max_duration = timedelta(minutes=5)
+    task_durations = []
+    error_count = 0
+    last_error = ""
 
-    # Find out what my name is
-    global BOT_NAME
-    BOT_NAME = wd.ri.reddit_client.user.me().name
-    print(f"My name is {wd.ri.reddit_client.user.me()}, {BOT_NAME}")
-    wd.bot_name = BOT_NAME
-    # Get the bot controlling sub
-    sub_info = wd.ri.get_subreddit_info(subreddit_name=MAIN_BOT_NAME)
-    wd.ri.bot_sub: TrackedSubreddit = wd.s.query(TrackedSubreddit).get(MAIN_BOT_NAME)
-    if not wd.ri.bot_sub:
-        wd.ri.bot_sub = TrackedSubreddit(subreddit_name=MAIN_BOT_NAME, sub_info=sub_info)
-    if not wd.ri.bot_sub.mm_convo_id:
-        wd.ri.bot_sub.mm_convo_id = wd.ri.get_modmail_thread_id(subreddit_name=MAIN_BOT_NAME)
-    wd.s.add(wd.ri.bot_sub)
-    wd.s.commit()
+    def __init__(self, wd, target_function, frequency):
+        self.wd = wd
+        self.target_function = target_function
+        self.frequency = frequency
 
-    i = 0
-    #calculate_stats(wd)
-    purge_old_records(wd)
+    def run_task(self):
 
-    while True:
-        i += 1
-        print('start_loop')
-
-        intensity = 1 if (i - 1) % 15 == 0 else 0
-
-        # First: Update sub list:
-        if wd.to_update_list or len(wd.sub_list) == 0 or i % 50 == 0:
-            print("updating list")
-            update_sub_list(wd, intensity=intensity)
-            wd.to_update_list = False
-
-        try:
-            handle_direct_messages(wd)
-            handle_modmail_messages(wd)
-            look_for_rule_violations3(wd)
-            # Gather posts
-            chunk_size = 200 if intensity == 1 else 300
-            chunked_list = [wd.sub_list[j:j + chunk_size] for j in range(0, len(wd.sub_list), chunk_size)]
-
-            updated_subs = []
-
-            for sub_list in chunked_list:
-                sub_list_str = "+".join(sub_list)
-                print( sub_list_str)
-                updated_subs += check_new_submissions(wd, sub_list=sub_list_str, intensity=intensity)
-                check_spam_submissions(wd, sub_list=sub_list_str, intensity=intensity)
-
-            if intensity == 1:
-                updated_subs = None
-
-            start = datetime.now(pytz.utc)
-            if i % 15 == 0:
-                intensity = 5
-            look_for_rule_violations3(wd)  # uses a lot of resource
-            # look_for_rule_violations2(wd, intensity=intensity, sub_list=sub_list)  # uses a lot of resource
-            print("$$$checking rule violations took this long", datetime.now(pytz.utc) - start)
-
-            if i % 75 == 0:
-                purge_old_records(wd)
-
-            if (i - 1) % 300 == 0:
-                print("$updating top posts", datetime.now(pytz.utc) - start)
-                # update_common_posts('nostalgia')
-                # update_common_posts('homeimprovement')
-
-            if i % 300 == 0:
-                print("$updating top posts", datetime.now(pytz.utc) - start)
-                # update_common_posts('nostalgia')
-
-            # if i % 70 == 0:
-            #    print("$Looking for bot spam posts", datetime.now(pytz.utc) - start)
-            #    check_common_posts(['nostalgia'])
-
-            # update_TMBR_submissions(look_back=timedelta(days=7))
-            #  do_automated_replies()  This is currently disabled!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            handle_direct_messages(wd)
-            handle_modmail_messages(wd)
-
-            nsfw_checking(wd)
-            if (i - 1) % 15 == 0:
-                calculate_stats(wd)
-
+        if self.last_run_dt and self.last_run_dt + self.frequency > datetime.now():
+            log.debug(f"Skipping task as not due for task: {self.target_function}")
+            pass
+        elif self.error_count > 5 and self.last_run_dt > datetime.now()-timedelta(hours=5):
+            # if had multiple erros  and last ran less than five hours ago
+            log.debug(f"Skipping task due to previous errors: {self.target_function} {self.last_error}")
+        else:
+            start_time = datetime.now()
+            try:
+                log.debug(f"Running task: {self.target_function}, last ran:{self.last_run_dt}")
+                globals()[self.target_function](self.wd)
+                end_time = datetime.now()
+                self.last_run_dt = start_time
+                log.debug(f"Task complete {self.target_function} {end_time-start_time}")
+                self.task_durations.append((end_time-start_time).seconds)
+            except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException):
+                self.error_count += 1
+                import traceback
+                trace = traceback.format_exc()
+                print(trace)
+                return -1
+            except Exception:
+                import traceback
+                trace = traceback.format_exc()
+                self.last_error = str(trace)
+                print(trace)
+        """
         except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException) as e:
             import time
             print("sleeping due to server error")
             import traceback
             print(traceback.format_exc())
             time.sleep(60 * 5)  # sleep for a bit server errors
-        except Exception as e:
+        
             import traceback
             trace = traceback.format_exc()
             print(trace)
             # wd.ri.send_modmail(subreddit_name=BOT_NAME, subject="[Notification] MHB Exception", body=trace,
             #                    use_same_thread=True)
-            wd.s.add(wd.ri.bot_sub)
-            wd.s.commit()
+            #wd.s.add(wd.ri.bot_sub)
+            #wd.s.commit()
+        """
+
+
+def check_submissions(wd):
+    chunk_size = 150
+    assert isinstance(wd.sub_dict, dict)
+    wd.sub_list = list(wd.sub_dict.keys())
+    chunked_list = [wd.sub_list[j:j + chunk_size] for j in range(0, len(wd.sub_list), chunk_size)]
+
+    for sub_list in chunked_list:
+        sub_list_str = "+".join(sub_list)
+        check_new_submissions(wd, sub_list=sub_list_str, intensity=0)
+        check_spam_submissions(wd, sub_list=sub_list_str, intensity=0)
+
+def main_loop():
+    wd: WorkingData = WorkingData()
+    wd.s = dbobj.s  # Database Session object
+    wd.ri = RedditInterface()  # Reddit API instance
+    wd.most_recent_review = None  # not used?
+    wd.bot_name = wd.ri.reddit_client.user.me().name  # what is my name?
+    log.debug(f"My name is {wd.bot_name}")
+
+    tasks = [Task(wd, 'purge_old_records', timedelta(hours=12)),
+             Task(wd, 'do_reddit_actions', timedelta(minutes=1)),
+             Task(wd, 'update_sub_list', timedelta(hours=2)),
+             Task(wd, 'handle_direct_messages', timedelta(minutes=1)),
+             Task(wd, 'handle_modmail_messages', timedelta(minutes=1)),
+             Task(wd, 'look_for_rule_violations3', timedelta(minutes=1)),
+             Task(wd, 'check_submissions', timedelta(minutes=1)),
+             Task(wd, 'calculate_stats', timedelta(hours=10)),
+             Task(wd, 'nsfw_checking', timedelta(minutes=20)),
+             ]
+    if False:
+        purge_old_records(wd)
+        update_sub_list(wd)
+        handle_direct_messages(wd)
+        handle_modmail_messages(wd)
+
+        # currently disabled:
+        # update_common_posts('nostalgia')
+        # update_common_posts('homeimprovement')
+        # update_TMBR_submissions(look_back=timedelta(days=7))
+        #  do_automated_replies()  This is currently disabled!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+        # nsfw_checking(wd)
+    rate_limiting_errors = 0
+    while True:
+        for task in tasks:
+            return_val = task.run_task()
+            if return_val == -1:
+                rate_limiting_errors += 1
+                if rate_limiting_errors > 2:
+                    import time
+                    time.sleep(60 * 5)
+                    rate_limiting_errors = 0
+
 
 def update_sub_list(wd: WorkingData, intensity=0):
-    print('updating subs..', sep="")
-    wd.sub_list = []
+    log.info('updating subs..')
     wd.nsfw_monitoring_subs = {}
 
-    if intensity > 4:
-        trs = wd.s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status > 0).all()  # sql query
-        for tr in trs:
-            assert isinstance(tr, TrackedSubreddit)
-            active_status, error = tr.update_from_subinfo(wd.ri.get_subreddit_info(tr))
+    trs = wd.s.query(TrackedSubreddit)\
+        .filter(~TrackedSubreddit.active_status_enum.in_((SubStatus.SUB_FORBIDDEN, SubStatus.SUB_GONE))).all()
 
-            print(f"Checked {tr.subreddit_name}:\t{tr.active_status}\t{error}")
-            if not tr.mm_convo_id and tr.active_status > 0:
-                tr.checking_mail_enabled = True
-                try:
-                    tr.mm_convo_id = wd.ri.get_modmail_thread_id(subreddit_name=tr.subreddit_name)
-
-                except prawcore.exceptions.Forbidden:
-                    tr.checking_mail_enabled = False
-                if tr.mm_convo_id:
-                    print(f"found convo id: {tr.mm_convo_id}")
-                wd.s.add(tr)
-                wd.s.commit()
-    trs = wd.s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status > 0).all()
+    # go through all subs in database
     for tr in trs:
-        # print(f'updating /r/{tr.subreddit_name}', end="")
         assert isinstance(tr, TrackedSubreddit)
 
-        wd.sub_list.append(tr.subreddit_name)
+        # See if due for complete re-pull from subreddit wiki (do periodically)
+        if not tr.config_last_checked\
+                or (tr.config_last_checked < datetime.now() - timedelta(days=1))\
+                or (not tr.mod_list)\
+                or (intensity == 3):
+            log.debug(f'***** rechecking...{tr.subreddit_name}, {tr.active_status_enum}'
+                  f' last updated:{tr.last_updated} last config check:{tr.config_last_checked}')
 
+            sub_info = wd.ri.get_subreddit_info(tr.subreddit_name)
+            tr.update_from_subinfo(sub_info)  # repopulate db with new values/settings from sub
+            tr.config_last_checked = datetime.now()  # record this is updated
+            wd.s.add(tr)
+        if wd.ri.bot_name.lower() == "moderatelyhelpfulbot" and "moderatelyusefulbot" in tr.mod_list.lower():
+            tr.active_status_enum = SubStatus.BOT_NOT_PRIMARY
+            wd.s.add(tr)
+
+        # skip adding  if config is NOT okay
+        if tr.active_status_enum in (SubStatus.YAML_SYNTAX_ERROR, SubStatus.NO_CONFIG, SubStatus.CONFIG_ACCESS_ERROR, SubStatus.BOT_NOT_PRIMARY):
+            log.info(f" active status for {tr.subreddit_name} is {tr.active_status_enum},  skipping")
+            continue  # don't bother with this
+
+        # Attempt to load config assuming it's okay
         if tr.subreddit_name not in wd.sub_dict:
             worked, status = tr.reload_yaml_settings()
-            wd.sub_dict[tr.subreddit_name] = tr
-            # print(f"---- {worked}, {status}")
-            if not tr.mod_list:
-                try:
-                    tr.mod_list = str(wd.ri.get_mod_list(tr.subreddit_name))
-                except (prawcore.exceptions.Forbidden, prawcore.exceptions.Redirect):
-                    tr.active_status = SubStatus.SUB_GONE.value
+            wd.s.add(tr)
+            if not worked:
+                log.info(f" active status for {tr.subreddit_name} is {tr.active_status_enum},  skipping")
+                continue
 
-                # print(tr.mod_list)
-                wd.s.add(tr)
-
-        if tr.subreddit_name not in wd.sub_dict:
-            if tr.last_updated < datetime.now() - timedelta(days=7) and tr.active_status >= 0:
-                print(f'...rechecking...{tr.last_updated}')
-                sub_info = wd.ri.get_subreddit_info(tr.subreddit_name)
-                tr.update_from_subinfo(sub_info)
-                tr.reload_yaml_settings()
-                wd.s.add(tr)
-                wd.s.commit()
-            else:
-                tr.reload_yaml_settings()
-                print(f'')
-        if tr.nsfw_pct_moderation:
-            wd.nsfw_monitoring_subs[tr.subreddit_name]=tr
-
+        # Add sub to dict to check
         wd.sub_dict[tr.subreddit_name] = tr
 
-    wd.s.commit()
+        # Add nsfw moderation if applicable:
+        if tr.nsfw_pct_moderation:
+            wd.nsfw_monitoring_subs[tr.subreddit_name] = tr
+
+        wd.s.commit()
     return
 
 
@@ -210,59 +228,26 @@ def purge_old_records(wd: WorkingData):  # requires db only
 def calculate_stats(wd: WorkingData):
     # Todo: repeat offenders?
 
-    statement = 'select count(*),counted_status, subreddit_name, date(time_utc) as date from RedditPost  where   time_utc < date(utc_timestamp) group by date(time_utc),  subreddit_name,  counted_status order by date desc'
-    rs = wd.s.execute(statement)
+    """CREATE TABLE IF NOT EXISTS stats5 (
+      subreddit_name VARCHAR(255),
+      counted_status VARCHAR(255),
+      post_date DATE,
+      post_count INT,
+      PRIMARY KEY (subreddit_name, counted_status, post_date)
+    );
+    """
 
-    for row in rs:
-        count = row[0]
-        counted_status = row[1]
-        subreddit_name = row[2]
-        date = row[3]
-        stat_name = str(CountedStatus(counted_status)).replace("CountedStatus.", "").lower()[0:21]
-        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, stat_name))
-        if not sub_stat:
-            sub_stat = Stats2(subreddit_name, date, stat_name)
-            sub_stat.value_int = count
-            wd.s.add(sub_stat)
-        elif sub_stat.value_int < count:
-            sub_stat.value_int = count
-        wd.s.add(sub_stat)
-    wd.s.commit()
+    save_stats_statement = """
+    INSERT INTO stats5 (subreddit_name, counted_status, post_date, post_count)
+    SELECT rp.subreddit_name, rp.counted_status_enum, DATE(rp.time_utc), COUNT(*)
+    FROM RedditPost rp
+    INNER JOIN TrackedSubs s
+    WHERE rp.time_utc >= (utc_timestamp() - INTERVAL 2 DAY) AND rp.time_utc < DATE(utc_timestamp() - INTERVAL 5 DAY)
+    GROUP BY rp.subreddit_name, rp.counted_status_enum, DATE(rp.time_utc)
+    ON DUPLICATE KEY UPDATE post_count = VALUES(post_count);
+    """
 
-    statement = 'select count(*), sum(if(counted_status=5, 1, 0)) as flagged, sum(if(counted_status=3, 1, 0)) as blacklisted, sum(if(counted_status=20, 1, 0)) as removed,  subreddit_name, date(time_utc) as date from RedditPost  where  time_utc > utc_timestamp() - INTERVAL  60*24*14 MINUTE and time_utc < date(utc_timestamp)  group by  subreddit_name, date  order by date'
-    rs = wd.s.execute(statement)
-    for row in rs:
-        count = row[0]
-        flagged_count = row[1]
-        blacklisted_count = row[2]
-        removed_count = row[3]
-        subreddit_name = row[4]
-        date = row[5]
-        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'collected'))
-        if not sub_stat:
-            sub_stat = Stats2(subreddit_name, date, 'collected')
-            sub_stat.value_int = count
-            wd.s.add(sub_stat)
-        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'flagged_'))
-        if not sub_stat:
-            sub_stat = Stats2(subreddit_name, date, 'flagged_')
-            sub_stat.value_int = flagged_count
-            wd.s.add(sub_stat)
-        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'blacklisted_'))
-        if not sub_stat:
-            sub_stat = Stats2(subreddit_name, date, 'blacklisted_')
-            sub_stat.value_int = blacklisted_count
-            wd.s.add(sub_stat)
-        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'removed_'))
-        if not sub_stat:
-            sub_stat = Stats2(subreddit_name, date, 'removed_')
-            sub_stat.value_int = removed_count
-            wd.s.add(sub_stat)
-        sub_stat = wd.s.query(Stats2).get((subreddit_name, date, 'flagged_total'))
-        if not sub_stat:
-            sub_stat = Stats2(subreddit_name, date, 'flagged_total')
-            sub_stat.value_int = flagged_count + blacklisted_count + removed_count
-            wd.s.add(sub_stat)
+    _ = wd.s.execute(save_stats_statement)
 
     # REMOVED(20) added as of 10/27/21 - previously not tracked separately from FLAGGED
 
@@ -297,8 +282,8 @@ def update_common_posts(wd: WorkingData, subreddit_name, limit=1000):
             post = CommonPost(post_to_review)
             wd.s.add(post)
             count += 1
-    logger.info(f'found {count} top posts')
-    logger.debug("updating database...")
+    log.debug(f'found {count} top posts')
+    log.debug("updating database...")
     wd.s.commit()
 
 
@@ -332,14 +317,14 @@ def check_common_posts(wd: WorkingData, subreddit_names):
         print(blurb)
 
         # rp.mod_remove()
-        rp.counted_status = CountedStatus.BOT_SPAM.value
+        rp.counted_status_enum = CountedStatus.BOT_SPAM
         wd.s.add(rp)
 
     for subreddit_name in blurbs:
         wd.ri.send_modmail(subject=f"[Notification] Post by possible karma hackers:",
                            body="".join(blurbs[subreddit_name]), subreddit=subreddit_name, use_same_thread=True)
-        wd.ri.send_modmail(subject=f"[Notification] botspam notification {subreddit_name}",
-                           body="".join(blurbs[subreddit_name]), subreddit_name=BOT_NAME, use_same_thread=True)
+        # wd.ri.send_modmail(subject=f"[Notification] botspam notification {subreddit_name}",
+        #                   body="".join(blurbs[subreddit_name]), subreddit_name=wd.bot_name, use_same_thread=True)
 
     wd.s.commit()
 
