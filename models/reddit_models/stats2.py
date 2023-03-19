@@ -6,7 +6,7 @@ class Stats2(dbobj.Base):
 
     subreddit_name = Column(String(191), primary_key=True)
     date = Column(Date, nullable=False, primary_key=True)
-    stat_name = Column(String(20), primary_key=True)
+    stat_name = Column(String(191), primary_key=True)
     value_int = Column(Integer)
     info = Column(String(191))
 

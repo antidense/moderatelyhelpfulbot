@@ -11,3 +11,13 @@ class PostedStatus(Enum):
     UNKNOWN = "Unknown status"
     FH_RM = "Flair_Helper removed"
     UNAVAILABLE = "Unavailable"
+
+    """
+    @staticmethod
+    def is_permanent(ps):
+        if ps in (PostedStatus.SELF_DEL, PostedStatus.MOD_RM,
+                  PostedStatus.AUTOMOD_RM, PostedStatus.MHB_RM, PostedStatus.SPAM_FLT):  # need to finish
+            return True
+        else:
+            return False
+    """

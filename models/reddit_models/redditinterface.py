@@ -8,21 +8,26 @@ import prawcore
 from logger import logger
 from enums import SubStatus, PostedStatus, CountedStatus
 
+
 from models.reddit_models import SubmittedPost, TrackedSubreddit, TrackedAuthor
 
-from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET
+from settings import MAIN_BOT_NAME
 from typing import List
 from datetime import datetime
+from static import DEFAULT_CONFIG
 import pytz
 # Set up PRAW
+
 
 class RedditInterface:
     bot_sub = None
     reddit_client = None
+    bot_name = None
 
     def __init__(self):
-        self.reddit_client = praw.Reddit(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, password=BOT_PW,
-                                    user_agent="ModeratelyHelpfulBot v0.4", username=BOT_NAME)
+        self.reddit_client = praw.Reddit(
+                                    )
+        self.bot_name = self.reddit_client.user.me().name
 
     '''SUBMISSION STUFF'''
     def get_submission_api_handle(self, submission: SubmittedPost) -> praw.models.Submission:
@@ -46,7 +51,7 @@ class RedditInterface:
                 submission.posted_status =  PostedStatus.SPAM_FLT.value
             elif submission.banned_by == "AutoModerator":
                 submission.posted_status =   PostedStatus.AUTOMOD_RM.value
-            elif submission.banned_by == BOT_NAME:
+            elif submission.banned_by in (self.bot_name, MAIN_BOT_NAME):
                 submission.posted_status = PostedStatus.MHB_RM.value
             else:
                 submission.posted_status =   PostedStatus.MOD_RM.value
@@ -57,13 +62,15 @@ class RedditInterface:
             submission.posted_status =   PostedStatus.UNKNOWN.value
         submission.post_flair = post_api_handle.link_flair_text
         submission.author_flair = post_api_handle.author_flair_text
-        if submission.counted_status == 1:
-            submission.counted_status = CountedStatus.NEEDS_UPDATE.value
+        # submission.author_css = post_api_handle.author_flair_css_class  ## there was big typo here!!
+        if submission.counted_status_enum == CountedStatus.COUNTS:
+            submission.counted_status_enum = CountedStatus.NEEDS_UPDATE
         submission.last_checked = datetime.now(pytz.utc)
 
 
 
     def get_posted_status(self, submission: SubmittedPost, get_removed_info=False) -> PostedStatus:
+        print(f'getting posted status...  current status:{submission.posted_status}')
         # _ = submission.get_api_handle()  what was this for again?
         post_api_handle = self.get_submission_api_handle(submission)  # updates the api handle
         try:
@@ -86,7 +93,7 @@ class RedditInterface:
                 return PostedStatus.AUTOMOD_RM
             elif submission.banned_by == "Flair_Helper":
                 return PostedStatus.FH_RM
-            elif submission.banned_by == BOT_NAME:
+            elif submission.banned_by in (self.bot_name, MAIN_BOT_NAME):
                 return PostedStatus.MHB_RM
             elif "bot" in submission.banned_by.lower():
                 return PostedStatus.BOT_RM
@@ -117,9 +124,9 @@ class RedditInterface:
             if lock_thread:
                 submission.api_handle.mod.lock()
             comment = submission.api_handle.reply(body=response)
-            if distinguish:
+            if comment and distinguish:
                 comment.mod.distinguish()
-            if approve:
+            if comment and approve:
                 comment.mod.approve()
             return comment
         except praw.exceptions.APIException:
@@ -145,6 +152,7 @@ class RedditInterface:
             return self.reddit_client.subreddit(subreddit_name)
 
     def get_subreddit_api_handle(self, subreddit: TrackedSubreddit) -> praw.models.Subreddit:
+        assert(isinstance(subreddit,TrackedSubreddit))
         if not subreddit.api_handle:
             subreddit.api_handle = self.reddit_client.subreddit(subreddit.subreddit_name)
             return subreddit.api_handle
@@ -153,23 +161,28 @@ class RedditInterface:
 
     def get_subreddit_info(self, subreddit_name=None):
         si = SubredditInfo(ri=self,  subreddit_name=subreddit_name)
-        print(f" si: {si}")
         return si
+
 
     def get_modmail_thread_id(self, subreddit_name=None):
         for convo in self.reddit_client.subreddit(subreddit_name).modmail.conversations(state="mod", sort='unread', limit=30):
+
             initiating_author_name = convo.authors[0].name  # praw query
             #subreddit_name = convo.owner.display_name  # praw query
-            if initiating_author_name == BOT_NAME:
+            if initiating_author_name == self.bot_name and convo.id !="11ejht":
                 return convo.id
 
-    def send_modmail(self, subreddit=None, subreddit_name=None, subject=f"[Notification] Message from {BOT_NAME}", body="Unspecified text",
+    def send_modmail(self, subreddit=None, subreddit_name=None, subject=None, body = "Unspecified text",
                      thread_id=None, use_same_thread=False):
         conversation = None
+        if subject is None:
+            subject = f"[Notification] Message from {self.bot_name}"
         # assert isinstance(subreddit, TrackedSubreddit)
-        if subreddit_name == BOT_NAME:
+        #if not hasattr(subreddit_name, mm_convo_id):
+
+        if subreddit_name in (self.bot_name, MAIN_BOT_NAME):
             subreddit = self.bot_sub
-            thread_id = subreddit.mm_convo_id
+            #thread_id = subreddit.mm_convo_id
 
         if subreddit and not thread_id and use_same_thread:
             thread_id = subreddit.mm_convo_id
@@ -177,15 +190,26 @@ class RedditInterface:
 
         if not subreddit_name and subreddit:
             subreddit_name = subreddit.subreddit_name
+        already_done = False
         if thread_id:
-            conversation = self.reddit_client.subreddit(subreddit_name).modmail(thread_id).reply(body, internal=True)
-        else:
+            try:
+                conversation = self.reddit_client.subreddit(subreddit_name).modmail(thread_id).reply(body, internal=True)
+                already_done = True
+            except(praw.exceptions.RedditAPIException):
+                subreddit.mm_convo_id = None
+            except (praw.exceptions.APIException, prawcore.exceptions.Forbidden, AttributeError) as e:
+                logger.warning(f'something went wrong in sending modmail {e}')
+                already_done = True
+
+
+
+        if not already_done:
             try:
                 conversation = self.reddit_client.subreddit(subreddit_name).message(subject=subject, message=body)
                 if subreddit:
                     subreddit.mm_convo_id = conversation.id  # won't get saved?
-            except (praw.exceptions.APIException, prawcore.exceptions.Forbidden, AttributeError):
-                logger.warning('something went wrong in sending modmail')
+            except (praw.exceptions.APIException, prawcore.exceptions.Forbidden, AttributeError) as e:
+                logger.warning(f'something went wrong in sending modmail {e}')
 
         return conversation
 
@@ -232,6 +256,7 @@ class SubmissionInfo:
         self.banned_by = submission.banned_by
         self.post_flair = submission.link_flair_text
         self.author_flair = submission.author_flair_text
+        # self.author_css = submission.author_flair_css_class
 
 
     def update(self, submission):
@@ -239,64 +264,93 @@ class SubmissionInfo:
         self.banned_by = submission.banned_by
         self.post_flair = submission.link_flair_text
         self.author_flair = submission.author_flair_text
+        # self.author_css = submission.author_flair_css_class
 
 class SubredditInfo:
     subreddit_api_handle = None
-    active_status = SubStatus.UNKNOWN
+    active_status_enum = SubStatus.UNKNOWN
     subreddit_name = None
     mod_list = None
-    settings_yaml_text = None
+    settings_yaml_txt = None
     settings_revision_date = None
     settings_yaml = None
     bot_mod = None
     is_nsfw = False
 
     def __init__(self, ri, subreddit_name):
-        if subreddit_name.startswith("/r/"):
-            subreddit_name = subreddit_name.replace('/r/', '')
         self.subreddit_name: str = subreddit_name.lower()
         self.subreddit_api_handle = ri.reddit_client.subreddit(subreddit_name)
+
         if not self.subreddit_api_handle:  # Subreddit doesn't exist
-            active_status = SubStatus.SUB_GONE
+            self.active_status_enum = SubStatus.SUB_GONE
             return
-        try:
-            self.mod_list = ",".join(list(moderator.name for moderator in self.subreddit_api_handle.moderator()))
-        except (prawcore.exceptions.NotFound, prawcore.exceptions.Forbidden):
-            pass
-        active_status, _ = self.check_sub_access(ri)
-        if active_status.value > 0:
+
+        active_status_enum, response = self.check_sub_access(ri)
+        print(active_status_enum, response)
+        self.active_status_enum = active_status_enum
+        if active_status_enum.value > 0:
             self.is_nsfw = self.subreddit_api_handle.over18
+        else:
+            print(f"ri/csa: sub {subreddit_name} has this issue: {response}")
 
-
-    def check_sub_access(self, ri) -> (SubStatus, str):
+    def check_sub_access(self, ri, ignore_no_mod_access=False) -> (SubStatus, str):
         mod_list = ri.get_mod_list(subreddit_name=self.subreddit_name)
+
         if not mod_list:
-            self.active_status = SubStatus.SUB_FORBIDDEN
+            self.active_status = SubStatus.SUB_FORBIDDEN.value
             return SubStatus.SUB_FORBIDDEN, f"Subreddit is banned."
-        if BOT_NAME not in mod_list:
+        self.mod_list=','.join(mod_list)
+
+        if ignore_no_mod_access is False and ri.bot_name not in self.mod_list:
             self.active_status = SubStatus.NO_MOD_PRIV.value
+
             return SubStatus.NO_MOD_PRIV, f"The bot does not have moderator privileges to /r/{self.subreddit_name}."
         try:
-            logger.debug(f'accessing wiki config {self.subreddit_name}')
-            wiki_page = self.subreddit_api_handle.wiki[BOT_NAME]
-            if wiki_page:
+            logger.debug(f'si/csa accessing wiki config {self.subreddit_name}, {MAIN_BOT_NAME}')
+
+            # logger.debug(f'si/csa wiki_page {wiki_page.content_md}')
+            possible_wiki_pages = [ ri.bot_name.lower(), MAIN_BOT_NAME.lower(),
+                                    f"config/{ri.bot_name.lower()}", f"config/{MAIN_BOT_NAME.lower()}"]
+            for possible_wiki_page in possible_wiki_pages:
+                try:
+                    wiki_page = self.subreddit_api_handle.wiki[possible_wiki_page]
+                    self.settings_yaml_txt = wiki_page.content_md
+                    print(self.settings_yaml_txt[0:20])
+                    self.settings_revision_date = wiki_page.revision_date
+                    if wiki_page.revision_by and wiki_page.revision_by.name != ri.bot_name:
+                        self.bot_mod = wiki_page.revision_by.name
+                    self.settings_yaml = yaml.safe_load(self.settings_yaml_txt)
+                    break
+                except prawcore.exceptions.NotFound:
+                    pass
+
+            if not self.settings_yaml_txt:
+                # attempt to create it...
+                ri.reddit_client.subreddit(self.subreddit_name).wiki.create(
+                    ri.bot_name, DEFAULT_CONFIG.replace("subredditname", self.subreddit_name).replace("moderatelyhelpfulbot", ri.bot_name),
+                    reason="default_config")
                 self.settings_yaml_txt = wiki_page.content_md
+
                 self.settings_revision_date = wiki_page.revision_date
-                if wiki_page.revision_by and wiki_page.revision_by.name != BOT_NAME:
+                if wiki_page.revision_by and wiki_page.revision_by.name != ri.bot_name:
                     self.bot_mod = wiki_page.revision_by.name
                 self.settings_yaml = yaml.safe_load(self.settings_yaml_txt)
-            else:
-                return SubStatus.NO_CONFIG, f"I only found an empty config for /r/{self.subreddit_name}."
+            if not self.settings_yaml_txt:
+                return SubStatus.NO_CONFIG, f"I did not find a config for /r/{self.subreddit_name} " \
+                                            f"Please create one at " \
+                                            f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{ri.bot_name} ."
         except prawcore.exceptions.NotFound:
-            return SubStatus.NO_CONFIG, f"I did not find a config for /r/{self.subreddit_name} Please create one at" \
-                                        f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{BOT_NAME} ."
+            return SubStatus.NO_CONFIG, f"Do you have your wiki enabled? I need a config file. " \
+                                 f"Please create one at " \
+                                 f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{ri.bot_name} ."
         except prawcore.exceptions.Forbidden:
             return SubStatus.CONFIG_ACCESS_ERROR, f"I do not have any access to /r/{self.subreddit_name}."
         except prawcore.exceptions.Redirect:
             return SubStatus.SUB_GONE, f"Reddit reports that there is no subreddit by the name of {self.subreddit_name}."
         except (yaml.scanner.ScannerError, yaml.composer.ComposerError, yaml.parser.ParserError):
             return SubStatus.YAML_SYNTAX_ERROR, f"There is a syntax error in your config: " \
-                                                f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{BOT_NAME} ." \
+                                                f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{ri.bot_name} ." \
                                                 f"Please validate your config using http://www.yamllint.com/. "
         return SubStatus.YAML_SYNTAX_OK, "Syntax is valid"
+
 

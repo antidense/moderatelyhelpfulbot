@@ -10,7 +10,7 @@ import re
 from core import dbobj, ASL_REGEX
 from praw.models import ListingGenerator, Submission
 from praw.models.listing.mixins.redditor import SubListing
-from sqlalchemy import Column, DateTime, Integer, String
+from sqlalchemy import Column, DateTime, Integer, String, UnicodeText
 
 
 def get_age(input_text):
@@ -44,7 +44,7 @@ class TrackedAuthor(dbobj.Base):
     gender = Column(String(5), nullable=True)
     num_history_items = Column(Integer)
     has_nsfw_post = Column(String(10), nullable=True)
-    sub_counts = Column(String(191), nullable=True)
+    sub_counts = Column(UnicodeText, nullable=True)
     age = Column(Integer)
     api_handle = None
     has_banned_subs_activity = False

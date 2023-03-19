@@ -7,3 +7,4 @@ pyyaml
 prawcore
 iso8601
 praw
+pymysql

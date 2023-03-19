@@ -17,7 +17,7 @@ from praw.models.listing.mixins.redditor import SubListing
 from sqlalchemy.orm import sessionmaker
 from enum import Enum  # has to be at the end?
 import queue
-from settings import BOT_NAME, BOT_PW, CLIENT_ID, CLIENT_SECRET, BOT_OWNER, DB_ENGINE
+from settings import DB_ENGINE
 from enums import *
 from static import *
 # from database import Database
@@ -25,7 +25,6 @@ from static import *
 
 
 # Set up some global variables
-ACCEPTING_NEW_SUBS = False
 LINK_REGEX = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
 REDDIT_LINK_REGEX = r'r/([a-zA-Z0-9_]*)/comments/([a-z0-9_]*)/([a-zA-Z0-9_]{0,50})'
 RESPONSE_TAIL = """
