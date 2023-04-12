@@ -303,7 +303,7 @@ def nsfw_checking(wd: WorkingData):  # Does not expand comments
                                 pass
                             wd.ri.send_modmail(subject=subject, body=response, subreddit=tr_sub, use_same_thread=True)
 
-                            wd.ri.reddit_client.redditor(BOT_OWNER).message(subject, response)
+                            #wd.ri.reddit_client.redditor(BOT_OWNER).message(subject, response)
                     record_actioned(wd, f"comment-{c.id}")
         post.nsfw_repliers_checked = True
         post.nsfw_last_checked = datetime.now(pytz.utc)
