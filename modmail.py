@@ -404,7 +404,7 @@ def mod_mail_invitation_to_moderate(wd: WorkingData, message):
     if tr_sub or (ACCEPTING_NEW_SUBS and 'karma' not in subreddit_name.lower()):
         try:
             wd.ri.reddit_client.subreddit(subreddit_name).mod.accept_invite()
-        except praw.exceptions.RedditAPIException as ex:  # Changed from praw.exceptions.APIException
+        except (praw.exceptions.RedditAPIException, prawcore.exceptions.ServerError) as ex:  # Changed from praw.exceptions.APIException
             reply =  f"Message from reddit: {ex.message}"
             print(f"error reply {reply}")
             message.reply(body=reply)
@@ -439,8 +439,11 @@ def mod_mail_invitation_to_moderate(wd: WorkingData, message):
             tr_sub.active_status_enum = SubStatus.CONFIG_ACCESS_ERROR
             wd.s.add(tr_sub)
     else:
-        message.reply(body=f"Invitation received. Please wait for approval by bot owner. In the mean time, "
-                           f"you may create a config at https://www.reddit.com/r/{subreddit_name}/wiki/{wd.bot_name} .")
+        try:
+            message.reply(body=f"Invitation received. Please wait for approval by bot owner. In the mean time, "
+                               f"you may create a config at https://www.reddit.com/r/{subreddit_name}/wiki/{wd.bot_name} .")
+        except (praw.exceptions.RedditAPIException, prawcore.exceptions.ServerError) as ex:
+            message.mark_read()
     message.mark_read()
 
 
