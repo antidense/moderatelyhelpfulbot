@@ -45,6 +45,8 @@ class TrackedAuthor(dbobj.Base):
     num_history_items = Column(Integer)
     has_nsfw_post = Column(String(10), nullable=True)
     sub_counts = Column(UnicodeText, nullable=True)
+    sub_messages = Column(UnicodeText, nullable=True)
+    bad_posts = Column(UnicodeText, nullable=True)
     age = Column(Integer)
     api_handle = None
     has_banned_subs_activity = False
@@ -76,6 +78,8 @@ class TrackedAuthor(dbobj.Base):
         comments_generator: ListingGenerator = sub_listing.new(limit=intended_total)
         post_listing: SubListing = api_handle.submissions
         post_generator: ListingGenerator = post_listing.new(limit=10)
+        bad_messages = []
+        bad_posts = []
         try:
             comments: List[praw.models.reddit.comment.Comment] = list(comments_generator)
             for comment in comments:
@@ -88,6 +92,7 @@ class TrackedAuthor(dbobj.Base):
                 total += 1
                 if comment.subreddit.over18:
                     count += 1
+                    bad_messages.append(comment.id)
                 if not age:
                     age = get_age(comment.body)
                     if age > 10:
@@ -104,6 +109,7 @@ class TrackedAuthor(dbobj.Base):
                     count += 1
                     if not post.is_self:
                         self.has_nsfw_post = post.id
+                    bad_posts.append(post.id)
                 if not age:
                     age = get_age(post.title)
                     if age > 10:
@@ -123,6 +129,8 @@ class TrackedAuthor(dbobj.Base):
                     break
         from collections import Counter
         self.sub_counts = str(Counter(subs))
+        self.sub_messages = str(bad_messages)
+        self.bad_posts = str(bad_posts)
         return self.nsfw_pct, total
 
         # In the future,  look for: /r/dirtypenpals   DDLGPersonals   cglpersonals  littlespace dirtyr4r ddlg
