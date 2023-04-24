@@ -480,8 +480,8 @@ def handle_modmail_message(wd: WorkingData, convo):
         return
 
     #ignore verification modmails
-    #if "verification" in convo.subject:
-    #    return
+    if "verification" in convo.subject:
+        return
 
 
     # Ignore if already actioned (at this many message #s)
