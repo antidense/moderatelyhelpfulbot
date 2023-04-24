@@ -85,16 +85,19 @@ class Task:
                 log.debug(f"Task complete {self.target_function} {end_time-start_time}")
                 self.task_durations.append((end_time-start_time).seconds)
             except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException):
+                self.wd.s.commit()
                 self.error_count += 1
                 import traceback
                 trace = traceback.format_exc()
                 print(trace)
                 return -1
             except Exception:
+                self.wd.s.commit()
                 import traceback
                 trace = traceback.format_exc()
                 self.last_error = str(trace)
                 print(trace)
+
         """
         except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException) as e:
             import time
@@ -320,9 +323,9 @@ def check_common_posts(wd: WorkingData, subreddit_names):
         rp.counted_status_enum = CountedStatus.BOT_SPAM
         wd.s.add(rp)
 
-    for subreddit_name in blurbs:
-        wd.ri.send_modmail(subject=f"[Notification] Post by possible karma hackers:",
-                           body="".join(blurbs[subreddit_name]), subreddit=subreddit_name, use_same_thread=True)
+    #for subreddit_name in blurbs:
+        #wd.ri.send_modmail(subject=f"[Notification] Post by possible karma hackers:",
+        #                   body="".join(blurbs[subreddit_name]), subreddit=subreddit_name, use_same_thread=True)
         # wd.ri.send_modmail(subject=f"[Notification] botspam notification {subreddit_name}",
         #                   body="".join(blurbs[subreddit_name]), subreddit_name=wd.bot_name, use_same_thread=True)
 
