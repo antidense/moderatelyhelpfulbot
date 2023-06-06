@@ -245,9 +245,9 @@ def calculate_stats(wd: WorkingData):
     SELECT rp.subreddit_name, rp.counted_status_enum, DATE(rp.time_utc), COUNT(*)
     FROM RedditPost rp
     INNER JOIN TrackedSubs s
-    WHERE rp.time_utc >= (utc_timestamp() - INTERVAL 2 DAY) AND rp.time_utc < DATE(utc_timestamp() - INTERVAL 5 DAY)
+    WHERE rp.time_utc < (utc_timestamp() - INTERVAL 2 DAY) AND rp.time_utc > DATE(utc_timestamp() - INTERVAL 180 DAY)
     GROUP BY rp.subreddit_name, rp.counted_status_enum, DATE(rp.time_utc)
-    ON DUPLICATE KEY UPDATE post_count = VALUES(post_count);
+    ON DUPLICATE KEY UPDATE post_count =  IF(post_count < VALUES(post_count), VALUES(post_count), post_count);
     """
 
     _ = wd.s.execute(save_stats_statement)
