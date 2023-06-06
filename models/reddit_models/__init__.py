@@ -3,7 +3,7 @@ from models.reddit_models.actionedcomments import (  # noqa: F401
 )
 from models.reddit_models.broadcast import Broadcast  # noqa: F401
 from models.reddit_models.commonpost import CommonPost  # noqa: F401
-from models.reddit_models.loggedactions import LoggedActions  # noqa: F401
+from models.reddit_models.loggedactions import LoggedAction  # noqa: F401
 from models.reddit_models.postinggroup import PostingGroup  # noqa: F401
 from models.reddit_models.stats2 import Stats2  # noqa: F401
 from models.reddit_models.stats3 import Stats3  # noqa: F401

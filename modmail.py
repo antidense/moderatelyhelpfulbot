@@ -7,13 +7,13 @@ import prawcore.exceptions
 from praw import exceptions
 
 from logger import logger
-from models.reddit_models import ActionedComments, SubAuthor, SubmittedPost, TrackedSubreddit
+from models.reddit_models import ActionedComments, SubAuthor, SubmittedPost, TrackedSubreddit, LoggedAction
 from settings import MAIN_BOT_NAME, ACCEPTING_NEW_SUBS, BOT_OWNER
 from static import *
 from utils import check_spam_submissions
 from utils import get_subreddit_by_name
 from workingdata import WorkingData
-
+from models.reddit_models.loggedactions import open_logged_action
 
 def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, command, parameters) \
         -> tuple[str, bool]:
@@ -272,8 +272,14 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
 def handle_direct_messages(wd: WorkingData):
     print("checking direct messages")
     for message in wd.ri.reddit_client.inbox.unread(limit=None):
+        import pprint
+        pprint.pprint(message)
 
-        logger.info("got this email author:{} subj:{}  body:{} ".format(message.author, message.subject, message.body))
+        logger.info(f"got this email {message.id} {message.author} {message.subject} {message.body}")
+
+        new_action = open_logged_action(wd, message.subject, 'dm', message.id)
+        if not new_action.is_new:
+            continue
 
         # Get author name, message_id if available
         requestor_name = message.author.name if message.author else None
@@ -404,7 +410,7 @@ def mod_mail_invitation_to_moderate(wd: WorkingData, message):
     if tr_sub or (ACCEPTING_NEW_SUBS and 'karma' not in subreddit_name.lower()):
         try:
             wd.ri.reddit_client.subreddit(subreddit_name).mod.accept_invite()
-        except praw.exceptions.RedditAPIException as ex:  # Changed from praw.exceptions.APIException
+        except (praw.exceptions.RedditAPIException, prawcore.exceptions.ServerError) as ex:  # Changed from praw.exceptions.APIException
             reply =  f"Message from reddit: {ex.message}"
             print(f"error reply {reply}")
             message.reply(body=reply)
@@ -439,8 +445,11 @@ def mod_mail_invitation_to_moderate(wd: WorkingData, message):
             tr_sub.active_status_enum = SubStatus.CONFIG_ACCESS_ERROR
             wd.s.add(tr_sub)
     else:
-        message.reply(body=f"Invitation received. Please wait for approval by bot owner. In the mean time, "
-                           f"you may create a config at https://www.reddit.com/r/{subreddit_name}/wiki/{wd.bot_name} .")
+        try:
+            message.reply(body=f"Invitation received. Please wait for approval by bot owner. In the mean time, "
+                               f"you may create a config at https://www.reddit.com/r/{subreddit_name}/wiki/{wd.bot_name} .")
+        except (praw.exceptions.RedditAPIException, prawcore.exceptions.ServerError) as ex:
+            message.mark_read()
     message.mark_read()
 
 
@@ -450,6 +459,7 @@ def handle_modmail_message(wd: WorkingData, convo):
         convo.read()
 
         return
+
     initiating_author_name = convo.authors[0].name  # praw query
     subreddit_name = convo.owner.display_name  # praw query
     tr_sub = get_subreddit_by_name(wd, subreddit_name=subreddit_name, create_if_not_exist=True, update_if_due=True)
@@ -462,6 +472,16 @@ def handle_modmail_message(wd: WorkingData, convo):
         wd.s.add(tr_sub)
         wd.s.commit()
         convo.read()
+
+    import pprint
+    pprint.pprint(convo)
+    new_action = open_logged_action(wd, subreddit_name, 'mm', f"{convo.id}-{convo.num_messages}")
+    if not new_action.is_new:
+        return
+
+    #ignore verification modmails
+    if "verification" in convo.subject:
+        return
 
 
     # Ignore if already actioned (at this many message #s)
@@ -712,3 +732,5 @@ def record_actioned(wd: WorkingData, comment_id: str):
     if response:
         return
     wd.s.add(ActionedComments(comment_id))
+
+
