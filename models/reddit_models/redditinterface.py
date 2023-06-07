@@ -348,7 +348,7 @@ class SubredditInfo:
         except prawcore.exceptions.Redirect:
             return SubStatus.SUB_GONE, f"Reddit reports that there is no subreddit by the name of {self.subreddit_name}."
         except (yaml.scanner.ScannerError, yaml.composer.ComposerError, yaml.parser.ParserError) as e:
-            error_message = e.args[0]
+            error_message = str(e)
             return SubStatus.YAML_SYNTAX_ERROR, f"There is a syntax error in your config: " \
                                                 f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{ri.bot_name} ." \
                                                 f"Please validate your config using http://www.yamllint.com/.  " \

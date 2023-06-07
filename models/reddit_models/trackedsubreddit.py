@@ -166,11 +166,11 @@ class TrackedSubreddit(dbobj.Base):
             return False, "Nothing in yaml?"
         try:
             self.settings_yaml = yaml.safe_load(self.settings_yaml_txt)
-        except (yaml.scanner.ScannerError, yaml.composer.ComposerError, yaml.parser.ParserError):
+        except (yaml.scanner.ScannerError, yaml.composer.ComposerError, yaml.parser.ParserError) as e:
             self.active_status_enum = SubStatus.YAML_SYNTAX_ERROR
             return False, f"There is a syntax error in your config: " \
                           f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{MAIN_BOT_NAME} ." \
-                          f"Please validate your config using http://www.yamllint.com/. "
+                          f"Please validate your config using http://www.yamllint.com/. {e} "
         if not self.settings_yaml:
             self.active_status_enum = SubStatus.YAML_SYNTAX_OK
             return False, "blank config?? settings yaml is None"
