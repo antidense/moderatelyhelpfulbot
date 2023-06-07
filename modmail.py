@@ -26,7 +26,7 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
 
     command: str = command[1:] if command.startswith("$") else command
 
-    result: tuple[Optional[TrackedSubreddit], str] = get_subreddit_by_name(wd, op.subreddit_name, update_if_due=False)
+    result: tuple[Optional[TrackedSubreddit], str] = get_subreddit_by_name(wd, subreddit_name, update_if_due=False)
     tr_sub, req_status = result
     if not tr_sub:
         return f"Error retrieving information for /r/{subreddit_name} {req_status}", True
