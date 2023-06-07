@@ -351,7 +351,7 @@ class SubredditInfo:
             error_message = e.args[0]
             return SubStatus.YAML_SYNTAX_ERROR, f"There is a syntax error in your config: " \
                                                 f"http://www.reddit.com/r/{self.subreddit_name}/wiki/{ri.bot_name} ." \
-                                                f"Please validate your config using http://www.yamllint.com/. } " \
+                                                f"Please validate your config using http://www.yamllint.com/.  " \
                                                 f"{error_message}"
         return SubStatus.YAML_SYNTAX_OK, "Syntax is valid"
 
