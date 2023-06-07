@@ -1094,7 +1094,14 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
 
     else:  # or just load from database
         worked, status = tr_sub.reload_yaml_settings()
-        return None, f"GSBN: couldn't load from stored info {tr_sub.subreddit_name} because {status} ACTIVE STATUS {tr_sub.active_status_enum}"
+        if not worked:  # try redownloading the yaml
+            sub_info = wd.ri.get_subreddit_info(subreddit_name=tr_sub.subreddit_name)
+            worked, status = tr_sub.update_from_subinfo(sub_info)
+            tr_sub.config_last_checked = datetime.now()  # this should be UTC... need to fix
+
+        if not worked:
+
+            return None, f"GSBN: couldn't load from stored info {tr_sub.subreddit_name} because {status} ACTIVE STATUS {tr_sub.active_status_enum}"
 
     wd.s.add(tr_sub)
     wd.s.commit()
