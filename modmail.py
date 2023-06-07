@@ -14,6 +14,7 @@ from utils import check_spam_submissions
 from utils import get_subreddit_by_name
 from workingdata import WorkingData
 from models.reddit_models.loggedactions import open_logged_action
+from typing import Optional
 
 def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, command, parameters) \
         -> tuple[str, bool]:
@@ -25,9 +26,10 @@ def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, comm
 
     command: str = command[1:] if command.startswith("$") else command
 
-    tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=True)
+    result: tuple[Optional[TrackedSubreddit], str] = get_subreddit_by_name(wd, op.subreddit_name, update_if_due=False)
+    tr_sub, req_status = result
     if not tr_sub:
-        return f"Error retrieving information for /r/{subreddit_name}", True
+        return f"Error retrieving information for /r/{subreddit_name} {req_status}", True
     try:
 
         moderators: List[str] = wd.ri.get_mod_list(subreddit=tr_sub)
@@ -354,9 +356,10 @@ def handle_direct_messages(wd: WorkingData):
                 message.mark_read()
                 message.reply(body=f"Sorry, I don''t think '{message_subject}' contains a valid subreddit?")
                 continue
-            tr_sub = get_subreddit_by_name(wd, subreddit_name)
-            response, _ = handle_dm_command(wd, subreddit_name, requestor_name, command, body_parts[1:])
-            print("response---", response)
+            result: tuple[Optional[TrackedSubreddit], str] = get_subreddit_by_name(wd, subreddit_name)
+            tr_sub, response = result
+            if tr_sub:
+                response, _ = handle_dm_command(wd, subreddit_name, requestor_name, command, body_parts[1:])
             if tr_sub and thread_id:
                 wd.ri.send_modmail(subreddit=tr_sub, body=response[:9999], thread_id=thread_id)
             else:
@@ -403,8 +406,8 @@ def handle_direct_messages(wd: WorkingData):
 def mod_mail_invitation_to_moderate(wd: WorkingData, message):
     subreddit_name = message.subject.replace("re: invitation to moderate /r/", "")
     subreddit_name = subreddit_name.replace("invitation to moderate /r/", "")
-
-    tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=False)
+    result: tuple[Optional[TrackedSubreddit], str] = get_subreddit_by_name(wd, subreddit_name,  create_if_not_exist=False)
+    tr_sub, req_status = result
     # accept invite if accepting invites or had been accepted previously
     print(f"Got invite for {subreddit_name}, {tr_sub}, accepting new subs?{ACCEPTING_NEW_SUBS}")
     if tr_sub or (ACCEPTING_NEW_SUBS and 'karma' not in subreddit_name.lower()):
@@ -417,7 +420,9 @@ def mod_mail_invitation_to_moderate(wd: WorkingData, message):
             message.mark_read()
 
         if not tr_sub:
-            tr_sub = get_subreddit_by_name(wd, subreddit_name, create_if_not_exist=True)
+            result: tuple[Optional[TrackedSubreddit], str] = get_subreddit_by_name(wd, subreddit_name,
+                                                                                   create_if_not_exist=False)
+            tr_sub, req_status = result
 
         message.reply(
             body=f"Hi, thank you for inviting me!  I will start working now. Please make sure I have a config. "
@@ -462,7 +467,8 @@ def handle_modmail_message(wd: WorkingData, convo):
 
     initiating_author_name = convo.authors[0].name  # praw query
     subreddit_name = convo.owner.display_name  # praw query
-    tr_sub = get_subreddit_by_name(wd, subreddit_name=subreddit_name, create_if_not_exist=True, update_if_due=True)
+    result: tuple[Optional[TrackedSubreddit], str] = get_subreddit_by_name(wd, subreddit_name,  create_if_not_exist=True, update_if_due=True)
+    tr_sub, req_status = result
     if not tr_sub:
         return
 

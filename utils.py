@@ -21,7 +21,7 @@ from logger import logger
 from sqlalchemy import exc
 from settings import MAIN_BOT_NAME
 from nsfw_monitoring import check_post_nsfw_eligibility
-
+from typing import Optional
 
 
 def check_new_submissions(wd: WorkingData, query_limit=800, sub_list='mod', intensity=0):
@@ -337,9 +337,10 @@ def automated_reviews(wd):
         assert (isinstance(op, SubmittedPost))
         assert (isinstance(subreddit_author, SubAuthor))
         logger.info(f"checking post for softblacklist: {j} {op.author} {op.title}")
-        tr_sub: TrackedSubreddit = get_subreddit_by_name(wd, op.subreddit_name, update_if_due=False)
+        result: tuple[Optional[TrackedSubreddit], str] = get_subreddit_by_name(wd, op.subreddit_name, update_if_due=False)
+        tr_sub, req_status = result
         if not tr_sub:
-            logger.info(f"Could not find subreddit {op.subreddit_name}")
+            logger.info(f"Could not find subreddit {op.subreddit_name} {req_status}")
             continue
         if tr_sub.active_status_enum not in (SubStatus.ACTIVE, SubStatus.NO_BAN_ACCESS):
             logger.info(f"active status not applicable {op.subreddit_name}")
@@ -384,7 +385,10 @@ def do_reddit_actions(wd):
     # print(f"blacklist removals {to_remove.rowcount}")
     for op in to_remove:
         # logger.info(f'removing post {op.author} {op.title} {op.subreddit_name}')
-        tr_sub = get_subreddit_by_name(wd, op.subreddit_name)
+        result: tuple[Optional[TrackedSubreddit], str] = get_subreddit_by_name(wd, op.subreddit_name, create_if_not_exist=False)
+        tr_sub, req_status = result
+        if not tr_sub:
+            continue
         try:
             wd.ri.get_submission_api_handle(op).mod.remove()
             logger.info(f'remove successful!: {op.subreddit_name} {op.author} {op.title}')
@@ -621,9 +625,11 @@ def look_for_rule_violations3(wd):
 
         # Load subreddit settings
         # tr_sub = wd.sub_dict[pg.subreddit_name]
-        tr_sub = get_subreddit_by_name(wd, pg.subreddit_name, update_if_due=False)
+        #tr_sub = get_subreddit_by_name(wd, pg.subreddit_name, update_if_due=False)
+        result: tuple[Optional[TrackedSubreddit], str] = get_subreddit_by_name(wd, pg.subreddit_name, update_if_due=False)
+        tr_sub, req_status = result
         if not tr_sub:
-            logger.debug(f"Unable to find subreddit in database{pg.subreddit_name} ")
+            logger.debug(f"{pg.subreddit_name}: {req_status}")
             continue
         max_count = tr_sub.max_count_per_interval
         if tr_sub.active_status_enum not in (SubStatus.ACTIVE, SubStatus.NO_BAN_ACCESS):
@@ -1047,19 +1053,21 @@ def soft_blacklist(tr_sub: TrackedSubreddit, recent_post: SubmittedPost, time_ne
 from workingdata import WorkingData
 
 
-def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_exist=True, update_if_due=False):
+def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_exist=True, update_if_due=False)\
+        -> tuple[Optional[TrackedSubreddit], str]:
     # check if tr_sub already loaded in memory
+    status = "worked"
     tr_sub: TrackedSubreddit = wd.sub_dict.get(subreddit_name)
-    if tr_sub:  # we have the sub on record
-        return tr_sub
+
+    if tr_sub:  # we have the sub on record and recently loaded
+        return tr_sub, status
 
     if not tr_sub: # know about the sub, but not being loaded (permissions issues, etc.)
         tr_sub: TrackedSubreddit = wd.s.query(TrackedSubreddit).get(subreddit_name)
 
     # Give up as requested if not in db
     if not tr_sub and not create_if_not_exist:
-        print(f"GSBN: doesn't exist and not supposed to create  {subreddit_name}")
-        return None
+        return None, f"GSBN: doesn't exist in database and not supposed to create record for {subreddit_name}"
 
     # If need to create this, do so now
     if not tr_sub:
@@ -1073,8 +1081,7 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
             wd.sub_dict[subreddit_name] = tr_sub  # add sub to current working list
 
         else:
-            print(f"GSBN: subreddit doesn't exist  {sub_info}")
-            return None
+            return None, f"GSBN: subreddit doesn't exist in reddit  {sub_info} {sub_info.active_status_enum}"
 
     # Update from scratch if it has been a while
     if not tr_sub.config_last_checked or tr_sub.config_last_checked < datetime.now() - timedelta(hours=SUBWIKI_CHECK_INTERVAL_HRS):
@@ -1083,30 +1090,16 @@ def get_subreddit_by_name(wd: WorkingData, subreddit_name: str, create_if_not_ex
 
         worked, status = tr_sub.update_from_subinfo(sub_info)
         tr_sub.config_last_checked = datetime.now()  #this should be UTC... need to fix
-        wd.s.add(tr_sub)
+        #wd.s.add(tr_sub)
 
     else:  # or just load from database
         worked, status = tr_sub.reload_yaml_settings()
-        if not worked:
-
-            print(f"GSBN: couldn't load from stored info {tr_sub.subreddit_name} because {status} ACTIVE STATUS {tr_sub.active_status_enum}")
-            # sub_info = wd.ri.get_subreddit_info(subreddit_name=tr_sub.subreddit_name)
-
-            # if hasattr(sub_info, 'yaml_settings_text'):
-            #     print(f"GSBN: settings: {sub_info.yaml_settings_text}")
-            # else:z
-            #     print(f"GSBN: no luck in getting yaml text  {tr_sub.subreddit_name}")
-            # worked, status = tr_sub.update_from_subinfo(sub_info)
-            # worked, status = tr_sub.reload_yaml_settings()
-
-    if not worked:
-        print(f"GSBN: didn't exist? {worked} {status}")
-        return None
+        return None, f"GSBN: couldn't load from stored info {tr_sub.subreddit_name} because {status} ACTIVE STATUS {tr_sub.active_status_enum}"
 
     wd.s.add(tr_sub)
     wd.s.commit()
     wd.sub_dict[subreddit_name] = tr_sub
-    return tr_sub
+    return tr_sub, "worked"
 
 
 """  
