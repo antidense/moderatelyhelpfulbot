@@ -176,8 +176,9 @@ class TrackedSubreddit(dbobj.Base):
             return False, "blank config?? settings yaml is None"
 
         if 'post_restriction' not in self.settings_yaml:
+
             self.active_status_enum = SubStatus.MHB_CONFIG_ERROR
-            return False, "Cannot load yaml config?"
+            return False, f"Cannot load yaml config? {self.settings_yaml_txt} ||| {self.settings_yaml_txt}"
 
         self.ban_ability = -1
 
