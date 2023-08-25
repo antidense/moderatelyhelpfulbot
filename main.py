@@ -40,39 +40,37 @@ add non-binary gender
 """
 
 class Task:
-    """
+
     __tablename__ = 'Tasks'
     wd = None
-    task_name = Column(String(191), nullable=False, primary_key=True)
-    func_name = Column(String(191), nullable=False)
+    target_function = Column(String(191), nullable=False, primary_key=True)
     last_run_dt = Column(DateTime, nullable=True)
-    last_runtime = Column(Integer, nullable=False)
-    frequency_mins = Column(Integer, nullable=False)
-    last_error
-    time out?
+    frequency_secs = Column(Integer, nullable=False)
+    max_duration_secs = Column(Integer, nullable=True)
+    last_error = Column(Text, nullable=True)
+    #time out?
 
-    """
-
-    wd = None
     target_function = None
     last_run_dt = None
-    frequency = timedelta(minutes=5)
-    max_duration = timedelta(minutes=5)
+    # frequency_secs = timedelta(minutes=5)
+    #max_duration = timedelta(minutes=5)
     task_durations = []
     error_count = 0
     last_error = ""
 
-    def __init__(self, wd, target_function, frequency):
+    def __init__(self, wd, target_function,  frequency: timedelta):
         self.wd = wd
         self.target_function = target_function
-        self.frequency = frequency
+        # self.frequency : timedelta= frequency
+        self.frequency_secs= frequency.total_seconds()
+        self.max_duration_secs = 0
 
     def run_task(self):
 
-        if self.last_run_dt and self.last_run_dt + self.frequency > datetime.now():
+        if self.last_run_dt and self.last_run_dt + timedelta(seconds=self.frequency) > datetime.now():
             log.debug(f"Skipping task as not due for task: {self.target_function}")
             pass
-        elif self.error_count > 5 and self.last_run_dt > datetime.now()-timedelta(hours=5):
+        elif self.error_count > 5 and self.last_run_dt + timedelta(hours=5) > datetime.now():
             # if had multiple erros  and last ran less than five hours ago
             log.debug(f"Skipping task due to previous errors: {self.target_function} {self.last_error}")
         else:
@@ -134,17 +132,21 @@ def main_loop():
     wd.most_recent_review = None  # not used?
     wd.bot_name = wd.ri.reddit_client.user.me().name  # what is my name?
     log.debug(f"My name is {wd.bot_name}")
-
-    tasks = [Task(wd, 'purge_old_records', timedelta(hours=12)),
-             Task(wd, 'do_reddit_actions', timedelta(minutes=1)),
-             Task(wd, 'update_sub_list', timedelta(hours=2)),
-             Task(wd, 'handle_direct_messages', timedelta(minutes=1)),
-             Task(wd, 'handle_modmail_messages', timedelta(minutes=1)),
-             Task(wd, 'look_for_rule_violations3', timedelta(minutes=1)),
-             Task(wd, 'check_submissions', timedelta(minutes=1)),
-             Task(wd, 'calculate_stats', timedelta(hours=10)),
-             Task(wd, 'nsfw_checking', timedelta(minutes=20)),
-             ]
+    tasks = wd.s.query(Task).all()
+    if not tasks:
+        tasks_to_populate = [Task(wd, 'purge_old_records', timedelta(hours=12)),
+                 Task(wd, 'do_reddit_actions', timedelta(minutes=1)),
+                 Task(wd, 'update_sub_list', timedelta(hours=12)),
+                 Task(wd, 'handle_direct_messages', timedelta(minutes=1)),
+                 Task(wd, 'handle_modmail_messages', timedelta(minutes=1)),
+                 Task(wd, 'look_for_rule_violations3', timedelta(minutes=1)),
+                 Task(wd, 'check_submissions', timedelta(minutes=1)),
+                 Task(wd, 'calculate_stats', timedelta(hours=10)),
+                 Task(wd, 'nsfw_checking', timedelta(minutes=20)),
+                 ]
+        for task in tasks_to_populate:
+            wd.s.add(task)
+        tasks = wd.s.query(Task).all()
     if False:
         purge_old_records(wd)
         update_sub_list(wd)
