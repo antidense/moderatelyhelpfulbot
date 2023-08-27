@@ -136,7 +136,7 @@ def main_loop():
     if not tasks:
         tasks_to_populate = [Task(wd, 'purge_old_records', timedelta(hours=12)),
                  Task(wd, 'do_reddit_actions', timedelta(minutes=1)),
-                 Task(wd, 'update_sub_list', timedelta(hours=12)),
+                 Task(wd, 'update_sub_list', timedelta(hours=13)),
                  Task(wd, 'handle_direct_messages', timedelta(minutes=1)),
                  Task(wd, 'handle_modmail_messages', timedelta(minutes=1)),
                  Task(wd, 'look_for_rule_violations3', timedelta(minutes=1)),
