@@ -39,7 +39,7 @@ add non-binary gender
 
 """
 
-class Task:
+class Task(dbobj.Base):
 
     __tablename__ = 'Tasks'
     wd = None
