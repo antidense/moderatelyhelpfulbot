@@ -12,3 +12,4 @@ from models.reddit_models.submittedpost import SubmittedPost  # noqa: F401
 from models.reddit_models.trackedauthor import TrackedAuthor  # noqa: F401
 from models.reddit_models.trackedsubreddit import TrackedSubreddit
 from models.reddit_models.redditinterface import RedditInterface  # noqa: F401
+from models.reddit_models.task import Task
