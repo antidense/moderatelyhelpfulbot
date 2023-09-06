@@ -1,13 +1,17 @@
+from datetime import datetime, timedelta
+import prawcore
+from core import dbobj
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, UnicodeText
+from logger import logger as log
 
 class Task(dbobj.Base):
-
     __tablename__ = 'Tasks'
     wd = None
     target_function = Column(String(191), nullable=False, primary_key=True)
     last_run_dt = Column(DateTime, nullable=True)
     frequency_secs = Column(Integer, nullable=False)
     max_duration_secs = Column(Integer, nullable=True)
-    last_error = Column(Text, nullable=True)
+    last_error = Column(UnicodeText, nullable=True)
     # time out?
 
     target_function = None
@@ -22,7 +26,7 @@ class Task(dbobj.Base):
         self.wd = wd
         self.target_function = target_function
         # self.frequency : timedelta= frequency
-        self.frequency_sec s= frequency.total_seconds()
+        self.frequency_secs= frequency.total_seconds()
         self.max_duration_secs = 0
 
     def run_task(self):
@@ -40,8 +44,8 @@ class Task(dbobj.Base):
                 globals()[self.target_function](self.wd)
                 end_time = datetime.now()
                 self.last_run_dt = start_time
-                log.debug(f"Task complete {self.target_function} {end_tim e -start_time}")
-                self.task_durations.append((end_tim e -start_time).seconds)
+                log.debug(f"Task complete {self.target_function} {end_time -start_time}")
+                self.task_durations.append((end_time -start_time).seconds)
             except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException):
                 self.wd.s.commit()
                 self.error_count += 1
