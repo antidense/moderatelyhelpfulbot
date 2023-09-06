@@ -91,7 +91,7 @@ def main_loop():
     rate_limiting_errors = 0
     while True:
         for task in tasks:
-            return_val = task.run_task()
+            return_val = run_task(wd, task)
             if return_val == -1:
                 rate_limiting_errors += 1
                 if rate_limiting_errors > 2:
@@ -99,6 +99,37 @@ def main_loop():
                     time.sleep(60 * 5)
                     rate_limiting_errors = 0
 
+def run_task(wd:WorkingData, task):
+
+    if task.last_run_dt and task.last_run_dt + timedelta(seconds=task.frequency_secs) > datetime.now():
+        log.debug(f"Skipping task as not due for task: {task.target_function}")
+        pass
+    elif task.error_count > 5 and task.last_run_dt + timedelta(hours=5) > datetime.now():
+        # if had multiple erros  and last ran less than five hours ago
+        log.debug(f"Skipping task due to previous errors: {task.target_function} {task.last_error}")
+    else:
+        start_time = datetime.now()
+        try:
+            log.debug(f"Running task: {task.target_function}, last ran:{task.last_run_dt}")
+
+            globals()[task.target_function](wd)
+            end_time = datetime.now()
+            task.last_run_dt = start_time
+            log.debug(f"Task complete {task.target_function} {end_time - start_time}")
+            task.task_durations.append((end_time - start_time).seconds)
+        except (prawcore.exceptions.ServerError, prawcore.exceptions.ResponseException):
+            wd.s.commit()
+            task.error_count += 1
+            import traceback
+            trace = traceback.format_exc()
+            print(trace)
+            return -1
+        except Exception:
+            wd.s.commit()
+            import traceback
+            trace = traceback.format_exc()
+            task.last_error = str(trace)
+            print(trace)
 
 def update_sub_list(wd: WorkingData, intensity=0):
     log.info('updating subs..')

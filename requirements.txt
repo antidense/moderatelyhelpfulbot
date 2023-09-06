@@ -2,7 +2,7 @@ feedparser
 humanize
 iso8601
 pytz
-sqlalchemy
+sqlalchemy=1.4.44
 pyyaml
 prawcore
 iso8601
