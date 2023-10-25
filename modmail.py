@@ -714,16 +714,29 @@ def handle_modmail_message(wd: WorkingData, convo):
 
 def handle_modmail_messages(wd: WorkingData):
     print("checking modmail")
+    import traceback
 
     for convo in wd.ri.reddit_client.subreddit('all').modmail.conversations(state="mod", sort='unread', limit=15):
-        handle_modmail_message(wd, convo=convo)
+        try:
+            handle_modmail_message(wd, convo=convo)
+        except prawcore.exceptions.ServerError:
+            trace = traceback.format_exc()
+            print(trace)
 
     for convo in wd.ri.reddit_client.subreddit('all').modmail.conversations(state="join_requests", sort='unread',
                                                                             limit=15):
-        handle_modmail_message(wd, convo=convo)
+        try:
+            handle_modmail_message(wd, convo=convo)
+        except prawcore.exceptions.ServerError:
+            trace = traceback.format_exc()
+            print(trace)
 
     for convo in wd.ri.reddit_client.subreddit('all').modmail.conversations(state="all", sort='unread', limit=15):
-        handle_modmail_message(wd, convo=convo)
+        try:
+            handle_modmail_message(wd, convo=convo)
+        except prawcore.exceptions.ServerError:
+            trace = traceback.format_exc()
+            print(trace)
 
 
 def check_actioned(wd: WorkingData, comment_id: str):
