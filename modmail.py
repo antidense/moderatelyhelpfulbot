@@ -718,6 +718,7 @@ def handle_modmail_messages(wd: WorkingData):
 
     for convo in wd.ri.reddit_client.subreddit('mod').modmail.conversations(state="mod", sort='unread', limit=15):
         try:
+            print(f"message {convo.id}")
             handle_modmail_message(wd, convo=convo)
         except prawcore.exceptions.ServerError:
             trace = traceback.format_exc()
