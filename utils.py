@@ -581,7 +581,7 @@ def look_for_rule_violations3(wd):
     tick = datetime.now()
     last_date = most_recent_identified.added_time.isoformat() \
         if most_recent_identified and most_recent_identified.added_time else datetime.now()-timedelta(days=5)
-    last_date = max(last_date, datetime.now()-timedelta(days=5))
+    last_date = max(most_recent_identified.added_time, datetime.now()-timedelta(days=5))
     logger.debug(f"doing more accurate {datetime.now()} last date:{last_date}")
     # last_date = "2022-06-30 00:00:00"  # REMOVE THIS!!!!!!!!!!!!!!!!!!!!!!!
     rs = wd.s.execute(more_accurate_statement, {"look_back": last_date})
