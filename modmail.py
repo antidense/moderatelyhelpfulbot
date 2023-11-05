@@ -717,7 +717,8 @@ def handle_modmail_messages(wd: WorkingData):
     print("checking modmail  0---")
     import traceback
     # ALTER TABLE `TrackedSubs` ADD `modmail_access` TINYINT NOT NULL DEFAULT '-1' AFTER `config_last_checked`;
-    sub_list1 = wd.s.query(TrackedSubreddit).filter(or_(TrackedSubreddit.modmail_access==-1 , TrackedSubreddit.modmail_access==1) ).all()
+    sub_list1 = wd.s.query(TrackedSubreddit).filter(TrackedSubreddit.active_status=="ACTIVE")\
+        .filter(or_(TrackedSubreddit.modmail_access==-1 , TrackedSubreddit.modmail_access==1) ).all()
     sub_list=[]
     for subreddit in sub_list1:
         """
@@ -733,7 +734,7 @@ def handle_modmail_messages(wd: WorkingData):
         print(sub_list_str)
     """
 
-        print(f"checking modmail  0---1 {subreddit.subreddit_name}")
+        print(f"checking modmail  0---1 {subreddit.subreddit_name} {subreddit.modmail_access}")
         try:
             for convo in wd.ri.reddit_client.subreddit(subreddit.subreddit_name).modmail.conversations(state="all", sort='unread', limit=15):
 
@@ -744,7 +745,7 @@ def handle_modmail_messages(wd: WorkingData):
             print(trace)
             subreddit.modmail_access =  0
             wd.s.add(subreddit)
-    wd.s.commit()
+            wd.s.commit()
 
 
 """

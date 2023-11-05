@@ -184,6 +184,9 @@ def update_sub_list(wd: WorkingData, intensity=0):
     return
 
 
+def update_sub_list_force_all(wd: WorkingData)
+    update_sub_list(wd, intensity=3)
+
 
 
 def purge_old_records(wd: WorkingData):  # requires db only
