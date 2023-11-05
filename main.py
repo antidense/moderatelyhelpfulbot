@@ -101,6 +101,7 @@ def main_loop():
 
 def run_task(wd:WorkingData, task):
 
+
     if task.last_run_dt and task.last_run_dt + timedelta(seconds=task.frequency_secs) > datetime.now():
         log.debug(f"Skipping task as not due for task: {task.target_function}")
         pass
@@ -108,6 +109,7 @@ def run_task(wd:WorkingData, task):
         # if had multiple erros  and last ran less than five hours ago
         log.debug(f"Skipping task due to previous errors: {task.target_function} {task.last_error}")
     else:
+
         start_time = datetime.now()
         try:
             log.debug(f"Running task: {task.target_function}, last ran:{task.last_run_dt}")

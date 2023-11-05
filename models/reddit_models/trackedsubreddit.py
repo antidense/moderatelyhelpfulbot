@@ -63,6 +63,7 @@ class TrackedSubreddit(dbobj.Base):
 
     last_pulled = Column(DateTime, nullable=True)
     config_last_checked = Column(DateTime, nullable=True)
+    modmail_access = Column(Integer, default=-1)
 
     subreddit_mods = []
     rate_limiting_enabled = False

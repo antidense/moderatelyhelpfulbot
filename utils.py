@@ -391,7 +391,7 @@ def do_reddit_actions(wd):
             continue
         try:
             wd.ri.get_submission_api_handle(op).mod.remove()
-            logger.info(f'remove successful!: {op.subreddit_name} {op.author} {op.title}')
+            logger.info(f'remove successful!: {op.subreddit_name} {op.author} {op.title} {op.id}')
             new_counted_status = CountedStatus.REMOVED \
                 if op.counted_status_enum == CountedStatus.NEED_REMOVE else CountedStatus.BLKLIST
             if op.reply_comment:

@@ -15,6 +15,7 @@ from utils import get_subreddit_by_name
 from workingdata import WorkingData
 from models.reddit_models.loggedactions import open_logged_action
 from typing import Optional
+from sqlalchemy import or_
 
 def handle_dm_command(wd: WorkingData, subreddit_name: str, requestor_name, command, parameters) \
         -> tuple[str, bool]:
@@ -715,16 +716,40 @@ def handle_modmail_message(wd: WorkingData, convo):
 def handle_modmail_messages(wd: WorkingData):
     print("checking modmail  0---")
     import traceback
+    # ALTER TABLE `TrackedSubs` ADD `modmail_access` TINYINT NOT NULL DEFAULT '-1' AFTER `config_last_checked`;
+    sub_list1 = wd.s.query(TrackedSubreddit).filter(or_(TrackedSubreddit.modmail_access==-1 , TrackedSubreddit.modmail_access==1) ).all()
+    sub_list=[]
+    for subreddit in sub_list1:
+        """
+        print(subreddit)
+        assert isinstance(subreddit, TrackedSubreddit)
+        sub_list.append(subreddit.subreddit_name)
+    chunk_size=20
+    chunked_list = [wd.sub_list[j:j + chunk_size] for j in range(0, len(sub_list), chunk_size)]
 
-    for convo in wd.ri.reddit_client.subreddit('mod').modmail.conversations(state="mod", sort='unread', limit=15):
+    for sub_list in chunked_list:
+
+        sub_list_str = "+".join(sub_list)
+        print(sub_list_str)
+    """
+
+        print(f"checking modmail  0---1 {subreddit.subreddit_name}")
         try:
-            print(f"message {convo.id}")
-            handle_modmail_message(wd, convo=convo)
-        except prawcore.exceptions.ServerError:
+            for convo in wd.ri.reddit_client.subreddit(subreddit.subreddit_name).modmail.conversations(state="all", sort='unread', limit=15):
+
+                    print(f"message {convo.id}")
+                    handle_modmail_message(wd, convo=convo)
+        except (prawcore.exceptions.ServerError, prawcore.exceptions.Forbidden):
             trace = traceback.format_exc()
             print(trace)
+            subreddit.modmail_access =  0
+            wd.s.add(subreddit)
+    wd.s.commit()
 
-    for convo in wd.ri.reddit_client.subreddit('mod').modmail.conversations(state="join_requests", sort='unread',
+
+"""
+    print("checking modmail  0---22")
+    for convo in wd.ri.reddit_client.subreddit(subreddit.subreddit_name).modmail.conversations(state="join_requests", sort='unread',
                                                                             limit=15):
         try:
             handle_modmail_message(wd, convo=convo)
@@ -732,12 +757,15 @@ def handle_modmail_messages(wd: WorkingData):
             trace = traceback.format_exc()
             print(trace)
 
-    for convo in wd.ri.reddit_client.subreddit('mod').modmail.conversations(state="all", sort='unread', limit=15):
+    
+    print("checking modmail  0---3")
+    for convo in wd.ri.reddit_client.subreddit(subreddit.subreddit_name).modmail.conversations(state="mod", sort='unread', limit=15):
         try:
             handle_modmail_message(wd, convo=convo)
         except prawcore.exceptions.ServerError:
             trace = traceback.format_exc()
             print(trace)
+    """
 
 
 def check_actioned(wd: WorkingData, comment_id: str):
