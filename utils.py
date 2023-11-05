@@ -28,7 +28,7 @@ def check_new_submissions(wd: WorkingData, query_limit=800, sub_list='mod', inte
     subreddit_names = []
     subreddit_names_complete = []
     logger.info(f"main/CNW: pulling new posts!  intensity: {intensity}")
-
+    print(sub_list)
     possible_new_posts = [a for a in wd.ri.reddit_client.subreddit(sub_list).new(limit=query_limit)]
 
     count = 0
