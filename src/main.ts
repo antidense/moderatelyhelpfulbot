@@ -22,11 +22,19 @@ const removalReasonForm = Devvit.createForm(
         acceptLabel: 'Save',
         fields: [
             {
+                type: 'string',
+                name: 'currentState',
+                label: 'Currently Configured Rule:',
+                defaultValue: data.currentRuleTitle || 'None (No reason is attached to removals)',
+                disabled: true,
+            },
+            {
                 type: 'select',
                 name: 'selectedReasonId',
-                label: 'Select a Rule/Removal Reason to attach when MHB removes a post:',
+                label: 'Select a new Rule/Removal Reason to attach:',
                 options: data.reasons || [],
                 multiSelect: false,
+                defaultValue: data.currentId ? [data.currentId] : [],
             }
         ]
     }),
@@ -63,7 +71,18 @@ Devvit.addMenuItem({
         // Add a 'None' option to clear it
         options.unshift({ label: '-- None (Do not attach a reason) --', value: '' });
 
-        context.ui.showForm(removalReasonForm, { reasons: options });
+        // Fetch current configuration
+        const currentId = await context.redis.get(`mhb_removal_reason_id:${subreddit.id}`);
+        let currentRuleTitle = 'None (No reason is attached to removals)';
+        
+        if (currentId) {
+            const matched = reasons.find((r: any) => r.id === currentId);
+            if (matched) {
+                currentRuleTitle = matched.title;
+            }
+        }
+
+        context.ui.showForm(removalReasonForm, { reasons: options, currentId: currentId || '', currentRuleTitle });
     }
 });
 
