@@ -1,7 +1,4 @@
-
-settings.py
-
-settings.pyc
-
-startModeratelyHelpfulBot.sh
-praw.ini
+node_modules
+.DS_Store
+dist
+.env

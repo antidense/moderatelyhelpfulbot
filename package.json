@@ -1,0 +1,12 @@
+{
+  "name": "modhelpbot2",
+  "version": "0.0.1",
+  "description": "Devvit port of moderatelyhelpfulbot",
+  "main": "src/main.ts",
+  "dependencies": {
+    "@devvit/public-api": "^0.11.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
