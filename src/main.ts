@@ -237,7 +237,10 @@ Devvit.addTrigger({
                 const reasonId = await redis.get(`mhb_removal_reason_id:${subreddit.id}`);
                 if (reasonId && reasonId.trim() !== '') {
                     try {
-                        await post.addRemovalNote({ reasonId: reasonId.trim() });
+                        await post.addRemovalNote({ 
+                            reasonId: reasonId.trim(),
+                            modNote: 'Automated removal by MHB'
+                        });
                         console.log(`[MHB] Attached removal reason ID: ${reasonId}`);
                     } catch (e) {
                         console.error(`[MHB] Failed to attach removal reason ID ${reasonId}`, e);
