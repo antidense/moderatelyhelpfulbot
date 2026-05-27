@@ -70,6 +70,6 @@ While this Devvit app ports the vast majority of the original `ModeratelyHelpful
 
 ## Conclusion
  
-While this Devvit port shifts the underlying architecture to a serverless model, it stands entirely on the shoulders of the original ModeratelyHelpfulBot. The goal here wasn't to reinvent the wheel, but simply to offer moderation teams an accessible alternative that runs natively within Reddit—eliminating the need to maintain external servers or troubleshoot Python scripts.
+While this Devvit port shifts the underlying architecture to a serverless model, it stands entirely on the shoulders of the original ModeratelyHelpfulBot. The goal here wasn't to reinvent the wheel, but simply to offer moderation teams an accessible alternative that runs natively within Reddit, eliminating the need to maintain external servers or troubleshoot Python scripts.
 
 Hopefully, by lowering the technical barrier to entry, this tool will make managing community rate limits just a little bit easier and less stressful for volunteer mod teams.
